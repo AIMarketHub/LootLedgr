@@ -1724,15 +1724,15 @@ export default function Loot() {
                 {settings.businessName} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}
               </div>
               <div style={c.g2(14)}>
-                <div style={c.card({padding:18,borderColor:T.goldDim+"66"})}>
+                <div style={{...c.card({padding:28,borderColor:T.goldDim+"66"}),minHeight:110}}>
                   <div style={c.lbl}>⬡ Gold Spot (AUD/oz)</div>
-                  <div style={{fontSize:26,fontWeight:"bold",color:T.gold}}>{fmtAUD(gSpot)}</div>
-                  <div style={{fontSize:11,color:T.muted,marginTop:3}}>Per gram: <span style={{color:T.goldLight}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
+                  <div style={{fontSize:34,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:4}}>{fmtAUD(gSpot)}</div>
+                  <div style={{fontSize:13,color:T.muted,marginTop:6}}>Per gram: <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
                 </div>
-                <div style={c.card({padding:18,borderColor:T.silverDim+"66"})}>
+                <div style={{...c.card({padding:28,borderColor:T.silverDim+"66"}),minHeight:110}}>
                   <div style={c.lbl}>◈ Silver Spot (AUD/oz)</div>
-                  <div style={{fontSize:26,fontWeight:"bold",color:T.silver}}>{fmtAUD(sSpot)}</div>
-                  <div style={{fontSize:11,color:T.muted,marginTop:3}}>Per gram: <span style={{color:T.silver}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
+                  <div style={{fontSize:34,fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:4}}>{fmtAUD(sSpot)}</div>
+                  <div style={{fontSize:13,color:T.muted,marginTop:6}}>Per gram: <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
                 </div>
               </div>
               <div style={{...c.g4(10),margin:"14px 0"}}>
