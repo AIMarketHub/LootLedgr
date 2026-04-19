@@ -469,6 +469,7 @@ export default function Loot() {
     webhookUrl:"",shopifyDomain:"",shopifyToken:"",xeroClientId:"",xeroSecret:"",xeroToken:"",xeroTenantId:"",xeroBuyCode:"310",xeroSellCode:"200",
     // Security — optional PIN lock (OFF by default)
     requirePin:false,sessionTimeout:"never",ttrEnabled:true,
+  eftposProvider:"none",squareTerminalId:"",linklyBaseUrl:"http://localhost:4242",
   aiAgentEnabled:false,aiAgentLevel:1,aiAgentUrl:"",aiAgentName:"Sophiie",
   cryptoEnabled:false,
   walletBTC:"",walletETH:"",walletBNB:"",walletXRP:"",walletSOL:"",
@@ -492,7 +493,6 @@ export default function Loot() {
   const [photo,setPhoto]         = useState(null);
   const [zoom,setZoom]           = useState(()=>store.get("zoom",100));
   const [simp,setSimp]           = useState(()=>store.get("simp",false));
-  const [hiContrast,setHiContrast] = useState(()=>store.get("hiContrast",false));
   const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
@@ -501,7 +501,7 @@ export default function Loot() {
   // Quick item
   const [quickMode,setQuickMode] = useState(false);
   const [qmMode,setQMMode]       = useState("buy");
-  const [qf,setQF]               = useState({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:""});
+  const [qf,setQF]               = useState({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:""});
   // Negotiated price per item
   const [adjId,setAdjId]         = useState(null);
   const [adjVal,setAdjVal]       = useState("");
@@ -616,7 +616,6 @@ export default function Loot() {
   },[isDark]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
-  useEffect(()=>store.set("hiContrast",hiContrast),[hiContrast]);
   useEffect(()=>store.set("contrast",contrast),[contrast]);
   useEffect(()=>store.set("isDark",isDark),[isDark]);
   useEffect(()=>store.set("fontWeight",fontWeight),[fontWeight]);
@@ -823,11 +822,25 @@ export default function Loot() {
   const calcMelt=(item)=>{
     const{g,s}=spotForCalc();
     const metal=(item.product&&item.product.cat)||item.metalCat||"";
-    const purityKey=item.purity||(item.product&&item.product.purity)||"";
     const weight=parseFloat(item.weight_g||item.qty||0);
-    if(!weight||!purityKey) return null;
-    if(metal==="Gold"){const p=GOLD_P[purityKey];if(!p)return null;return weight*(g/31.1035)*p;}
-    if(metal==="Silver"){const p=SILV_P[purityKey];if(!p)return null;return weight*(s/31.1035)*p;}
+    if(!weight) return null;
+    if(metal==="Gold"){
+      // Try purity key first, then numeric carat, then numeric purity
+      const purityKey=item.purity||(item.product&&item.product.purity)||"";
+      const caratNum=parseFloat(item.carat||(item.product&&item.product.carat)||0);
+      const purityNum=parseFloat(item.purity||(item.product&&item.product.purity)||0);
+      if(GOLD_P[purityKey]) return weight*(g/31.1035)*GOLD_P[purityKey];
+      if(caratNum>0) return weight*(g/31.1035)*(caratNum/24);
+      if(purityNum>0&&purityNum<=1) return weight*(g/31.1035)*purityNum;
+      return null;
+    }
+    if(metal==="Silver"){
+      const purityKey=item.purity||(item.product&&item.product.purity)||"";
+      const purityNum=parseFloat(item.purity||(item.product&&item.product.purity)||0);
+      if(SILV_P[purityKey]) return weight*(g/31.1035)*SILV_P[purityKey];
+      if(purityNum>0&&purityNum<=1) return weight*(g/31.1035)*purityNum;
+      return null;
+    }
     return null;
   };
 
@@ -1038,15 +1051,19 @@ export default function Loot() {
       id:uid(),txId:txNo,date:now,
       product:i.product,qty:i.qty,price:i.price,
       description:i.note||i.product.label,
+      // Carry purity/carat/weight for melt value calculation
+      purity:i.purity||(i.product&&i.product.purity)||null,
+      carat:i.carat||(i.product&&i.product.carat)||null,
+      weight_g:i.weight_g||( i.product&&i.product.unit==="g" ? i.qty : null ),
       holdUntil:i.holdUntil,
-      policeHold:!!(i.policeHold),   // carry item-level police hold from basket
-      suspicious:!!(i.suspicious),   // carry suspicious flag from basket
+      policeHold:!!(i.policeHold),
+      suspicious:!!(i.suspicious),
       storageLocation:staff.storageLocation||"",
       deleteAfter:sevenYrsFrom(now),
     }));
     setTxList(p=>[tx,...p]);
     setStock(p=>[...newStock,...p]);
-    setTxStep(5);
+    setTxStep(6);
     // Push to all configured integrations (async, non-blocking)
     pushIntegrations(tx).catch(()=>{});
   };
@@ -1113,6 +1130,90 @@ export default function Loot() {
         return{ok:true,msg:"Square vendor expense recorded"};
       return{ok:false,msg:"Square payment error: "+((pd.errors&&pd.errors[0]&&pd.errors[0].detail)||JSON.stringify(pd))};
     }catch(e){return{ok:false,msg:"Square buy failed: "+e.message};}
+  };
+
+  // ── EFTPOS: push payment to physical terminal ────────────────
+  // Supports: Square Terminal API + Linkly (PC-EFTPOS) for AU bank terminals
+  const sendEftpos=async(amountAUD)=>{
+    const provider=settings.eftposProvider||"none";
+
+    // ── Square Terminal API ──────────────────────────────────────
+    if(provider==="square"){
+      if(!settings.squareToken||!settings.squareTerminalId)
+        return{ok:false,msg:"Square terminal not configured. Add Access Token and Terminal Device ID in Settings."};
+      try{
+        const r=await fetch("https://connect.squareup.com/v2/terminals/checkouts",{
+          method:"POST",
+          headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},
+          body:JSON.stringify({
+            idempotency_key:"eftpos-"+txNo+"-"+Date.now(),
+            checkout:{
+              amount_money:{amount:Math.round(amountAUD*100),currency:"AUD"},
+              device_options:{device_id:settings.squareTerminalId,skip_receipt_screen:false},
+              note:"Loot Ledgr #"+txNo,
+              payment_options:{autocomplete:true},
+            },
+          }),
+        });
+        const d=await r.json();
+        if(d.checkout&&d.checkout.id){
+          // Poll for completion (up to 90s)
+          const checkId=d.checkout.id;
+          pop("Payment sent to terminal — waiting for customer to tap/insert…","ok");
+          for(let attempt=0;attempt<18;attempt++){
+            await new Promise(res=>setTimeout(res,5000));
+            const poll=await fetch("https://connect.squareup.com/v2/terminals/checkouts/"+checkId,{
+              headers:{"Authorization":"Bearer "+settings.squareToken,"Square-Version":"2024-11-20"},
+            });
+            const pd=await poll.json();
+            const status=pd.checkout&&pd.checkout.status;
+            if(status==="COMPLETED") return{ok:true,msg:"EFTPOS payment approved."};
+            if(status==="CANCELED"||status==="CANCEL_REQUESTED") return{ok:false,msg:"Payment cancelled at terminal."};
+          }
+          return{ok:false,msg:"Terminal timeout — check terminal screen."};
+        }
+        return{ok:false,msg:"Square terminal error: "+((d.errors&&d.errors[0]&&d.errors[0].detail)||"Unknown")};
+      }catch(e){return{ok:false,msg:"Square terminal error: "+e.message};}
+    }
+
+    // ── Linkly / PC-EFTPOS (AU bank terminals) ───────────────────
+    if(provider==="linkly"){
+      const base=settings.linklyBaseUrl||"http://localhost:4242";
+      try{
+        // Linkly REST API v1 — sends purchase request to terminal
+        const r=await fetch(base+"/api/v1/transaction/purchase",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            PurchaseAnalysisData:{},
+            Request:{
+              TxnType:"P",               // Purchase
+              AmtPurchase:Math.round(amountAUD*100),
+              AmtCash:0,
+              TxnRef:txNo,
+              CurrencyCode:"AUD",
+              CutReceipt:"0",
+              EnableTip:false,
+            },
+          }),
+        });
+        const d=await r.json();
+        if(d&&d.Response){
+          const resp=d.Response;
+          if(resp.Success===true||resp.RespCode==="00")
+            return{ok:true,msg:"EFTPOS approved. Auth: "+(resp.AuthCode||"—")};
+          return{ok:false,msg:"EFTPOS declined: "+(resp.ResponseText||resp.RespCode||"Unknown")};
+        }
+        return{ok:false,msg:"Linkly: unexpected response"};
+      }catch(e){
+        if(e.message&&e.message.includes("fetch")){
+          return{ok:false,msg:"Cannot reach Linkly. Is PC-EFTPOS running on this device? (localhost:4242)"};
+        }
+        return{ok:false,msg:"Linkly error: "+e.message};
+      }
+    }
+
+    return{ok:false,msg:"No EFTPOS provider configured. Set it up in Settings → Integrations."};
   };
 
   // ── SHOPIFY SELL: create completed order ───────────────────
@@ -1598,7 +1699,7 @@ export default function Loot() {
             <div>
               {/* STEP INDICATOR */}
               <div style={{...c.row(0),flexWrap:"wrap",gap:4,marginBottom:18}}>
-                {["Basket","Compliance","Client","Staff","Done"].map((s,i)=>(
+                {["Basket","Compliance","Client","Staff","Payment","Done"].map((s,i)=>(
                   <div key={s} style={{...c.row(0)}}>
                     <div style={{padding:"5px 12px",borderRadius:4,fontSize:10,fontWeight:"bold",
                       background:txStep===i+1?T.gold:txStep>i+1?T.greenBg:T.surface,
@@ -1615,17 +1716,8 @@ export default function Loot() {
               {/* ─── STEP 1: BASKET ─── */}
               {txStep===1&&(
                 <div>
-                  <div style={{...c.row(10),marginBottom:14,flexWrap:"wrap"}}>
+                  <div style={{marginBottom:14}}>
                     <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Contract: <span style={{color:T.gold}}>{txNo}</span></div>
-                    <div>
-                      <label style={c.lbl}>Payment Method</label>
-                      <select style={c.sel()} value={txPay} onChange={e=>setTxPay(e.target.value)}>
-                        <option value="cash">Cash (buy ≤ $2,000 only)</option>
-                        <option value="card">Card (sell to customer only)</option>
-                        <option value="bank">Bank Transfer</option>
-                        {settings.cryptoEnabled&&<option value="crypto">Cryptocurrency</option>}
-                      </select>
-                    </div>
                   </div>
                   {/* ADD ITEM */}
                   <div style={c.card({padding:16,marginBottom:14})}>
@@ -1701,6 +1793,8 @@ export default function Loot() {
                       <div><label style={c.lbl}>Metal</label><select style={{...c.sel(),width:"100%"}} value={qf.cat} onChange={e=>setQF(p=>({...p,cat:e.target.value}))}><option value="Gold">Gold</option><option value="Silver">Silver</option><option value="Other">Other</option></select></div>
                       <div><label style={c.lbl}>Compliance Type</label><select style={{...c.sel(),width:"100%"}} value={qf.type} onChange={e=>setQF(p=>({...p,type:e.target.value}))}><option value="scrap">Scrap / Jewellery ($10k)</option><option value="bullion">Bullion ($5k)</option></select></div>
                       <div><label style={c.lbl}>Unit</label><select style={{...c.sel(),width:"100%"}} value={qf.unit} onChange={e=>setQF(p=>({...p,unit:e.target.value}))}><option value="g">Grams</option><option value="oz">Troy oz</option><option value="pc">Piece</option></select></div>
+                      {qf.cat==="Gold"&&<div><label style={c.lbl}>Carat (e.g. 9, 14, 18, 22, 24)</label><input style={c.inp()} type="number" placeholder="e.g. 18" value={qf.carat} onChange={e=>setQF(p=>({...p,carat:e.target.value,purity:""}))}/></div>}
+                      {qf.cat==="Silver"&&<div><label style={c.lbl}>Purity (0–1, e.g. 0.925)</label><input style={c.inp()} type="number" step="0.001" placeholder="e.g. 0.925" value={qf.purity} onChange={e=>setQF(p=>({...p,purity:e.target.value,carat:""}))}/></div>}
                       <div><label style={c.lbl}>Weight / Qty</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.qty} onChange={e=>setQF(p=>({...p,qty:e.target.value}))}/></div>
                       <div><label style={c.lbl}>Price ($) *</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.price} onChange={e=>setQF(p=>({...p,price:e.target.value}))}/></div>
                       <div><label style={c.lbl}>Note</label><input style={c.inp()} type="text" placeholder="Condition, markings…" value={qf.note} onChange={e=>setQF(p=>({...p,note:e.target.value}))}/></div>
@@ -1727,8 +1821,18 @@ export default function Loot() {
                       if(!qf.label){pop("Description required.","warn");return;}
                       const price=Math.max(0,parseFloat(qf.price)||0);
                       if(!price){pop("Enter a valid price.","warn");return;}
-                      setTxItems(p=>[...p,{id:uid(),mode:qmMode,product:{isQuick:true,label:qf.label,cat:qf.cat,type:qf.type,unit:qf.unit},qty:parseFloat(qf.qty)||1,price,calculatedPrice:price,note:qf.note,isQuick:true,holdUntil:qmMode==="buy"?addHours(new Date().toISOString(),THRESH.HOLD_HOURS):null,policeHold:false,suspicious:false}]);
-                      setQuickMode(false);setQF({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:""});
+                      const qPurity=qf.cat==="Gold"&&qf.carat?{caratKey:String(qf.carat)+"ct"}:qf.purity?{purityKey:String(qf.purity)}:{};
+                      setTxItems(p=>[...p,{id:uid(),mode:qmMode,
+                        product:{isQuick:true,label:qf.label,cat:qf.cat,type:qf.type,unit:qf.unit,
+                          purity:qf.purity?parseFloat(qf.purity):null,
+                          carat:qf.carat?parseFloat(qf.carat):null},
+                        qty:parseFloat(qf.qty)||1,price,calculatedPrice:price,
+                        purity:qf.purity||null,carat:qf.carat||null,
+                        weight_g:qf.unit==="g"?parseFloat(qf.qty)||null:null,
+                        note:qf.note,isQuick:true,
+                        holdUntil:qmMode==="buy"?addHours(new Date().toISOString(),THRESH.HOLD_HOURS):null,
+                        policeHold:false,suspicious:false}]);
+                      setQuickMode(false);setQF({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:"",photo:null});
                       pop("Quick item added.","ok");
                     }}>⚡ Add Quick Item</button>
                   </div>}
@@ -2101,198 +2205,231 @@ export default function Loot() {
               {/* ─── STEP 5: PAYMENT + INTEGRATIONS ─── */}
               {txStep===5&&(
                 <div>
-                  {/* Summary */}
-                  <div style={{...c.card({padding:14}),marginBottom:12}}>
-                    <div style={{...c.g2(10)}}>
-                      <div><div style={c.lbl}>Contract</div><div style={{color:T.gold,fontWeight:"bold"}}>{txNo}</div></div>
+                  <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>💳 Payment</div>
+
+                  {/* Payment method selector */}
+                  <div style={{...c.card({padding:16}),marginBottom:14}}>
+                    <label style={c.lbl}>Payment Method</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
+                      {[
+                        {v:"cash",   icon:"💵", label:"Cash",        note:"Buy ≤ $2,000"},
+                        {v:"eftpos", icon:"🖥",  label:"EFTPOS",      note:"Terminal"},
+                        {v:"card",   icon:"💳",  label:"Card Online", note:"Link"},
+                        {v:"bank",   icon:"🏦",  label:"Bank EFT",    note:"Transfer"},
+                        ...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto",note:"BTC/ETH"}]:[]),
+                      ].map(opt=>(
+                        <button key={opt.v} onClick={()=>setTxPay(opt.v)}
+                          style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,
+                            {padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",
+                             alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
+                          <span style={{fontSize:18}}>{opt.icon}</span>
+                          <span style={{fontWeight:"bold"}}>{opt.label}</span>
+                          <span style={{fontSize:9,opacity:0.65,fontWeight:"normal"}}>{opt.note}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Net amount display */}
+                  <div style={{...c.card({padding:14}),marginBottom:14,textAlign:"center"}}>
+                    <div style={{fontSize:11,color:T.muted,marginBottom:4}}>
+                      {net>=0?"Amount to collect from client":"Amount to pay client"}
+                    </div>
+                    <div style={{fontSize:28,fontWeight:"bold",color:net>=0?T.gold:T.green}}>
+                      {fmtAUD(Math.abs(net))}
+                    </div>
+                    {buyTotal>0&&sellTotal>0&&<div style={{fontSize:11,color:T.muted,marginTop:4}}>
+                      Buy: {fmtAUD(buyTotal)} · Sell: {fmtAUD(sellTotal)}
+                    </div>}
+                  </div>
+
+                  {/* EFTPOS terminal button */}
+                  {txPay==="eftpos"&&net>0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
+                      <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
+                      {settings.eftposProvider==="none"||!settings.eftposProvider
+                        ?<div style={{fontSize:11,color:T.muted,marginBottom:10}}>No terminal configured — confirm manually below, or set up in Settings → Integrations.</div>
+                        :<div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+                          Provider: <strong>{settings.eftposProvider==="square"?"Square Terminal":"Linkly / PC-EFTPOS"}</strong>
+                          {settings.eftposProvider==="linkly"&&<span> · {settings.linklyBaseUrl||"localhost:4242"}</span>}
+                        </div>
+                      }
+                      <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:14,padding:"14px"}}
+                        onClick={async()=>{
+                          pop("Sending "+fmtAUD(net)+" to terminal…","ok");
+                          const r=await sendEftpos(net);
+                          pop(r.msg,r.ok?"ok":"err");
+                        }}>
+                        🖥 Send {fmtAUD(net)} to Terminal
+                      </button>
+                      <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}}
+                        onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>
+                        ✓ Confirm Manually (terminal not connected)
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Cash */}
+                  {txPay==="cash"&&net>=0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
+                      <div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div>
+                      <button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button>
+                    </div>
+                  )}
+
+                  {/* Card online */}
+                  {txPay==="card"&&net>=0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.gold}}>
+                      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button style={{...c.btn(T.gold,T.bg),flex:1}}
+                          onClick={async()=>{
+                            if(!settings.squareToken){pop("Square not configured in Settings.","warn");return;}
+                            pop("Opening Square checkout…","ok");
+                            try{await sendSquareSell();}catch(e){pop("Square: "+e.message,"err");}
+                          }}>⬡ Square Checkout</button>
+                        <button style={{...c.btn(T.border,T.text),flex:1}}
+                          onClick={async()=>{
+                            if(!settings.shopifyDomain){pop("Shopify not configured in Settings.","warn");return;}
+                            pop("Creating Shopify order…","ok");
+                            try{const r=await sendShopifySell(txNo,txItems.filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}
+                            catch(e){pop("Shopify: "+e.message,"err");}
+                          }}>🛍 Shopify Order</button>
+                      </div>
+                      <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
+                    </div>
+                  )}
+
+                  {/* Bank transfer */}
+                  {txPay==="bank"&&net>=0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.blue}}>
+                      <div style={c.bnr("info")}>🏦 Client transfers {fmtAUD(net)} to your account.</div>
+                      <button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Bank transfer noted.","ok")}>✓ Transfer Noted</button>
+                    </div>
+                  )}
+
+                  {/* Crypto */}
+                  {txPay==="crypto"&&net>=0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.orange}}>
+                      <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto</div>
+                      {(()=>{
+                        const COINS=[
+                          {k:"BTC",l:"Bitcoin",w:settings.walletBTC},
+                          {k:"ETH",l:"Ethereum",w:settings.walletETH},
+                          {k:"BNB",l:"Binance BEP-2",w:settings.walletBNB},
+                          {k:"XRP",l:"Ripple",w:settings.walletXRP},
+                          {k:"SOL",l:"Solana",w:settings.walletSOL},
+                        ].filter(x=>x.w);
+                        if(!COINS.length) return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;
+                        return COINS.map(coin=>(
+                          <div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}>
+                            <div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div>
+                            <div style={{fontFamily:"monospace",fontSize:10,color:T.white,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div>
+                            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button>
+                          </div>
+                        ));
+                      })()}
+                      <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
+                    </div>
+                  )}
+
+                  {/* We owe client */}
+                  {net<0&&(
+                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
+                      <div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {(txPay||"cash").toUpperCase()}.</div>
+                      {txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(-net);pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}
+                      <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button>
+                    </div>
+                  )}
+
+                  {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}
+
+                  {/* Integrations row */}
+                  <div style={{...c.card({padding:12}),marginBottom:14}}>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:8,letterSpacing:"0.08em"}}>RECORD IN</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button style={c.bsm(settings.squareToken?T.goldBg:T.surface,settings.squareToken?T.gold:T.muted)}
+                        onClick={async()=>{
+                          if(!settings.squareToken){pop("Square not configured.","warn");return;}
+                          const buys=txItems.filter(i=>i.mode==="buy");
+                          const sells=txItems.filter(i=>i.mode==="sell");
+                          if(buys.length) try{const r=await sendSquareBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Square: "+e.message,"err");}
+                          if(sells.length) try{await sendSquareSell();}catch(e){pop("Square sell: "+e.message,"err");}
+                        }}>⬡ Square</button>
+                      <button style={c.bsm(settings.shopifyDomain?T.goldBg:T.surface,settings.shopifyDomain?T.gold:T.muted)}
+                        onClick={async()=>{
+                          if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}
+                          const buys=txItems.filter(i=>i.mode==="buy");
+                          const sells=txItems.filter(i=>i.mode==="sell");
+                          if(buys.length) try{const r=await sendShopifyBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}
+                          if(sells.length) try{const r=await sendShopifySell(txNo,sells,client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}
+                        }}>🛍 Shopify</button>
+                      <button style={c.bsm(settings.xeroToken?T.goldBg:T.surface,settings.xeroToken?T.gold:T.muted)}
+                        onClick={async()=>{
+                          if(!settings.xeroToken){pop("Xero not configured.","warn");return;}
+                          pop("Xero sync requires webhook setup — configure in Settings.","warn");
+                        }}>📒 Xero</button>
+                    </div>
+                    <div style={{fontSize:9,color:T.muted,marginTop:6}}>Greyed = not configured. Tap to see instructions.</div>
+                  </div>
+
+                  <button style={{...c.btn(T.gold,T.bg),width:"100%",marginTop:4}} onClick={()=>setTxStep(6)}>
+                    Next: Finalise →
+                  </button>
+                </div>
+              )}
+
+              {txStep===6&&(
+                <div>
+                  {/* Transaction summary */}
+                  <div style={{...c.card({padding:16}),marginBottom:14,borderLeft:"4px solid "+T.gold}}>
+                    <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:12,letterSpacing:"0.08em"}}>📋 TRANSACTION SUMMARY</div>
+                    <div style={c.g2(10)}>
+                      <div><div style={c.lbl}>Contract</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
                       <div><div style={c.lbl}>Client</div><div style={{color:T.white}}>{client.fullName}</div></div>
-                      <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase"}}>{txPay}</div></div>
-                      {activeStaff&&staffList.find(s=>s.id===activeStaff)&&<div><div style={c.lbl}>Staff</div><div style={{color:T.white}}>{(staffList.find(s=>s.id===activeStaff)||{}).name}</div></div>}
+                      <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase",color:T.white}}>{txPay}</div></div>
+                      {activeStaff&&staffList.find(s=>s.id===activeStaff)&&(
+                        <div><div style={c.lbl}>Staff</div><div style={{color:T.white}}>{(staffList.find(s=>s.id===activeStaff)||{}).name}</div></div>
+                      )}
                       {buyTotal>0&&<div><div style={c.lbl}>Buy Total</div><div style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(buyTotal)}</div></div>}
                       {sellTotal>0&&<div><div style={c.lbl}>Sell Total</div><div style={{color:T.gold,fontWeight:"bold"}}>{fmtAUD(sellTotal)}</div></div>}
-                      <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:15}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
+                      <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:16}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
                     </div>
                     {compliance.flags.some(f=>f.key==="ttr")&&(
                       <div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR required — file with AUSTRAC Online within 10 business days.</div>
                     )}
+                    {compliance.flags.some(f=>f.key==="smr")&&(
+                      <div style={{...c.bnr("warn"),marginTop:8}}>⚠ Suspicious — consider filing an SMR with AUSTRAC.</div>
+                    )}
                   </div>
 
-                  {/* ── CARD 1: PAYMENT ── */}
-                  <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.gold}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.08em"}}>💳 PAYMENT</div>
-                    {net>=0&&txPay==="cash"&&(
-                      <div>
-                        <div style={c.bnr("info")}>💵 Cash — collect {fmtAUD(net)} from client.</div>
-                        <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("✓ Cash received and recorded.","ok")}>✓ Cash Received — Mark Paid</button>
-                      </div>
-                    )}
-                    {net>=0&&txPay==="card"&&(
-                      <div>
-                        <div style={c.bnr("info")}>💳 Card — present EFTPOS terminal for {fmtAUD(net)}.</div>
-                        {settings.squareToken&&settings.squareLoc
-                          ?<button style={{...c.btn(T.gold,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{pop("Creating Square checkout…","ok");await sendSquareSell();}}>⬡ Open Square Checkout Link</button>
-                          :<div style={{fontSize:11,color:T.muted,marginTop:6}}>Add Square credentials in Settings to open a checkout link.</div>
-                        }
-                        <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("✓ Card payment confirmed.","ok")}>✓ Card Paid — Mark Confirmed</button>
-                      </div>
-                    )}
-                    {net>=0&&txPay==="bank"&&(
-                      <div>
-                        <div style={c.bnr("info")}>🏦 Bank Transfer — client transfers {fmtAUD(net)} to your account.</div>
-                        <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("✓ Bank transfer noted. Confirm in banking app.","ok")}>✓ Transfer Noted — Mark Paid</button>
-                      </div>
-                    )}
-                    {net>=0&&txPay==="crypto"&&(
-                      <div>
-                        <div style={{...c.bnr("info"),marginBottom:10}}>Crypto — client sends equivalent of {fmtAUD(net)} AUD in chosen coin at current rate.</div>
-                        {(()=>{
-                          const COINS=[
-                            {k:"BTC",l:"Bitcoin",w:settings.walletBTC},
-                            {k:"ETH",l:"Ethereum",w:settings.walletETH},
-                            {k:"BNB",l:"Binance Coin",w:settings.walletBNB},
-                            {k:"XRP",l:"Ripple (XRP)",w:settings.walletXRP},
-                            {k:"SOL",l:"Solana",w:settings.walletSOL},
-                          ].filter(x=>x.w);
-                          if(!COINS.length) return(<div style={c.bnr("warn")}>No wallets configured. Add addresses in Settings.</div>);
-                          return COINS.map(coin=>(
-                            <div key={coin.k} style={{...c.card({padding:12}),marginBottom:8}}>
-                              <div style={{fontWeight:"bold",color:T.gold,fontSize:12,marginBottom:6}}>{coin.k} — {coin.l}</div>
-                              <div style={{fontFamily:"monospace",fontSize:11,color:T.white,background:T.surface,padding:"8px 10px",borderRadius:6,wordBreak:"break-all",marginBottom:8}}>{coin.w}</div>
-                              <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" address copied.","ok");}}>📋 Copy</button>
-                            </div>
-                          ));
-                        })()}
-                        <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("✓ Crypto payment confirmed.","ok")}>✓ Crypto Received — Mark Paid</button>
-                        <div style={{fontSize:10,color:T.muted,marginTop:6}}>ATO: record the AUD value at time of payment for CGT/GST.</div>
-                      </div>
-                    )}
-                    {net<0&&(
-                      <div>
-                        <div style={c.bnr("warn")}>🏦 We owe client {fmtAUD(-net)} — pay by {(txPay||"cash").toUpperCase()}.</div>
-                        <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("✓ Payment to client recorded.","ok")}>✓ Client Paid — Mark Done</button>
-                      </div>
-                    )}
-                    {net===0&&<div style={c.bnr("info")}>⚖ No payment required — transaction balances to zero.</div>}
-                  </div>
+                  {/* Items recap */}
+                  {txItems.length>0&&(
+                    <div style={{...c.card({padding:14}),marginBottom:14}}>
+                      <div style={{fontSize:11,color:T.muted,marginBottom:8,letterSpacing:"0.08em"}}>ITEMS ({txItems.length})</div>
+                      {txItems.map((it,i)=>(
+                        <div key={it.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<txItems.length-1?"1px solid "+T.border+"44":"none"}}>
+                          <div>
+                            <span style={{...c.badge(it.mode==="buy"?T.green:T.gold),marginRight:6}}>{it.mode.toUpperCase()}</span>
+                            <span style={{fontSize:12,color:T.white}}>{it.product&&it.product.label}</span>
+                            {it.note&&<span style={{fontSize:11,color:T.muted}}> — {it.note}</span>}
+                          </div>
+                          <span style={{fontWeight:"bold",color:it.mode==="buy"?T.green:T.gold}}>{fmtAUD(it.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-                  {/* ── CARD 2: SQUARE ── */}
-                  <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.gold}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,letterSpacing:"0.08em"}}>⬡ SQUARE</div>
-                    {!settings.squareToken||!settings.squareLoc
-                      ?<div style={{fontSize:11,color:T.muted}}>Not configured. Add Square credentials in Settings → Integrations.</div>
-                      :<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {txItems.filter(i=>i.mode==="buy").length>0&&(
-                          <button style={{...c.btn(T.green,T.bg),flex:1,minWidth:130,fontSize:11}} onClick={async()=>{
-                            pop("Recording vendor purchase in Square…","ok");
-                            try{const r=await sendSquareBuy(txNo,txItems.filter(i=>i.mode==="buy"),buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}
-                            catch(e){pop("Square error: "+e.message,"err");}
-                          }}>⬡ BUY — Vendor Expense ({fmtAUD(buyTotal)})</button>
-                        )}
-                        {txItems.filter(i=>i.mode==="sell").length>0&&(
-                          <button style={{...c.btn(T.gold,T.bg),flex:1,minWidth:130,fontSize:11}} onClick={async()=>{
-                            pop("Creating Square checkout link…","ok");
-                            try{await sendSquareSell();}
-                            catch(e){pop("Square error: "+e.message,"err");}
-                          }}>⬡ SELL — Checkout Link ({fmtAUD(sellTotal)})</button>
-                        )}
-                        <div style={{width:"100%",fontSize:10,color:T.muted}}>BUY = vendor expense in Square Dashboard · SELL = payment link opened in browser</div>
-                      </div>
-                    }
-                  </div>
+                  {/* Finalise button */}
+                  <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}}
+                    onClick={finalize}>
+                    ✓ Complete Transaction
+                  </button>
 
-                  {/* ── CARD 3: SHOPIFY ── */}
-                  <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.gold}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,letterSpacing:"0.08em"}}>🛍 SHOPIFY</div>
-                    {!settings.shopifyDomain||!settings.shopifyToken
-                      ?<div style={{fontSize:11,color:T.muted}}>Not configured. Add Shopify credentials in Settings → Integrations.</div>
-                      :<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {txItems.filter(i=>i.mode==="buy").length>0&&(
-                          <button style={{...c.btn(T.green,T.bg),flex:1,minWidth:130,fontSize:11}} onClick={async()=>{
-                            pop("Creating Shopify vendor draft order…","ok");
-                            try{const r=await sendShopifyBuy(txNo,txItems.filter(i=>i.mode==="buy"),buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}
-                            catch(e){pop("Shopify error: "+e.message,"err");}
-                          }}>🛍 BUY — Vendor Draft ({fmtAUD(buyTotal)})</button>
-                        )}
-                        {txItems.filter(i=>i.mode==="sell").length>0&&(
-                          <button style={{...c.btn(T.gold,T.bg),flex:1,minWidth:130,fontSize:11}} onClick={async()=>{
-                            pop("Creating Shopify order…","ok");
-                            try{const r=await sendShopifySell(txNo,txItems.filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}
-                            catch(e){pop("Shopify error: "+e.message,"err");}
-                          }}>🛍 SELL — Completed Order ({fmtAUD(sellTotal)})</button>
-                        )}
-                        <div style={{width:"100%",fontSize:10,color:T.muted}}>BUY = draft order tagged "vendor-purchase" · SELL = completed order in Shopify admin</div>
-                      </div>
-                    }
-                  </div>
-
-                  {/* ── CARD 4: XERO ── */}
-                  <div style={{...c.card({padding:16}),marginBottom:14,borderLeft:"4px solid "+T.gold}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,letterSpacing:"0.08em"}}>📒 XERO</div>
-                    {!settings.xeroToken
-                      ?<div style={{fontSize:11,color:T.muted}}>Not configured. Add Xero Bearer token + Tenant ID in Settings → Integrations.</div>
-                      :<div>
-                        <button style={{...c.btn(T.gold,T.bg),width:"100%",fontSize:11}} onClick={async()=>{
-                          pop("Sending to Xero…","ok");
-                          try{
-                            const isReceivable=net>=0;
-                            const lineItems=[
-                              ...txItems.filter(i=>i.mode==="buy").map(i=>({
-                                Description:("[BUY] "+(i.product&&i.product.label||"Item")+(i.note?" — "+i.note:"")).slice(0,200),
-                                Quantity:Math.max(0.01,parseFloat(i.qty)||1),
-                                UnitAmount:Math.max(0,parseFloat((i.price||0).toFixed(2))),
-                                AccountCode:(settings.xeroBuyCode||"310").trim(),
-                                TaxType:"NONE",
-                              })),
-                              ...txItems.filter(i=>i.mode==="sell").map(i=>({
-                                Description:("[SELL] "+(i.product&&i.product.label||"Item")+(i.note?" — "+i.note:"")).slice(0,200),
-                                Quantity:Math.max(0.01,parseFloat(i.qty)||1),
-                                UnitAmount:Math.max(0,parseFloat((i.price||0).toFixed(2))),
-                                AccountCode:(settings.xeroSellCode||"200").trim(),
-                                TaxType:"OUTPUT2",
-                              })),
-                            ];
-                            if(!lineItems.length){pop("No items to send to Xero.","warn");return;}
-                            const today=nowISO().slice(0,10);
-                            const invoice={
-                              Type:isReceivable?"ACCREC":"ACCPAY",
-                              Contact:{Name:(client.fullName||"Walk-in").slice(0,255)},
-                              Date:today,DueDate:today,
-                              Reference:("Loot Ledgr-"+txNo).slice(0,255),
-                              Status:"SUBMITTED",
-                              CurrencyCode:"AUD",
-                              LineAmountTypes:"EXCLUSIVE",
-                              LineItems:lineItems,
-                            };
-                            const resp=await fetch("https://api.xero.com/api.xro/2.0/Invoices",{
-                              method:"PUT",
-                              headers:{
-                                "Content-Type":"application/json",
-                                "Authorization":"Bearer "+(settings.xeroToken||"").trim(),
-                                "Xero-tenant-id":(settings.xeroTenantId||"").trim(),
-                                "Accept":"application/json",
-                              },
-                              body:JSON.stringify({Invoices:[invoice]}),
-                            });
-                            if(!resp.ok){
-                              let errMsg="HTTP "+resp.status;
-                              try{const ej=await resp.json();errMsg=(ej.Detail||ej.Message||errMsg);}catch(ex){}
-                              pop("Xero error: "+errMsg,"err");return;
-                            }
-                            const data=await resp.json();
-                            const inv=data.Invoices&&data.Invoices[0];
-                            const invNum=inv&&inv.InvoiceNumber||"";
-                            pop("✓ Xero invoice "+(invNum||"created")+" ("+(isReceivable?"receivable":"payable")+")","ok");
-                          }catch(e){pop("Xero error: "+e.message,"err");}
-                        }}>📒 Create Xero Invoice ({net>=0?"Receivable "+fmtAUD(net):"Payable "+fmtAUD(-net)})</button>
-                        <div style={{fontSize:10,color:T.muted,marginTop:6}}>ACCREC if client pays us · ACCPAY if we pay client. Account codes: Buy={settings.xeroBuyCode||"310"} Sell={settings.xeroSellCode||"200"}.</div>
-                      </div>
-                    }
-                  </div>
-
-                  {/* ── NAVIGATION ── */}
-                  <div style={{...c.row(10),flexWrap:"wrap"}}>
-                    <button style={{...c.btn(T.gold,T.bg),flex:1,minWidth:120}} onClick={()=>{resetTx();setScreen("dashboard");}}>← Dashboard</button>
-                    <button style={{...c.btn(T.green,T.bg),flex:1,minWidth:120}} onClick={resetTx}>＋ New Transaction</button>
+                  {/* Navigation */}
+                  <div style={c.row(10)}>
+                    <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>setTxStep(5)}>← Back to Payment</button>
+                    <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>{resetTx();setScreen("dashboard");}}>✕ Cancel</button>
                   </div>
                 </div>
               )}
@@ -2895,6 +3032,31 @@ export default function Loot() {
             </button>
             {settingsOpen.integrations&&(
               <div style={{paddingBottom:14}}>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,marginTop:4}}>🖥 EFTPOS Terminal</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Connect a physical payment terminal. Square Terminal works globally. Linkly connects to any Australian bank terminal (CBA, NAB, ANZ, Westpac) via the PC-EFTPOS app running on the same device.</div>
+                <div style={{marginBottom:10}}>
+                  <label style={c.lbl}>EFTPOS Provider</label>
+                  <select style={{...c.sel(),width:"100%"}} value={settings.eftposProvider||"none"} onChange={e=>setSettings(p=>({...p,eftposProvider:e.target.value}))}>
+                    <option value="none">None (manual confirmation)</option>
+                    <option value="square">Square Terminal API</option>
+                    <option value="linkly">Linkly / PC-EFTPOS (AU bank terminals)</option>
+                  </select>
+                </div>
+                {settings.eftposProvider==="square"&&(
+                  <div style={{marginBottom:10}}>
+                    <label style={c.lbl}>Square Terminal Device ID</label>
+                    <input style={c.inp()} value={settings.squareTerminalId||""} placeholder="device:XXXXXXXXXXXXXXXX" onChange={e=>setSettings(p=>({...p,squareTerminalId:e.target.value}))}/>
+                    <div style={{fontSize:10,color:T.muted,marginTop:3}}>Find in Square Dashboard → Devices → your terminal → Device ID</div>
+                  </div>
+                )}
+                {settings.eftposProvider==="linkly"&&(
+                  <div style={{marginBottom:10}}>
+                    <label style={c.lbl}>Linkly Base URL</label>
+                    <input style={c.inp()} value={settings.linklyBaseUrl||"http://localhost:4242"} placeholder="http://localhost:4242" onChange={e=>setSettings(p=>({...p,linklyBaseUrl:e.target.value}))}/>
+                    <div style={{fontSize:10,color:T.muted,marginTop:3}}>Default is localhost:4242. PC-EFTPOS must be running on this device.</div>
+                  </div>
+                )}
+                <div style={{height:1,background:T.border,margin:"12px 0"}}/>
                 <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,marginTop:4}}>💳 Square</div>
                 <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY → vendor expense (Orders+Payments API) · SELL → checkout link</div>
                 <div style={c.g2(10)}>
