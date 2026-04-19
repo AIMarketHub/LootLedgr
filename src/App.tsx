@@ -54,6 +54,90 @@ const store={
   del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(e){}},
 };
 
+// ── SUPABASE SYNC LAYER ───────────────────────────────────────────────────────
+// All data still saves to localStorage first (instant, offline-safe).
+// Supabase syncs in the background for multi-device sharing.
+const SB_URL = "https://uimrnctjkwhhgwewgmzm.supabase.co";
+const SB_KEY = "sb_publishable_wgIxqpsjftysrlJuWZPS6g_EmDiaoaR";
+const SHOP_ID = "default"; // Plan B: replace with business login ID
+
+const sbFetch = async (path, opts={}) => {
+  try {
+    const r = await fetch(SB_URL+"/rest/v1/"+path, {
+      ...opts,
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": "Bearer "+SB_KEY,
+        "Content-Type": "application/json",
+        "Prefer": opts.prefer||"",
+        ...opts.headers,
+      },
+    });
+    if(!r.ok) return null;
+    const text = await r.text();
+    return text ? JSON.parse(text) : null;
+  } catch(e) { return null; }
+};
+
+const sb = {
+  // Transactions
+  saveTx: async (tx) => {
+    await sbFetch("transactions?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:tx.id, shop_id:SHOP_ID, data:tx, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadTxList: async () => {
+    const rows = await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");
+    return rows ? rows.map(r=>r.data) : null;
+  },
+  deleteTx: async (id) => {
+    await sbFetch("transactions?id=eq."+id, {method:"DELETE"});
+  },
+  // Stock
+  saveStock: async (item) => {
+    await sbFetch("stock?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:item.id, shop_id:SHOP_ID, data:item, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadStock: async () => {
+    const rows = await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");
+    return rows ? rows.map(r=>r.data) : null;
+  },
+  deleteStock: async (id) => {
+    await sbFetch("stock?id=eq."+id, {method:"DELETE"});
+  },
+  // Settings
+  saveSettings: async (settings) => {
+    await sbFetch("settings?on_conflict=shop_id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({shop_id:SHOP_ID, data:settings, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadSettings: async () => {
+    const rows = await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");
+    return rows && rows[0] ? rows[0].data : null;
+  },
+  // Catalog
+  saveCatalog: async (catalog) => {
+    // Save catalog as a single JSON blob under a fixed ID
+    await sbFetch("catalog?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:"catalog_"+SHOP_ID, shop_id:SHOP_ID, data:catalog, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadCatalog: async () => {
+    const rows = await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");
+    return rows && rows[0] ? rows[0].data : null;
+  },
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Photo handler — no artificial size cap, browser quota is the only limit
 const MAX_PHOTO_B64 = Infinity;
 const checkPhotoSize = (b64, cb) => { if(b64) cb(b64); };
@@ -519,6 +603,30 @@ export default function Loot() {
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("hiContrast",hiContrast),[hiContrast]);
+  // ── INITIAL LOAD FROM SUPABASE ─────────────────────────────────────────────
+  // On first mount, pull latest data from Supabase.
+  // localStorage is used instantly (no flicker), Supabase overwrites if newer.
+  useEffect(()=>{
+    (async()=>{
+      try {
+        const [sbTxList, sbStock, sbSettings, sbCatalog] = await Promise.all([
+          sb.loadTxList(),
+          sb.loadStock(),
+          sb.loadSettings(),
+          sb.loadCatalog(),
+        ]);
+        if(sbTxList&&sbTxList.length>0) setTxList(sbTxList);
+        if(sbStock&&sbStock.length>0) setStock(sbStock);
+        if(sbSettings&&Object.keys(sbSettings).length>0) setSettings(p=>({...p,...sbSettings}));
+        if(sbCatalog&&sbCatalog.length>0) setCatalog(sbCatalog);
+      } catch(e) {
+        // Supabase unavailable — app continues with localStorage data
+        console.log("Supabase offline, using local data");
+      }
+    })();
+  },[]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(()=>{
     if(document.getElementById("gf-fonts"))return;
     const l=document.createElement("link");l.id="gf-fonts";l.rel="stylesheet";
@@ -535,10 +643,24 @@ export default function Loot() {
   },[]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
-  useEffect(()=>store.set("catalog",catalog),[catalog]);
-  useEffect(()=>store.set("txList",txList),[txList]);
-  useEffect(()=>store.set("stock",stock),[stock]);
-  useEffect(()=>store.set("settings",settings),[settings]);
+  useEffect(()=>{
+    store.set("catalog",catalog);
+    sb.saveCatalog(catalog);
+  },[catalog]);
+  useEffect(()=>{
+    store.set("txList",txList);
+    // Sync latest transaction to Supabase in background
+    if(txList.length>0) sb.saveTx(txList[0]);
+  },[txList]);
+  useEffect(()=>{
+    store.set("stock",stock);
+    // Sync to Supabase in background
+    if(stock.length>0) stock.forEach(item=>sb.saveStock(item));
+  },[stock]);
+  useEffect(()=>{
+    store.set("settings",settings);
+    sb.saveSettings(settings);
+  },[settings]);
 
   useEffect(()=>store.set("vendors",vendors),[vendors]);
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
@@ -3179,5 +3301,5 @@ export default function Loot() {
 
       {notify&&<Notif msg={notify.msg} type={notify.type} onClose={()=>setNotify(null)}/>}
     </div>
-  )
+  );
 }
