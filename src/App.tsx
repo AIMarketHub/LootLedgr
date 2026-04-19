@@ -737,7 +737,7 @@ export default function Loot() {
   const [spotSource,setSpotSource] = useState("");
   // Manual override timestamp — stored so it survives re-renders
   const manualTs = useRef(store.get("manualSpotTs",0));
-  const MANUAL_TTL = 12*60*60*1000; // 12 hours in ms
+  const MANUAL_TTL = 60*60*1000; // 60 minutes in ms
   const isManualActive = ()=>(Date.now()-manualTs.current)<MANUAL_TTL;
 
   // Called when user edits spot in Prices screen
@@ -754,6 +754,8 @@ export default function Loot() {
       // Log spot price (keep last 90 entries)
       setSpotLog(prev=>{const entry={t:nowISO(),g,s,src};return[entry,...prev].slice(0,90);});
       if(isManualActive()) return; // manual override active — ignore API data
+      // Manual just expired — clear manual status so next fetch shows live
+      if(spotStatus==="manual") setSpotStatus("stale");
       setGSpot(parseFloat(Number(g).toFixed(2)));
       setSSpot(parseFloat(Number(s).toFixed(2)));
       setSpotStatus("live");
@@ -1603,7 +1605,7 @@ export default function Loot() {
               border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
           <div style={{overflow:"hidden"}}>
             <div style={{fontSize:11,fontWeight:"bold",color:T.gold,letterSpacing:"0.03em",
-              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledgr</div>
+              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledger</div>
             <div style={{fontSize:7.5,color:T.muted,letterSpacing:"0.08em",textTransform:"uppercase",
               whiteSpace:"nowrap",marginTop:1}}>Compliance POS</div>
           </div>
@@ -1626,7 +1628,7 @@ export default function Loot() {
               type="number" value={sSpot} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
           </div>
           {spotStatus!=="off"&&<span
-            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override (12h)":"Stale — checking APIs"}
+            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override (60min)":"Stale — checking APIs"}
             style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",
               background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}/>}
           <button style={c.bsm(T.border)} onClick={()=>setShowSet(true)}>⚙</button>
@@ -2616,7 +2618,7 @@ export default function Loot() {
                   </div>
                 </div>
                 <div style={{fontSize:10,color:T.muted,marginTop:6}}>
-                  {spotStatus==="manual"?"🟡 Manual override active — API updates suppressed for 12h after last edit.":"⚠ Edit here to override all APIs for 12 hours. API will resume after 12h of no edits."}
+                  {spotStatus==="manual"?"🟡 Manual override active — API resumes automatically after 60 minutes.":"Edit here to manually set prices. API resumes after 60 min of no edits."}
                   {spotSource&&spotStatus!=="manual"&&" Last source: "+spotSource}
                 </div>
               </div>
@@ -2788,7 +2790,7 @@ export default function Loot() {
         <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
           {/* ── SPOT FEED STATUS ── */}
           {spotSource&&<div style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface}}>
-            {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?"🟡 Manual override (12h)":"🟠 Stale — no API"}
+            {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})():"🟠 No API — price held"}
           </div>}
 
           {/* ── ACCORDION SECTIONS ── */}
@@ -2801,7 +2803,7 @@ export default function Loot() {
             </button>
             {settingsOpen.spotfeed&&(
               <div style={{paddingBottom:14}}>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices screen beats all for 12h.</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices screen beats all for 60 min.</div>
                 <div style={c.g2(10)}>
                   <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxxxxxxxxxx"/>
                   <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
@@ -3376,7 +3378,7 @@ export default function Loot() {
                     <div key={img.id} style={{...c.card({padding:8}),borderColor:isActive?T.gold:T.border,borderWidth:isActive?2:1,position:"relative",textAlign:"center"}}>
                       <img src={img.data} alt={img.name} style={{width:"100%",height:80,objectFit:"contain",borderRadius:4,marginBottom:6,background:T.surface}}/>
                       
-                      <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                      <div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
                         <button
                           style={{...c.bsm(isActive?T.goldBg:T.border,isActive?T.gold:T.muted),fontSize:10,padding:"4px 8px",fontWeight:isActive?"bold":"normal"}}
                           onClick={()=>{
@@ -3386,6 +3388,15 @@ export default function Loot() {
                           }}>
                           {isActive?"✓ Logo":"Set Logo"}
                         </button>
+                        <button style={{...c.bsm(T.border,T.muted),fontSize:10,padding:"4px 8px"}}
+                          title="Download image"
+                          onClick={()=>{
+                            const a=document.createElement("a");
+                            a.href=img.data;
+                            a.download=(img.name||"logo")+".png";
+                            a.click();
+                            pop("Downloading "+( img.name||"image")+"…","ok");
+                          }}>⬇</button>
                         <button style={{...c.bsm(T.redBg,T.red),fontSize:10,padding:"4px 8px"}}
                           onClick={()=>{
                             if(isActive)setSettings(p=>({...p,logoImg:null}));
