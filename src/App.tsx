@@ -1098,8 +1098,9 @@ export default function Loot() {
   };
 
   const submitPin=()=>{
-    if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);}
-    else pop("Incorrect PIN","err");
+    if(!settings.staffPin){pop("No manager PIN set. Set one in Settings → Business first.","warn");setPinModal(null);return;}
+    if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}
+    else{pop("Incorrect PIN.","err");setPinVal("");}
   };
 
   const handleToClient=()=>{
@@ -2688,22 +2689,14 @@ export default function Loot() {
                     <input style={c.inp()} type="number" placeholder="e.g. 48" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
                   </div>
                 </div>
-                <div style={{marginTop:8}}>
-                  {spotStatus==="manual"?(
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <span style={{fontSize:10,color:T.gold,flex:1}}>
-                        {(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})()}
-                      </span>
-                      <button style={c.bsm(T.goldBg,T.gold)}
-                        onClick={forceResumeAPI}>
-                        ↺ Resume API Now
-                      </button>
-                    </div>
-                  ):(
-                    <span style={{fontSize:10,color:T.muted}}>
-                      Edit above to manually set prices. API resumes after 60 min of no edits.
-                      {spotSource&&" Last source: "+spotSource}
-                    </span>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:10,color:spotStatus==="manual"?T.gold:T.muted,flex:1}}>
+                    {spotStatus==="manual"
+                      ?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})()
+                      :"Edit above to manually set prices. API resumes after 60 min."+(spotSource?" Last: "+spotSource:"")}
+                  </span>
+                  {spotStatus==="manual"&&(
+                    <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API Now</button>
                   )}
                 </div>
               </div>
@@ -2874,16 +2867,14 @@ export default function Loot() {
       {showSet&&(
         <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
           {/* ── SPOT FEED STATUS ── */}
-          {(spotSource||spotStatus==="manual")&&(
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
-              <span style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
-                {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+mins+" min left";})():"🟠 No API — price held"}
-              </span>
-              {spotStatus==="manual"&&(
-                <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API</button>
-              )}
-            </div>
-          )}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,color:spotStatus==="live"?T.gold:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
+              {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+mins+" min left";})():"🟠 No API — price held"}
+            </span>
+            {spotStatus==="manual"&&(
+              <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API</button>
+            )}
+          </div>
 
           {/* ── ACCORDION SECTIONS ── */}
 
