@@ -1600,7 +1600,11 @@ export default function Loot() {
         {/* LEFT: logo + name — click logo to open logo manager */}
         <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,flexGrow:0,width:"auto",maxWidth:160}}>
           <img src={settings.logoImg} alt="logo"
-            onClick={()=>setShowLogoLib(true)}
+            onClick={()=>{
+              const pin=window.prompt("");
+              if(!pin||pin!==settings.staffPin) return;
+              setShowLogoLib(true);
+            }}
             style={{width:34,height:34,borderRadius:"50%",objectFit:"contain",
               border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
           <div style={{overflow:"hidden"}}>
