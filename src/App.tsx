@@ -1411,10 +1411,16 @@ export default function Loot() {
   const togglePoliceHold=(id,val)=>setStock(p=>p.map(s=>s.id===id?{...s,policeHold:val}:s));
 
   const purge=()=>{
-    txList.filter(t=>isExpired7yr(t.deleteAfter)).forEach(t=>{if(t.photoKey)store.del(t.photoKey);});
+    const expiredTx=txList.filter(t=>isExpired7yr(t.deleteAfter));
+    const expiredStock=stock.filter(s=>isExpired7yr(s.deleteAfter));
+    expiredTx.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});
     setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));
     setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));
-    pop("7-year purge complete.","ok");
+    if(expiredTx.length===0&&expiredStock.length===0){
+      pop("Nothing to purge — no records have passed their 7-year retention date yet.","ok");
+    } else {
+      pop("Purged "+expiredTx.length+" transaction(s) and "+expiredStock.length+" stock item(s) past 7-year retention.","ok");
+    }
   };
 
   const makeTxt=tx=>{
@@ -2770,14 +2776,18 @@ export default function Loot() {
 
       {/* Manager PIN */}
       {pinModal&&(
-        <Modal title="Manager Authorisation Required" onClose={()=>setPinModal(null)}>
-          <div style={c.bnr("warn")}>{pinModal.reason}</div>
-          <F label="Manager PIN" type="password" value={pinVal} onChange={setPinVal} placeholder="Enter PIN…"/>
-          <div style={c.row(10)}>
-            <button style={c.btn(T.gold)} onClick={submitPin}>Authorise</button>
-            <button style={c.bsm()} onClick={()=>setPinModal(null)}>Cancel</button>
+        <div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+          onClick={()=>setPinModal(null)}>
+          <div style={{...c.card({padding:24}),maxWidth:460,width:"100%"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:"bold",color:T.white,marginBottom:16}}>🔒 Manager Authorisation</div>
+            <div style={{...c.bnr("warn"),marginBottom:16}}>{pinModal.reason}</div>
+            <F label="Manager PIN" type="password" value={pinVal} onChange={setPinVal} placeholder="Enter PIN…"/>
+            <div style={c.row(10)}>
+              <button style={c.btn(T.gold,T.bg)} onClick={submitPin}>Authorise</button>
+              <button style={c.bsm(T.border,T.text)} onClick={()=>{setPinModal(null);setPinVal("");}}>Cancel</button>
+            </div>
           </div>
-        </Modal>
+        </div>
       )}
 
       {/* TX Detail */}
