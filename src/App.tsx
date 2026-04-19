@@ -11,10 +11,10 @@ const DARK={
   border:"#1c2619",borderHi:"#2a3826",
   gold:"#c9a84c",goldLight:"#e8c86a",goldDim:"#7a6520",goldBg:"#1a1500",
   silver:"#8fb5ad",silverDim:"#4a6560",silverBg:"#0a1510",
-  green:"#3fa86e",greenDim:"#1a4a30",greenBg:"#081a10",
+  green:"#c9a84c",greenDim:"#7a6520",greenBg:"#1a1500",
   orange:"#d4722a",orangeDim:"#7a3a10",orangeBg:"#1a0c04",
   red:"#cc3f3f",redDim:"#5a1a1a",redBg:"#1a0404",
-  blue:"#4a8fc4",blueBg:"#040e1a",
+  blue:"#c9a84c",blueBg:"#1a1500",
   text:"#ddd8ce",textDim:"#a09a90",muted:"#5a6055",white:"#f5f0e8",
   ff:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
 };
@@ -23,10 +23,10 @@ const LIGHT={
   border:"rgba(0,0,0,0.12)",borderHi:"rgba(0,0,0,0.22)",
   gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",
   silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",
-  green:"#166534",greenDim:"#22C55E",greenBg:"#ECFDF5",
+  green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",
   orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",
   red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",
-  blue:"#1E40AF",blueBg:"#EFF6FF",
+  blue:"#9C7A00",blueBg:"#FEFBEE",
   text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",
   ff:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
 };
@@ -241,8 +241,8 @@ const c = {
   card:  (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:8,...x}),
   inp:   (x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
   sel:   (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",...x}),
-  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"12px 24px",fontFamily:T.ff,fontSize:13,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x}),
-  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"8px 15px",fontFamily:T.ff,fontSize:12,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"}),
+  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x}),
+  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"}),
   lbl:   {fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
   row:   (g=12)=>({display:"flex",alignItems:"center",gap:g}),
   col:   (g=12)=>({display:"flex",flexDirection:"column",gap:g}),
@@ -496,8 +496,7 @@ export default function Loot() {
   const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
-  const [isDark,setIsDark]           = useState(()=>store.get("isDark",false));
-  const [fontWeight,setFontWeight] = useState(()=>store.get("fontWeight",400)); // 300-800
+  const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",13));    // 11-18
   // Quick item
   const [quickMode,setQuickMode] = useState(false);
   const [qmMode,setQMMode]       = useState("buy");
@@ -582,7 +581,7 @@ export default function Loot() {
   const stockPhotoRef = useRef();
   const pendingPhotoId = useRef(null);
 
-  T=isDark?DARK:LIGHT;
+  T=LIGHT;
   // Contrast slider — ranges from -5 (softer) to +5 (very high contrast)
   if(contrast!==0){
     const cv=contrast; // cv to avoid clash with c style utils
@@ -603,8 +602,8 @@ export default function Loot() {
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:8,color:T.text,fontFamily:T.ff,fontSize:15,padding:"13px 14px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:12,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,display:"block"};
   } else {
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"12px 24px",fontFamily:T.ff,fontSize:13,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"8px 15px",fontFamily:T.ff,fontSize:12,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"});
+    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
+    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"});
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"};
   }
@@ -613,12 +612,11 @@ export default function Loot() {
     document.body.style.margin="0";
     document.body.style.padding="0";
     document.documentElement.style.background=T.bg;
-  },[isDark]);
+  },[]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("contrast",contrast),[contrast]);
-  useEffect(()=>store.set("isDark",isDark),[isDark]);
-  useEffect(()=>store.set("fontWeight",fontWeight),[fontWeight]);
+  useEffect(()=>store.set("fontSize",fontSize),[fontSize]);
   // ── INITIAL LOAD FROM SUPABASE ─────────────────────────────────────────────
   // On first mount, pull latest data from Supabase.
   // localStorage is used instantly (no flicker), Supabase overwrites if newer.
@@ -1570,7 +1568,7 @@ export default function Loot() {
     }:{}),
     // Rendering quality — prevents pixelation at any zoom or resolution
     WebkitFontSmoothing:"antialiased",
-    fontWeight:fontWeight,
+    fontSize:fontSize,
     MozOsxFontSmoothing:"grayscale",
     textRendering:"optimizeLegibility",
     imageRendering:"high-quality",
@@ -1645,13 +1643,13 @@ export default function Loot() {
               </div>
               <div style={{...c.g4(10),margin:"14px 0"}}>
                 {[
-                  {l:"Transactions Today",v:txList.filter(t=>t.date&&t.date.slice(0,10)===nowISO().slice(0,10)).length},
-                  {l:"Items In Hold",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
-                  {l:"Ready For Sale",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0).length,col:T.green},
-                  {l:"Police Holds",v:stock.filter(s=>s.policeHold).length,col:T.red},
+                  {l:"Txn 24h",v:(()=>{const now=new Date();const midnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();return txList.filter(t=>t.date&&new Date(t.date).getTime()>=midnight).length;})()},
+                  {l:"In Hold",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
+                  {l:"For Sale",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},
+                  {l:"Police Hold",v:stock.filter(s=>s.policeHold).length,col:T.red},
                 ].map(st=>(
                   <div key={st.l} style={c.card({padding:14})}>
-                    <div style={c.lbl}>{st.l}</div>
+                    <div style={{...c.lbl,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st.l}</div>
                     <div style={{fontSize:24,fontWeight:"bold",color:st.col||T.text}}>{st.v}</div>
                   </div>
                 ))}
@@ -2222,7 +2220,7 @@ export default function Loot() {
                           style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,
                             {padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",
                              alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
-                          <span style={{fontSize:18}}>{opt.icon}</span>
+                          <span style={{fontSize:28}}>{opt.icon}</span>
                           <span style={{fontWeight:"bold"}}>{opt.label}</span>
                           <span style={{fontSize:9,opacity:0.65,fontWeight:"normal"}}>{opt.note}</span>
                         </button>
@@ -2836,13 +2834,7 @@ export default function Loot() {
             </button>
             {settingsOpen.appearance&&(
               <div style={{paddingBottom:14}}>
-                <div style={{marginBottom:16}}>
-                  <label style={c.lbl}>Colour Mode</label>
-                  <div style={c.row(8)}>
-                    <button style={c.btn(!isDark?T.gold:T.border,!isDark?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setIsDark(false)}>☀️ Light</button>
-                    <button style={c.btn(isDark?T.gold:T.border,isDark?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setIsDark(true)}>🌙 Dark</button>
-                  </div>
-                </div>
+
                 <div style={{marginBottom:16}}>
                   <label style={c.lbl}>Contrast</label>
                   <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Softer ←→ Stronger</div>
@@ -2854,15 +2846,15 @@ export default function Loot() {
                   </div>
                 </div>
                 <div style={{marginBottom:16}}>
-                  <label style={c.lbl}>Font Weight</label>
-                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Thin ←→ Bold</div>
-                  <input type="range" min={300} max={800} step={100} value={fontWeight}
-                    onChange={e=>setFontWeight(Number(e.target.value))}
+                  <label style={c.lbl}>Font Size</label>
+                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Small ←→ Large</div>
+                  <input type="range" min={11} max={18} step={1} value={fontSize}
+                    onChange={e=>setFontSize(Number(e.target.value))}
                     style={{width:"100%",accentColor:T.gold}}/>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
-                    <span>Thin</span>
-                    <span style={{color:T.gold,fontWeight:fontWeight}}>{fontWeight===400?"Regular":fontWeight<400?"Light":fontWeight===500?"Medium":fontWeight===600?"Semi-Bold":"Bold"}</span>
-                    <span>Bold</span>
+                    <span>Small</span>
+                    <span style={{color:T.gold,fontWeight:"bold",fontSize:fontSize}}>{fontSize}px</span>
+                    <span>Large</span>
                   </div>
                 </div>
                 <div style={{marginBottom:16}}>
