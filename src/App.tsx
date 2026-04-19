@@ -54,6 +54,90 @@ const store={
   del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(e){}},
 };
 
+// ── SUPABASE SYNC LAYER ───────────────────────────────────────────────────────
+// All data still saves to localStorage first (instant, offline-safe).
+// Supabase syncs in the background for multi-device sharing.
+const SB_URL = "https://uimrnctjkwhhgwewgmzm.supabase.co";
+const SB_KEY = "sb_publishable_wgIxqpsjftysrlJuWZPS6g_EmDiaoaR";
+const SHOP_ID = "default"; // Plan B: replace with business login ID
+
+const sbFetch = async (path, opts={}) => {
+  try {
+    const r = await fetch(SB_URL+"/rest/v1/"+path, {
+      ...opts,
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": "Bearer "+SB_KEY,
+        "Content-Type": "application/json",
+        "Prefer": opts.prefer||"",
+        ...opts.headers,
+      },
+    });
+    if(!r.ok) return null;
+    const text = await r.text();
+    return text ? JSON.parse(text) : null;
+  } catch(e) { return null; }
+};
+
+const sb = {
+  // Transactions
+  saveTx: async (tx) => {
+    await sbFetch("transactions?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:tx.id, shop_id:SHOP_ID, data:tx, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadTxList: async () => {
+    const rows = await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");
+    return rows ? rows.map(r=>r.data) : null;
+  },
+  deleteTx: async (id) => {
+    await sbFetch("transactions?id=eq."+id, {method:"DELETE"});
+  },
+  // Stock
+  saveStock: async (item) => {
+    await sbFetch("stock?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:item.id, shop_id:SHOP_ID, data:item, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadStock: async () => {
+    const rows = await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");
+    return rows ? rows.map(r=>r.data) : null;
+  },
+  deleteStock: async (id) => {
+    await sbFetch("stock?id=eq."+id, {method:"DELETE"});
+  },
+  // Settings
+  saveSettings: async (settings) => {
+    await sbFetch("settings?on_conflict=shop_id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({shop_id:SHOP_ID, data:settings, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadSettings: async () => {
+    const rows = await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");
+    return rows && rows[0] ? rows[0].data : null;
+  },
+  // Catalog
+  saveCatalog: async (catalog) => {
+    // Save catalog as a single JSON blob under a fixed ID
+    await sbFetch("catalog?on_conflict=id", {
+      method:"POST",
+      prefer:"resolution=merge-duplicates",
+      body: JSON.stringify({id:"catalog_"+SHOP_ID, shop_id:SHOP_ID, data:catalog, updated_at:new Date().toISOString()}),
+    });
+  },
+  loadCatalog: async () => {
+    const rows = await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");
+    return rows && rows[0] ? rows[0].data : null;
+  },
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Photo handler — no artificial size cap, browser quota is the only limit
 const MAX_PHOTO_B64 = Infinity;
 const checkPhotoSize = (b64, cb) => { if(b64) cb(b64); };
@@ -157,8 +241,8 @@ const c = {
   card:  (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:8,...x}),
   inp:   (x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
   sel:   (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",...x}),
-  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 20px",fontFamily:T.ff,fontSize:12,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x}),
-  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"5px 11px",fontFamily:T.ff,fontSize:11,cursor:"pointer"}),
+  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"12px 24px",fontFamily:T.ff,fontSize:13,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x}),
+  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"8px 15px",fontFamily:T.ff,fontSize:12,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"}),
   lbl:   {fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
   row:   (g=12)=>({display:"flex",alignItems:"center",gap:g}),
   col:   (g=12)=>({display:"flex",flexDirection:"column",gap:g}),
@@ -237,7 +321,12 @@ function Notif({msg,type,onClose}){
 // ═══════════════════════════════════════════════════════════════════════════
 function TxPhotoManager({selTx,store,setTxList,setSelTx,T,c}){
   const phKey=selTx.photoKey||("photos_"+selTx.id);
-  const ph=store.get(phKey,{idPhoto:null,itemPhotos:{}});
+  // Read from embedded tx object first, fall back to localStorage
+  const localPh=store.get(phKey,{idPhoto:null,itemPhotos:{}});
+  const ph={
+    idPhoto:selTx.photo||localPh.idPhoto||null,
+    itemPhotos:{...localPh.itemPhotos,...(selTx.itemPhotos||{})},
+  };
   const imgs=Object.entries(ph.itemPhotos||{});
   const save=(updated)=>{
     store.set(phKey,updated);
@@ -404,6 +493,11 @@ export default function Loot() {
   const [zoom,setZoom]           = useState(()=>store.get("zoom",100));
   const [simp,setSimp]           = useState(()=>store.get("simp",false));
   const [hiContrast,setHiContrast] = useState(()=>store.get("hiContrast",false));
+  const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
+  const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
+  const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
+  const [isDark,setIsDark]           = useState(()=>store.get("isDark",false));
+  const [fontWeight,setFontWeight] = useState(()=>store.get("fontWeight",400)); // 300-800
   // Quick item
   const [quickMode,setQuickMode] = useState(false);
   const [qmMode,setQMMode]       = useState("buy");
@@ -488,14 +582,18 @@ export default function Loot() {
   const stockPhotoRef = useRef();
   const pendingPhotoId = useRef(null);
 
-  T=LIGHT; // always light mode
-  // High contrast overrides — stronger borders, darker text, no transparency
-  if(hiContrast){
+  T=isDark?DARK:LIGHT;
+  // Contrast slider — ranges from -5 (softer) to +5 (very high contrast)
+  if(contrast!==0){
+    const cv=contrast; // cv to avoid clash with c style utils
     T={...T,
-      border:"rgba(0,0,0,0.35)",borderHi:"rgba(0,0,0,0.55)",
-      muted:"#444",text:"#000",textDim:"#111",
-      card:"#fff",surface:"#f0ede8",bg:"#e8e4de",
-      gold:"#7a5c00",goldLight:"#8a6800",
+      border:cv>0?"rgba(0,0,0,"+(0.12+cv*0.075)+")":"rgba(0,0,0,"+(0.12+cv*0.02)+")",
+      borderHi:cv>0?"rgba(0,0,0,"+(0.22+cv*0.1)+")":"rgba(0,0,0,"+(0.22+cv*0.02)+")",
+      muted:cv>0?"#"+Math.max(0,0x73-cv*18).toString(16).padStart(2,"0").repeat(3):"#737373",
+      text:cv>0?"#000":"#"+Math.max(0x11,0x11+Math.round(cv*8)).toString(16).padStart(2,"0").repeat(3),
+      card:cv>0?"#fff":"#"+Math.max(0xfa,0xff-Math.abs(cv)*2).toString(16).padStart(2,"0").repeat(3),
+      bg:cv>0?"#dedad4":"#"+Math.max(0xee,0xf5-Math.abs(cv)*3).toString(16).padStart(2,"0"),
+      gold:cv>0?"#7a5200":"#9C7A00",
     };
   }
   // Simplified view overrides — larger tap targets and text when simp=true
@@ -505,8 +603,8 @@ export default function Loot() {
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:8,color:T.text,fontFamily:T.ff,fontSize:15,padding:"13px 14px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:12,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,display:"block"};
   } else {
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 20px",fontFamily:T.ff,fontSize:12,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"5px 11px",fontFamily:T.ff,fontSize:11,cursor:"pointer"});
+    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"12px 24px",fontFamily:T.ff,fontSize:13,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
+    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"8px 15px",fontFamily:T.ff,fontSize:12,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"});
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"};
   }
@@ -515,10 +613,41 @@ export default function Loot() {
     document.body.style.margin="0";
     document.body.style.padding="0";
     document.documentElement.style.background=T.bg;
-  },[]);
+  },[isDark]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("hiContrast",hiContrast),[hiContrast]);
+  useEffect(()=>store.set("contrast",contrast),[contrast]);
+  useEffect(()=>store.set("isDark",isDark),[isDark]);
+  useEffect(()=>store.set("fontWeight",fontWeight),[fontWeight]);
+  // ── INITIAL LOAD FROM SUPABASE ─────────────────────────────────────────────
+  // On first mount, pull latest data from Supabase.
+  // localStorage is used instantly (no flicker), Supabase overwrites if newer.
+  useEffect(()=>{
+    (async()=>{
+      try {
+        const [sbTxList, sbStock, sbSettings, sbCatalog] = await Promise.all([
+          sb.loadTxList(),
+          sb.loadStock(),
+          sb.loadSettings(),
+          sb.loadCatalog(),
+        ]);
+        if(sbTxList&&sbTxList.length>0) setTxList(sbTxList);
+        if(sbStock&&sbStock.length>0) setStock(sbStock);
+        if(sbSettings&&Object.keys(sbSettings).length>0){
+          setSettings(p=>({...p,...sbSettings}));
+          if(sbSettings.gSpot) setGSpot(sbSettings.gSpot);
+          if(sbSettings.sSpot) setSSpot(sbSettings.sSpot);
+        }
+        if(sbCatalog&&sbCatalog.length>0) setCatalog(sbCatalog);
+      } catch(e) {
+        // Supabase unavailable — app continues with localStorage data
+        console.log("Supabase offline, using local data");
+      }
+    })();
+  },[]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(()=>{
     if(document.getElementById("gf-fonts"))return;
     const l=document.createElement("link");l.id="gf-fonts";l.rel="stylesheet";
@@ -535,10 +664,42 @@ export default function Loot() {
   },[]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
-  useEffect(()=>store.set("catalog",catalog),[catalog]);
-  useEffect(()=>store.set("txList",txList),[txList]);
-  useEffect(()=>store.set("stock",stock),[stock]);
-  useEffect(()=>store.set("settings",settings),[settings]);
+  useEffect(()=>{
+    store.set("catalog",catalog);
+    sb.saveCatalog(catalog);
+  },[catalog]);
+  useEffect(()=>{
+    store.set("txList",txList);
+    // Sync latest transaction to Supabase in background
+    if(txList.length>0) sb.saveTx(txList[0]);
+  },[txList]);
+  const prevStockRef = useRef([]);
+  useEffect(()=>{
+    store.set("stock",stock);
+    // Only sync items that changed or were added
+    const prev = prevStockRef.current;
+    const prevIds = new Set(prev.map(s=>s.id));
+    const currIds = new Set(stock.map(s=>s.id));
+    // Deleted items — remove from Supabase
+    prev.forEach(s=>{ if(!currIds.has(s.id)) sb.deleteStock(s.id); });
+    // New or changed items — upsert to Supabase
+    stock.forEach(s=>{
+      const old = prev.find(p=>p.id===s.id);
+      if(!old||JSON.stringify(old)!==JSON.stringify(s)) sb.saveStock(s);
+    });
+    prevStockRef.current = stock;
+  },[stock]);
+  useEffect(()=>{
+    store.set("settings",settings);
+    sb.saveSettings(settings);
+  },[settings]);
+
+  // Sync spot prices as part of settings so they transfer across devices
+  useEffect(()=>{
+    store.set("gSpot",gSpot);
+    store.set("sSpot",sSpot);
+    sb.saveSettings({...settings,gSpot,sSpot});
+  },[gSpot,sSpot]);
 
   useEffect(()=>store.set("vendors",vendors),[vendors]);
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
@@ -765,11 +926,22 @@ export default function Loot() {
     txList.forEach(tx=>s4.push([tx.id,tx.date&&tx.date.slice(0,10),(tx.client&&tx.client.fullName)||"—",
       tx.ttrStatus||"N/A",tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",
       tx.items&&tx.items.some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
-    // Build multi-sheet CSV — no regex to avoid parser confusion
+    // Build clean multi-sheet CSV for accountant
     const DQ=String.fromCharCode(34);
-    const escCSV=v=>{const s=String(v==null?"":v);return DQ+s.split(DQ).join(DQ+DQ)+DQ;};
+    const escCSV=v=>{
+      const s=String(v==null?"":v).replace(/[\r\n]+/g," ");
+      return DQ+s.split(DQ).join(DQ+DQ)+DQ;
+    };
     const toCSV=rows=>rows.map(r=>r.map(escCSV).join(",")).join("\n");
-        const full="=== TRANSACTION REGISTER ===\n"+toCSV(s1)+"\n\n=== STOCK VALUATION ===\n"+toCSV(s2)+"\n\n=== GST SUMMARY ===\n"+toCSV(s3)+"\n\n=== COMPLIANCE LOG ===\n"+toCSV(s4);
+    const sep=(title)=>"\n\n"+title+"\n"+"-".repeat(title.length)+"\n";
+    const full=
+      "LOOT LEDGR — ACCOUNTING EXPORT\n"+
+      "Business: "+(settings.businessName||"")+"  ABN: "+(settings.abn||"")+"\n"+
+      "Exported: "+nowISO().slice(0,10)+"  Spot: "+snapNote+"\n"+
+      sep("1. TRANSACTION REGISTER")+toCSV(s1)+
+      sep("2. STOCK VALUATION")+toCSV(s2)+
+      sep("3. GST SUMMARY")+toCSV(s3)+
+      sep("4. COMPLIANCE LOG")+toCSV(s4);
     dlFile(full,"lootledgr-accounting-"+todayStr()+".csv","text/csv");
     pop("Accounting export downloaded.","ok");
   };
@@ -850,10 +1022,13 @@ export default function Loot() {
     const phData={idPhoto:compliance.requiresKYC?photo:null,itemPhotos};
     const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length>0);
     const photoKey=hasPh?"photos_"+txNo:null;
-    if(hasPh)store.set(photoKey,phData);
+    if(hasPh)store.set(photoKey,phData); // keep local copy for speed
     const tx={
       id:txNo,date:now,items:txItems,payment:txPay,
-      buyTotal,sellTotal,net,client,staff,idSighted,photo:null,hasPhotos:hasPh,photoKey,kycDone,
+      buyTotal,sellTotal,net,client,staff,idSighted,
+      photo:phData.idPhoto||null,          // ID photo embedded in tx
+      itemPhotos:phData.itemPhotos||{},    // item photos embedded in tx
+      hasPhotos:hasPh,photoKey,kycDone,
       flags:compliance.flags.map(f=>f.key),
       ttrRequired:compliance.flags.some(f=>f.key==="ttr"),
       ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,
@@ -1294,6 +1469,7 @@ export default function Loot() {
     }:{}),
     // Rendering quality — prevents pixelation at any zoom or resolution
     WebkitFontSmoothing:"antialiased",
+    fontWeight:fontWeight,
     MozOsxFontSmoothing:"grayscale",
     textRendering:"optimizeLegibility",
     imageRendering:"high-quality",
@@ -2461,228 +2637,303 @@ export default function Loot() {
       {/* Settings */}
       {showSet&&(
         <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
-          <div style={{...c.bnr("info"),marginBottom:10}}>
-            📡 <strong>Live Spot Feed — 3-tier cascade</strong><br/>
-            <span style={{fontSize:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. Manual override (Prices screen) beats all for 12h. All free, no card required.</span>
-          </div>
-          {spotSource&&<div style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,marginBottom:8}}>
-            {spotStatus==="live"?"🟢 Live from "+spotSource:spotStatus==="manual"?"🟡 Manual override active (12h)":"🟠 Stale — API unavailable"}
+          {/* ── SPOT FEED STATUS ── */}
+          {spotSource&&<div style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface}}>
+            {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?"🟡 Manual override (12h)":"🟠 Stale — no API"}
           </div>}
-          <div style={c.g2(10)}>
-            <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxxxxxxxxxx"/>
-            <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
-            <F label="3. Metals.Dev key (fallback)" value={settings.metalsDevKey||""} onChange={v=>setSettings(p=>({...p,metalsDevKey:v}))} placeholder="from metals.dev"/>
-          </div>
-          <div style={{display:"flex",gap:10,marginTop:8}}>
-            <div style={{flex:1}}>
-              <label style={c.lbl}>Gold alert when ≥ (AUD/oz)</label>
-              <input style={c.inp()} type="number" placeholder="e.g. 5000" value={settings.goldAlert||""} onChange={e=>setSettings(p=>({...p,goldAlert:e.target.value||null}))}/>
-            </div>
-            <div style={{flex:1}}>
-              <label style={c.lbl}>Silver alert when ≥ (AUD/oz)</label>
-              <input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/>
-            </div>
-          </div>
-          <div style={{height:1,background:T.border,margin:"14px 0"}}/>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>Business</div>
-          <div style={c.g2(10)}>
-            <F label="Business Name" value={settings.businessName} onChange={v=>setSettings(p=>({...p,businessName:v}))}/>
-            <F label="ABN" value={settings.abn} onChange={v=>setSettings(p=>({...p,abn:v}))}/>
-            <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
-            <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
-            <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>💳 Square — BUY records vendor expense · SELL records checkout</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:10,lineHeight:1.6}}>SELLS: checkout link sent to customer (item name + price, no client data).<br/>BUYS: Order + Payment recorded in Square Dashboard as vendor/expense (Orders API → Payments API).<br/>Required: Access Token (EAAAl…) + Location ID (from Square Developer Console).</div>
-          <div style={c.g2(10)}>
-            <F label="Square Access Token" type="password" value={settings.squareToken} onChange={v=>setSettings(p=>({...p,squareToken:v}))} placeholder="EAAAl…"/>
-            <F label="Square Location ID" value={settings.squareLoc} onChange={v=>setSettings(p=>({...p,squareLoc:v}))}/>
-            <F label="Redirect URL" value={settings.squareRedirect} onChange={v=>setSettings(p=>({...p,squareRedirect:v}))} placeholder="https://…"/>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>📊 Google Sheets (Format 1)</div>
-          <div style={c.g2(10)}>
-            <F label="Spreadsheet ID" value={settings.sheetsId} onChange={v=>setSettings(p=>({...p,sheetsId:v}))}/>
-            <F label="Range" value={settings.sheetsRange} onChange={v=>setSettings(p=>({...p,sheetsRange:v}))} placeholder="Sheet1!A1"/>
-            <F label="OAuth Token" type="password" value={settings.sheetsToken} onChange={v=>setSettings(p=>({...p,sheetsToken:v}))}/>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>🔗 Webhook — Zapier / Make / n8n (Format 2)</div>
-          <div style={c.g2(10)}>
-            <F label="Webhook URL" value={settings.webhookUrl} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hooks.zapier.com/…"/>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>🛍 Shopify — BUY records vendor draft order · SELL records completed order</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:10,lineHeight:1.6}}>BUYS: Draft order tagged "vendor-purchase" (filter in Shopify admin for expense reports).<br/>SELLS: Standard completed order. Required: Store domain (no https://) + Admin API access token.</div>
-          <div style={c.g2(10)}>
-            <F label="Store Domain (xxx.myshopify.com)" value={settings.shopifyDomain} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))}/>
-            <F label="Storefront API Token" type="password" value={settings.shopifyToken} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>📒 Xero — Invoice API</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:8}}>BUY = ACCPAY invoice (we pay client) · SELL = ACCREC invoice (client pays). Requires Xero OAuth2 Bearer token.</div>
-          <div style={c.g2(10)}>
-            <F label="Xero Bearer Token" type="password" value={settings.xeroToken||""} onChange={v=>setSettings(p=>({...p,xeroToken:v}))} placeholder="OAuth2 Bearer token from Xero developer portal"/>
-            <F label="Xero Tenant ID" value={settings.xeroTenantId||""} onChange={v=>setSettings(p=>({...p,xeroTenantId:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-            <div style={{display:"flex",gap:10}}>
-              <div style={{flex:1}}><label style={c.lbl}>Buy Account Code</label><input style={c.inp()} type="text" value={settings.xeroBuyCode||"310"} placeholder="310" onChange={e=>setSettings(p=>({...p,xeroBuyCode:e.target.value}))}/></div>
-              <div style={{flex:1}}><label style={c.lbl}>Sell Account Code</label><input style={c.inp()} type="text" value={settings.xeroSellCode||"200"} placeholder="200" onChange={e=>setSettings(p=>({...p,xeroSellCode:e.target.value}))}/></div>
-            </div>
-            <div style={{fontSize:10,color:T.muted}}>BUY → ACCPAY (we pay client) · SELL → ACCREC (client pays us). Get bearer token from Xero Developer → My Apps → OAuth 2.0.</div>
-          </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>🤖 AI Agent Integration</div>
-          <div style={{...c.card({padding:14}),marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>AI Agent</div>
-                <div style={{fontSize:11,color:T.muted,marginTop:3}}>Connect an AI agent (Sophiie, Claude, custom) to observe and assist with this app. When active, a small indicator appears on each screen.</div>
-              </div>
-              <button style={{...c.btn(settings.aiAgentEnabled?T.green:T.border,settings.aiAgentEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                onClick={()=>setSettings(p=>({...p,aiAgentEnabled:!p.aiAgentEnabled}))}>
-                {settings.aiAgentEnabled?"ON":"OFF"}
-              </button>
-            </div>
-            {settings.aiAgentEnabled&&(
-              <div>
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>Agent Name</label>
-                  <input style={c.inp()} value={settings.aiAgentName||""} placeholder="Sophiie" onChange={e=>setSettings(p=>({...p,aiAgentName:e.target.value}))}/>
+
+          {/* ── ACCORDION SECTIONS ── */}
+
+          {/* 1. SPOT FEED & PRICES */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("spotfeed")}>
+              <span>📡 Spot Feed — API Keys</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.spotfeed?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.spotfeed&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices screen beats all for 12h.</div>
+                <div style={c.g2(10)}>
+                  <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxxxxxxxxxx"/>
+                  <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
+                  <F label="3. Metals.Dev key (fallback)" value={settings.metalsDevKey||""} onChange={v=>setSettings(p=>({...p,metalsDevKey:v}))} placeholder="from metals.dev"/>
                 </div>
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>Webhook / Agent URL (optional)</label>
-                  <input style={c.inp()} value={settings.aiAgentUrl||""} placeholder="https://..." onChange={e=>setSettings(p=>({...p,aiAgentUrl:e.target.value}))}/>
-                  <div style={{fontSize:10,color:T.muted,marginTop:3}}>Events will be posted here as JSON. Leave blank for local-only integration via window.LOOTLEDGER_AI.</div>
-                </div>
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>Access Level</label>
-                  <div style={c.row(8)}>
-                    <button style={c.btn(settings.aiAgentLevel===1?T.gold:T.border,settings.aiAgentLevel===1?T.bg:T.text,{fontSize:11,padding:"7px 14px"})}
-                      onClick={()=>setSettings(p=>({...p,aiAgentLevel:1}))}>Level 1 — Observe</button>
-                    <button style={c.btn(settings.aiAgentLevel===2?T.orange:T.border,settings.aiAgentLevel===2?T.bg:T.muted,{fontSize:11,padding:"7px 14px"})}
-                      onClick={()=>setPinModal({reason:"Level 2 grants AI agents the ability to control the app. Manager PIN required.",cb:()=>setSettings(p=>({...p,aiAgentLevel:2}))})}>Level 2 — Autonomous (v2.0)</button>
+                <div style={{display:"flex",gap:10,marginTop:10}}>
+                  <div style={{flex:1}}>
+                    <label style={c.lbl}>Gold alert when ≥ (AUD/oz)</label>
+                    <input style={c.inp()} type="number" placeholder="e.g. 5000" value={settings.goldAlert||""} onChange={e=>setSettings(p=>({...p,goldAlert:e.target.value||null}))}/>
                   </div>
-                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>
-                    Level 1: agent can read app state, answer staff questions, and receive screen events. No control.{" "}
-                    Level 2: agent can execute transactions autonomously via voice or API (locked — requires v2.0 upgrade).
+                  <div style={{flex:1}}>
+                    <label style={c.lbl}>Silver alert when ≥ (AUD/oz)</label>
+                    <input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/>
                   </div>
-                </div>
-                <div style={{...c.bnr("info"),fontSize:10}}>
-                  Developer: connect via <strong>window.LOOTLEDGER_AI</strong> — call <strong>.getState()</strong>, <strong>.getCatalog()</strong>, <strong>.getStock()</strong>, <strong>.on("screenChange", cb)</strong>. Command API ready but locked until v2.0.
                 </div>
               </div>
             )}
           </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>₿ Cryptocurrency Payments</div>
-          <div style={{...c.card({padding:14}),marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Accept Crypto</div>
-                <div style={{fontSize:11,color:T.muted,marginTop:3}}>Adds a Crypto option to the payment selector. No AUSTRAC registration required for accepting crypto as payment — just record the AUD value for tax purposes.</div>
+
+          {/* 2. BUSINESS */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("business")}>
+              <span>🏪 Business Details</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.business?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.business&&(
+              <div style={{paddingBottom:14}}>
+                <div style={c.g2(10)}>
+                  <F label="Business Name" value={settings.businessName} onChange={v=>setSettings(p=>({...p,businessName:v}))}/>
+                  <F label="ABN" value={settings.abn} onChange={v=>setSettings(p=>({...p,abn:v}))}/>
+                  <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
+                  <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
+                  <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
+                </div>
               </div>
-              <button style={{...c.btn(settings.cryptoEnabled?T.green:T.border,settings.cryptoEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                onClick={()=>setSettings(p=>({...p,cryptoEnabled:!p.cryptoEnabled}))}>
-                {settings.cryptoEnabled?"ON":"OFF"}
-              </button>
-            </div>
+            )}
           </div>
-          {settings.cryptoEnabled&&(
-            <div style={{...c.card({padding:14}),marginBottom:10}}>
-              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>Wallet Addresses</div>
-              <div style={{fontSize:10,color:T.muted,marginBottom:12}}>Enter your receiving wallet address for each coin you accept. Leave blank to hide that coin. Addresses are validated on entry.</div>
-              {[
-                {k:"walletBTC",label:"Bitcoin (BTC)",placeholder:"1... or 3... or bc1...",
-                  validate:v=>/^(1[a-km-zA-HJ-NP-Z1-9]{25,33}|3[a-km-zA-HJ-NP-Z1-9]{25,33}|bc1[a-z0-9]{6,87})$/.test(v),
-                  hint:"Starts with 1, 3, or bc1 · 26–62 chars"},
-                {k:"walletETH",label:"Ethereum (ETH) / BNB Smart Chain (BNB)",placeholder:"0x...",
-                  validate:v=>/^0x[0-9a-fA-F]{40}$/.test(v),
-                  hint:"Starts with 0x · exactly 42 chars"},
-                {k:"walletBNB",label:"Binance Coin BEP-2 (BNB native chain)",placeholder:"bnb1...",
-                  validate:v=>/^bnb1[0-9a-z]{38}$/.test(v),
-                  hint:"Starts with bnb1 · exactly 42 chars (BEP-2). For BEP-20 use your ETH address above."},
-                {k:"walletXRP",label:"Ripple (XRP)",placeholder:"r...",
-                  validate:v=>/^r[0-9a-zA-Z]{24,34}$/.test(v),
-                  hint:"Starts with r · 25–35 chars"},
-                {k:"walletSOL",label:"Solana (SOL)",placeholder:"...",
-                  validate:v=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v),
-                  hint:"Base58 · 32–44 chars"},
-              ].map(field=>{
-                const val=settings[field.k]||"";
-                const ok=val===""||field.validate(val);
-                return(
-                  <div key={field.k} style={{marginBottom:14}}>
-                    <label style={c.lbl}>{field.label}</label>
-                    <input style={{...c.inp(),borderColor:val&&!ok?T.red:val&&ok?T.green:T.border,fontFamily:"monospace",fontSize:12}}
-                      value={val} placeholder={field.placeholder}
-                      onChange={e=>setSettings(p=>({...p,[field.k]:e.target.value.trim()}))}/>
-                    <div style={{fontSize:10,marginTop:3,color:val&&!ok?T.red:T.muted}}>
-                      {val&&!ok?"⚠ Invalid format — "+field.hint:field.hint}
+
+          {/* 3. APPEARANCE */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("appearance")}>
+              <span>🎨 Appearance</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.appearance?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.appearance&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{marginBottom:16}}>
+                  <label style={c.lbl}>Colour Mode</label>
+                  <div style={c.row(8)}>
+                    <button style={c.btn(!isDark?T.gold:T.border,!isDark?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setIsDark(false)}>☀️ Light</button>
+                    <button style={c.btn(isDark?T.gold:T.border,isDark?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setIsDark(true)}>🌙 Dark</button>
+                  </div>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <label style={c.lbl}>Contrast</label>
+                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Softer ←→ Stronger</div>
+                  <input type="range" min={-5} max={5} step={1} value={contrast}
+                    onChange={e=>setContrast(Number(e.target.value))}
+                    style={{width:"100%",accentColor:T.gold}}/>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
+                    <span>Soft</span><span style={{color:T.gold,fontWeight:"bold"}}>{contrast===0?"Default":contrast>0?"+"+contrast:contrast}</span><span>Strong</span>
+                  </div>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <label style={c.lbl}>Font Weight</label>
+                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Thin ←→ Bold</div>
+                  <input type="range" min={300} max={800} step={100} value={fontWeight}
+                    onChange={e=>setFontWeight(Number(e.target.value))}
+                    style={{width:"100%",accentColor:T.gold}}/>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
+                    <span>Thin</span>
+                    <span style={{color:T.gold,fontWeight:fontWeight}}>{fontWeight===400?"Regular":fontWeight<400?"Light":fontWeight===500?"Medium":fontWeight===600?"Semi-Bold":"Bold"}</span>
+                    <span>Bold</span>
+                  </div>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <label style={c.lbl}>Zoom</label>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+                    {[80,90,100,110,120].map(z=><button key={z} style={c.btn(zoom===z?T.gold:T.border,zoom===z?T.bg:T.text,{padding:"6px 12px",fontSize:11})} onClick={()=>setZoom(z)}>{z}%</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label style={c.lbl}>Simplified View</label>
+                  <div style={{fontSize:10,color:T.muted,marginBottom:6}}>Larger text + touch targets — recommended for phones</div>
+                  <div style={c.row(8)}>
+                    <button style={c.btn(simp?T.green:T.border,simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(true)}>ON</button>
+                    <button style={c.btn(!simp?T.gold:T.border,!simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(false)}>OFF</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. SECURITY */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("security")}>
+              <span>🔒 Security</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.security?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.security&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>When enabled, a PIN screen blocks access on every app open.</div>
+                <div style={c.g2(10)}>
+                  <div>
+                    <label style={c.lbl}>Require PIN to open app</label>
+                    <div style={c.row(10)}>
+                      <button style={c.btn(settings.requirePin?T.green:T.border,settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})} onClick={()=>setSettings(p=>({...p,requirePin:true}))}>ON</button>
+                      <button style={c.btn(!settings.requirePin?T.gold:T.border,!settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})} onClick={()=>setSettings(p=>({...p,requirePin:false}))}>OFF</button>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>📋 Compliance — TTR Reporting</div>
-          <div style={{...c.card({padding:14}),marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Threshold Transaction Reports</div>
-                <div style={{fontSize:11,color:T.muted,marginTop:3}}>TTR applies to physical cash payments over $10,000. If you do not accept cash over $2,000, this will never trigger and can be safely disabled.</div>
+                  <div>
+                    <label style={c.lbl}>Session timeout</label>
+                    <select style={{...c.sel(),width:"100%"}} value={settings.sessionTimeout||"never"} onChange={e=>setSettings(p=>({...p,sessionTimeout:e.target.value}))}>
+                      <option value="never">Never</option>
+                      <option value="1h">1 hour</option>
+                      <option value="8h">8 hours</option>
+                      <option value="close">On app close</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-              <button style={{...c.btn(settings.ttrEnabled!==false?T.green:T.border,settings.ttrEnabled!==false?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                onClick={()=>setSettings(p=>({...p,ttrEnabled:p.ttrEnabled===false?true:false}))}>
-                {settings.ttrEnabled!==false?"ON":"OFF"}
-              </button>
-            </div>
-            {settings.ttrEnabled===false&&<div style={{...c.bnr("warn"),marginBottom:0}}>TTR reporting is disabled. Only turn this off if you never accept cash over $10,000.</div>}
+            )}
           </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"16px 0 10px"}}>🔒 Security — Optional PIN Lock (OFF by default)</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:10}}>When enabled, a PIN screen blocks access on every app open. Uses the Staff/Manager PIN above.</div>
-          <div style={c.g2(10)}>
-            <div>
-              <label style={c.lbl}>Require PIN to open app</label>
-              <div style={c.row(10)}>
-                <button style={c.btn(settings.requirePin?T.green:T.border,settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})}
-                  onClick={()=>setSettings(p=>({...p,requirePin:true}))}>ON</button>
-                <button style={c.btn(!settings.requirePin?T.gold:T.border,!settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})}
-                  onClick={()=>setSettings(p=>({...p,requirePin:false}))}>OFF (default)</button>
+
+          {/* 5. COMPLIANCE */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("compliance")}>
+              <span>📋 Compliance — TTR</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.compliance?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.compliance&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{...c.card({padding:14})}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Threshold Transaction Reports</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>TTR applies to physical cash over $10,000. If you never accept cash over $2,000 this will never trigger.</div>
+                    </div>
+                    <button style={{...c.btn(settings.ttrEnabled!==false?T.green:T.border,settings.ttrEnabled!==false?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
+                      onClick={()=>setSettings(p=>({...p,ttrEnabled:p.ttrEnabled===false?true:false}))}>
+                      {settings.ttrEnabled!==false?"ON":"OFF"}
+                    </button>
+                  </div>
+                  {settings.ttrEnabled===false&&<div style={{...c.bnr("warn"),marginBottom:0}}>TTR disabled. Only turn off if you never accept cash over $10,000.</div>}
+                </div>
               </div>
-            </div>
-            <div>
-              <label style={c.lbl}>Session timeout</label>
-              <select style={{...c.sel(),width:"100%"}} value={settings.sessionTimeout||"never"} onChange={e=>setSettings(p=>({...p,sessionTimeout:e.target.value}))}>
-                <option value="never">Never (stay unlocked)</option>
-                <option value="1h">1 hour</option>
-                <option value="8h">8 hours</option>
-                <option value="close">On app close</option>
-              </select>
-            </div>
+            )}
           </div>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>🎨 Appearance</div>
-          <div style={c.g2(10)}>
-            <div><label style={c.lbl}>Colour Mode</label>
-              <div style={c.row(8)}>
-<span style={{fontSize:11,color:T.muted}}>Light mode only</span>
+
+          {/* 6. CRYPTO */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("crypto")}>
+              <span>₿ Cryptocurrency Payments</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.crypto?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.crypto&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{...c.card({padding:14}),marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Accept Crypto</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>Adds Crypto to payment selector. No AUSTRAC registration needed — just record AUD value for tax.</div>
+                    </div>
+                    <button style={{...c.btn(settings.cryptoEnabled?T.green:T.border,settings.cryptoEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
+                      onClick={()=>setSettings(p=>({...p,cryptoEnabled:!p.cryptoEnabled}))}>
+                      {settings.cryptoEnabled?"ON":"OFF"}
+                    </button>
+                  </div>
+                </div>
+                {settings.cryptoEnabled&&(
+                  <div style={{...c.card({padding:14})}}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>Wallet Addresses</div>
+                    {[
+                      {k:"walletBTC",label:"Bitcoin (BTC)",placeholder:"1... or 3... or bc1...",validate:v=>/^(1[a-km-zA-HJ-NP-Z1-9]{25,33}|3[a-km-zA-HJ-NP-Z1-9]{25,33}|bc1[a-z0-9]{6,87})$/.test(v),hint:"Starts with 1, 3, or bc1"},
+                      {k:"walletETH",label:"Ethereum / BNB BEP-20",placeholder:"0x...",validate:v=>/^0x[0-9a-fA-F]{40}$/.test(v),hint:"0x + 40 hex chars"},
+                      {k:"walletBNB",label:"Binance BEP-2 (native)",placeholder:"bnb1...",validate:v=>/^bnb1[0-9a-z]{38}$/.test(v),hint:"bnb1 + 38 chars"},
+                      {k:"walletXRP",label:"Ripple (XRP)",placeholder:"r...",validate:v=>/^r[0-9a-zA-Z]{24,34}$/.test(v),hint:"r + 24–34 chars"},
+                      {k:"walletSOL",label:"Solana (SOL)",placeholder:"Base58...",validate:v=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v),hint:"Base58 · 32–44 chars"},
+                    ].map(field=>{
+                      const val=settings[field.k]||"";
+                      const ok=val===""||field.validate(val);
+                      return(
+                        <div key={field.k} style={{marginBottom:12}}>
+                          <label style={c.lbl}>{field.label}</label>
+                          <input style={{...c.inp(),borderColor:val&&!ok?T.red:val&&ok?T.green:T.border,fontFamily:"monospace",fontSize:11}}
+                            value={val} placeholder={field.placeholder}
+                            onChange={e=>setSettings(p=>({...p,[field.k]:e.target.value.trim()}))}/>
+                          <div style={{fontSize:10,marginTop:2,color:val&&!ok?T.red:T.muted}}>{val&&!ok?"⚠ "+field.hint:field.hint}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-            <div style={{marginBottom:12}}>
-              <label style={c.lbl}>High Contrast</label>
-              <div style={{fontSize:10,color:T.muted,marginBottom:6}}>Stronger borders and darker text — easier to read in bright light</div>
-              <div style={c.row(8)}>
-                <button style={c.btn(hiContrast?T.green:T.border,hiContrast?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setHiContrast(true)}>ON</button>
-                <button style={c.btn(!hiContrast?T.gold:T.border,!hiContrast?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setHiContrast(false)}>OFF (default)</button>
-              </div>
-            </div>
-            <div><label style={c.lbl}>Zoom</label>
-              <div style={{fontSize:10,color:T.muted,marginBottom:6}}>All zoom levels fit the screen correctly</div>
-              <div style={c.row(6)}>
-                {[80,90,100,110,120].map(z=><button key={z} style={c.btn(zoom===z?T.gold:T.border,zoom===z?T.bg:T.text,{padding:"5px 10px",fontSize:11})} onClick={()=>setZoom(z)}>{z}%</button>)}
-              </div>
-            </div>
-            <div><label style={c.lbl}>Simplified View</label>
-              <div style={{fontSize:10,color:T.muted,marginBottom:6}}>Larger text + touch targets — recommended for phones</div>
-              <div style={c.row(8)}>
-                <button style={c.btn(simp?T.green:T.border,simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(true)}>ON</button>
-                <button style={c.btn(!simp?T.gold:T.border,!simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(false)}>OFF (default)</button>
-              </div>
-            </div>
+            )}
           </div>
+
+          {/* 7. AI AGENT */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("ai")}>
+              <span>🤖 AI Agent</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.ai?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.ai&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{...c.card({padding:14})}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>AI Agent</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>Connect Sophiie, Claude, or any AI agent.</div>
+                    </div>
+                    <button style={{...c.btn(settings.aiAgentEnabled?T.green:T.border,settings.aiAgentEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
+                      onClick={()=>setSettings(p=>({...p,aiAgentEnabled:!p.aiAgentEnabled}))}>
+                      {settings.aiAgentEnabled?"ON":"OFF"}
+                    </button>
+                  </div>
+                  {settings.aiAgentEnabled&&(
+                    <div>
+                      <div style={{marginBottom:10}}><label style={c.lbl}>Agent Name</label><input style={c.inp()} value={settings.aiAgentName||""} placeholder="Sophiie" onChange={e=>setSettings(p=>({...p,aiAgentName:e.target.value}))}/></div>
+                      <div style={{marginBottom:10}}><label style={c.lbl}>Webhook URL (optional)</label><input style={c.inp()} value={settings.aiAgentUrl||""} placeholder="https://..." onChange={e=>setSettings(p=>({...p,aiAgentUrl:e.target.value}))}/></div>
+                      <div>
+                        <label style={c.lbl}>Access Level</label>
+                        <div style={c.row(8)}>
+                          <button style={c.btn(settings.aiAgentLevel===1?T.gold:T.border,settings.aiAgentLevel===1?T.bg:T.text,{fontSize:11,padding:"7px 14px"})} onClick={()=>setSettings(p=>({...p,aiAgentLevel:1}))}>Level 1 — Observe</button>
+                          <button style={c.btn(settings.aiAgentLevel===2?T.orange:T.border,settings.aiAgentLevel===2?T.bg:T.muted,{fontSize:11,padding:"7px 14px"})} onClick={()=>setPinModal({reason:"Level 2 grants AI control. Manager PIN required.",cb:()=>setSettings(p=>({...p,aiAgentLevel:2}))})}>Level 2 — Autonomous (v2.0)</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 8. INTEGRATIONS */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("integrations")}>
+              <span>🔗 Integrations</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.integrations?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.integrations&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,marginTop:4}}>💳 Square</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY → vendor expense (Orders+Payments API) · SELL → checkout link</div>
+                <div style={c.g2(10)}>
+                  <F label="Square Access Token" type="password" value={settings.squareToken} onChange={v=>setSettings(p=>({...p,squareToken:v}))} placeholder="EAAAl…"/>
+                  <F label="Square Location ID" value={settings.squareLoc} onChange={v=>setSettings(p=>({...p,squareLoc:v}))}/>
+                  <F label="Redirect URL" value={settings.squareRedirect} onChange={v=>setSettings(p=>({...p,squareRedirect:v}))} placeholder="https://…"/>
+                </div>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>📊 Google Sheets</div>
+                <div style={c.g2(10)}>
+                  <F label="Spreadsheet ID" value={settings.sheetsId} onChange={v=>setSettings(p=>({...p,sheetsId:v}))}/>
+                  <F label="Range" value={settings.sheetsRange} onChange={v=>setSettings(p=>({...p,sheetsRange:v}))} placeholder="Sheet1!A1"/>
+                  <F label="OAuth Token" type="password" value={settings.sheetsToken} onChange={v=>setSettings(p=>({...p,sheetsToken:v}))}/>
+                </div>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>🔗 Webhook (Zapier / Make / n8n)</div>
+                <div style={c.g2(10)}>
+                  <F label="Webhook URL" value={settings.webhookUrl} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hooks.zapier.com/…"/>
+                </div>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>🛍 Shopify</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY → vendor draft order · SELL → completed order</div>
+                <div style={c.g2(10)}>
+                  <F label="Store Domain (xxx.myshopify.com)" value={settings.shopifyDomain} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))}/>
+                  <F label="Admin API Token" type="password" value={settings.shopifyToken} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
+                </div>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>📒 Xero</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY = ACCPAY · SELL = ACCREC. OAuth2 bearer token from Xero Developer Portal.</div>
+                <div style={c.g2(10)}>
+                  <F label="Xero Bearer Token" type="password" value={settings.xeroToken||""} onChange={v=>setSettings(p=>({...p,xeroToken:v}))} placeholder="OAuth2 Bearer"/>
+                  <F label="Xero Tenant ID" value={settings.xeroTenantId||""} onChange={v=>setSettings(p=>({...p,xeroTenantId:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
+                  <div style={{display:"flex",gap:10}}>
+                    <div style={{flex:1}}><label style={c.lbl}>Buy Account Code</label><input style={c.inp()} type="text" value={settings.xeroBuyCode||"310"} placeholder="310" onChange={e=>setSettings(p=>({...p,xeroBuyCode:e.target.value}))}/></div>
+                    <div style={{flex:1}}><label style={c.lbl}>Sell Account Code</label><input style={c.inp()} type="text" value={settings.xeroSellCode||"200"} placeholder="200" onChange={e=>setSettings(p=>({...p,xeroSellCode:e.target.value}))}/></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 9. DANGER ZONE — always visible at bottom */ }
+
           <button style={c.btn(T.gold,T.bg,{marginTop:14})} onClick={()=>{
             setAppUnlocked(!settings.requirePin);
             if(settings.requirePin)store.set("sessionActive",false);
@@ -3179,5 +3430,5 @@ export default function Loot() {
 
       {notify&&<Notif msg={notify.msg} type={notify.type} onClose={()=>setNotify(null)}/>}
     </div>
-  )
+  );
 }
