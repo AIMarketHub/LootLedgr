@@ -496,7 +496,7 @@ export default function Loot() {
   const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
-  const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",13));    // 11-18
+  const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",14));    // 12-36
   // Quick item
   const [quickMode,setQuickMode] = useState(false);
   const [qmMode,setQMMode]       = useState("buy");
@@ -659,6 +659,21 @@ export default function Loot() {
     if(!el){el=document.createElement("style");el.id="gf-focus";document.head.appendChild(el);}
     el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
+
+  // Font size + weight applied globally via CSS variable injection
+  useEffect(()=>{
+    // fontSize 14 = default (100%). Scale everything proportionally.
+    const scale=fontSize/14;
+    const weight=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;
+    let el=document.getElementById("gf-fontscale");
+    if(!el){el=document.createElement("style");el.id="gf-fontscale";document.head.appendChild(el);}
+    el.textContent=
+      ":root{--fs-scale:"+scale+";font-size:"+fontSize+"px;font-weight:"+weight+"}"+
+      "#root *{font-weight:"+weight+"}"+
+      // Preserve bold/semibold elements
+      "#root strong,#root b,#root th{font-weight:"+Math.min(weight+200,900)+"}";
+    document.documentElement.style.fontSize=fontSize+"px";
+  },[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
   useEffect(()=>{
@@ -1568,7 +1583,6 @@ export default function Loot() {
     }:{}),
     // Rendering quality — prevents pixelation at any zoom or resolution
     WebkitFontSmoothing:"antialiased",
-    fontSize:fontSize,
     MozOsxFontSmoothing:"grayscale",
     textRendering:"optimizeLegibility",
     imageRendering:"high-quality",
@@ -2848,13 +2862,13 @@ export default function Loot() {
                 <div style={{marginBottom:16}}>
                   <label style={c.lbl}>Font Size</label>
                   <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Small ←→ Large</div>
-                  <input type="range" min={11} max={18} step={1} value={fontSize}
+                  <input type="range" min={12} max={36} step={1} value={fontSize}
                     onChange={e=>setFontSize(Number(e.target.value))}
                     style={{width:"100%",accentColor:T.gold}}/>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
                     <span>Small</span>
-                    <span style={{color:T.gold,fontWeight:"bold",fontSize:fontSize}}>{fontSize}px</span>
-                    <span>Large</span>
+                    <span style={{color:T.gold,fontWeight:"bold"}}>{fontSize}px · {fontSize<=14?"Regular":fontSize<=18?"Medium":fontSize<=24?"Semi-Bold":"Bold"}</span>
+                    <span>Large & Bold</span>
                   </div>
                 </div>
                 <div style={{marginBottom:16}}>
