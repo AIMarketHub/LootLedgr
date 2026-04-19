@@ -640,6 +640,7 @@ export default function Loot() {
           if(sbSettings.gSpot) setGSpot(sbSettings.gSpot);
           if(sbSettings.sSpot) setSSpot(sbSettings.sSpot);
         }
+        if(sbSettings&&Object.keys(sbSettings).length>0) setSettings(p=>({...p,...sbSettings}));
         if(sbCatalog&&sbCatalog.length>0) setCatalog(sbCatalog);
       } catch(e) {
         // Supabase unavailable — app continues with localStorage data
@@ -689,6 +690,10 @@ export default function Loot() {
       if(!old||JSON.stringify(old)!==JSON.stringify(s)) sb.saveStock(s);
     });
     prevStockRef.current = stock;
+  useEffect(()=>{
+    store.set("stock",stock);
+    // Sync to Supabase in background
+    if(stock.length>0) stock.forEach(item=>sb.saveStock(item));
   },[stock]);
   useEffect(()=>{
     store.set("settings",settings);
