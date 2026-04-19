@@ -186,7 +186,16 @@ function runMigration(){
   }catch(e){}
 }
 runMigration();
+function peekInv(){
+  // Returns what the NEXT invoice number will be — does NOT increment the counter
+  const d=new Date(),dd=String(d.getDate()).padStart(2,"0"),
+    mm=String(d.getMonth()+1).padStart(2,"0"),yy=String(d.getFullYear()).slice(-2),today=dd+mm+yy;
+  const rec=store.get("invday",{d:"",n:0});
+  const n=(rec.d===today?rec.n:0)+1;
+  return today+n;
+}
 function makeInv(){
+  // Increments the counter and returns the new invoice number — call only when finalising a transaction
   const d=new Date(),dd=String(d.getDate()).padStart(2,"0"),
     mm=String(d.getMonth()+1).padStart(2,"0"),yy=String(d.getFullYear()).slice(-2),today=dd+mm+yy;
   let rec=store.get("invday",{d:"",n:0});
@@ -238,22 +247,29 @@ const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+(biz||"[Business Name]")+"
 // ── STYLE UTILS ──────────────────────────────────────────────────────────────
 const c = {
   app:   {fontFamily:T.ff,background:T.bg,minHeight:"100vh",color:T.text,WebkitFontSmoothing:"antialiased",paddingBottom:60,boxSizing:"border-box"},
-  card:  (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:8,...x}),
-  inp:   (x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
-  sel:   (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",...x}),
-  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x}),
-  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"}),
+  // φ=1.618 · 1/√8=0.3536 · border-radius φ×6=10 · shadow offset 1/√8×16=6px · blur φ×12=19px · opacity 1/√8÷2=0.177
+  card:  (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,
+    boxShadow:"6px 6px 19px rgba(0,0,0,0.18), 3px 3px 0 rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.07)",
+    ...x}),
+  inp:   (x={})=>({background:T.surface,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",
+    boxShadow:"inset 2px 2px 5px rgba(0,0,0,0.09)",...x}),
+  sel:   (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",
+    boxShadow:"inset 1px 1px 4px rgba(0,0,0,0.07)",...x}),
+  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,
+    boxShadow:"4px 4px 14px rgba(0,0,0,0.22), 1px 1px 0 rgba(255,255,255,0.10)"}),
+  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",
+    boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}),
   lbl:   {fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
   row:   (g=12)=>({display:"flex",alignItems:"center",gap:g}),
   col:   (g=12)=>({display:"flex",flexDirection:"column",gap:g}),
   g2:    (g=16)=>({display:"grid",gridTemplateColumns:"1fr 1fr",gap:g}),
   g3:    (g=12)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:g}),
-  g4:    (g=12)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:g}),
+  g4:    (g=13)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:g}),
   th:    {padding:"8px 12px",fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"left",borderBottom:"1px solid "+T.border,background:T.surface,whiteSpace:"nowrap"},
   td:    (x={})=>({padding:"9px 12px",fontSize:12,borderBottom:"1px solid "+T.border+"22",verticalAlign:"middle",...x}),
   dot:   (col)=>({width:10,height:10,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"99",flexShrink:0,display:"inline-block"}),
   badge: (col,bg)=>({display:"inline-block",padding:"2px 7px",borderRadius:4,fontSize:10,fontWeight:"bold",color:col,background:bg||col+"22",letterSpacing:"0.06em"}),
-  bnr:   (lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6};},
+  bnr:   (lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6,boxShadow:"2px 2px 8px rgba(0,0,0,0.10)"};},
   shead: (g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver,display:"flex",alignItems:"center",gap:8}),
 };
 
@@ -484,7 +500,7 @@ export default function Loot() {
   const [txStep,setTxStep]       = useState(1);
   const [txItems,setTxItems]     = useState([]);
   const [txPay,setTxPay]         = useState("cash");
-  const [txNo,setTxNo]           = useState(()=>makeInv());
+  const [txNo,setTxNo]           = useState(()=>peekInv());
   const [client,setClient]       = useState({});
   const [staff,setStaff]         = useState({});
   const [kycDone,setKycDone]     = useState(false);
@@ -597,13 +613,13 @@ export default function Loot() {
   }
   // Simplified view overrides — larger tap targets and text when simp=true
   if(simp){
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:8,padding:"14px 24px",fontFamily:T.ff,fontSize:15,fontWeight:"bold",letterSpacing:"0.06em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 16px",fontFamily:T.ff,fontSize:13,cursor:"pointer"});
+    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:8,padding:"14px 24px",fontFamily:T.ff,fontSize:15,fontWeight:"bold",letterSpacing:"0.06em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"});
+    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 16px",fontFamily:T.ff,fontSize:13,cursor:"pointer",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"});
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:8,color:T.text,fontFamily:T.ff,fontSize:15,padding:"13px 14px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:12,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,display:"block"};
   } else {
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap"});
+    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"});
+    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"});
     c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x});
     c.lbl={fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"};
   }
@@ -986,7 +1002,7 @@ export default function Loot() {
     // Sheet 2 — Stock Valuation
     const s2=[["STOCK VALUATION","","","","","","","",""],
       ["Spot used: "+snapNote,"","","","","","","",""],
-      ["Item","Contract","Metal","Purity","Weight(g)","Bought($)","Melt Value($)","Unrealised P&L($)","GST","Days Held","Status"]];
+      ["Item","Invoice #","Metal","Purity","Weight(g)","Bought($)","Melt Value($)","Unrealised P&L($)","GST","Days Held","Status"]];
     stock.filter(s=>!s.sold).forEach(s=>{
       const mv=calcMelt(s);
       const bought=s.price||0;
@@ -1115,15 +1131,16 @@ export default function Loot() {
     if(!idSighted){pop("Staff must confirm ID sighted.","err");return;}
     if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}
     const now=nowISO();
+    const realInv=makeInv(); // consume the counter NOW — only at actual save
     const phData={idPhoto:compliance.requiresKYC?photo:null,itemPhotos};
     const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length>0);
-    const photoKey=hasPh?"photos_"+txNo:null;
-    if(hasPh)store.set(photoKey,phData); // keep local copy for speed
+    const photoKey=hasPh?"photos_"+realInv:null;
+    if(hasPh)store.set(photoKey,phData);
     const tx={
-      id:txNo,date:now,items:txItems,payment:txPay,
+      id:realInv,date:now,items:txItems,payment:txPay,
       buyTotal,sellTotal,net,client,staff,idSighted,
-      photo:phData.idPhoto||null,          // ID photo embedded in tx
-      itemPhotos:phData.itemPhotos||{},    // item photos embedded in tx
+      photo:phData.idPhoto||null,
+      itemPhotos:phData.itemPhotos||{},
       hasPhotos:hasPh,photoKey,kycDone,
       flags:compliance.flags.map(f=>f.key),
       ttrRequired:compliance.flags.some(f=>f.key==="ttr"),
@@ -1131,7 +1148,7 @@ export default function Loot() {
       smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now),
     };
     const newStock=txItems.filter(i=>i.mode==="buy").map(i=>({
-      id:uid(),txId:txNo,date:now,
+      id:uid(),txId:realInv,date:now,
       product:i.product,qty:i.qty,price:i.price,
       description:i.note||i.product.label,
       // Carry purity/carat/weight for melt value calculation
@@ -1146,6 +1163,7 @@ export default function Loot() {
     }));
     setTxList(p=>[tx,...p]);
     setStock(p=>[...newStock,...p]);
+    setTxNo(peekInv()); // update display to next invoice preview
     setTxStep(6);
     // Push to all configured integrations (async, non-blocking)
     pushIntegrations(tx).catch(()=>{});
@@ -1404,7 +1422,7 @@ export default function Loot() {
   const resetTx=()=>{
     setTxItems([]);setTxStep(1);setTxPay("cash");
     setClient({});setStaff({});setKycDone(false);setPrivAck(false);
-    setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(makeInv());
+    setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());
     setAddQty("");setAddCustom("");setAddNote("");
   };
 
@@ -1650,14 +1668,12 @@ export default function Loot() {
     fontSize:simp?16:13,
     lineHeight:simp?"1.6":"1.4",
     position:"relative",
-    // Zoom via transform so nothing gets clipped at <100%
     ...(zoom!==100?{
       transform:"scale("+zoom/100+")",
       transformOrigin:"top left",
       width:(10000/zoom)+"%",   // compensate so content fills screen at any zoom
       minWidth:"unset",
     }:{}),
-    // Rendering quality — prevents pixelation at any zoom or resolution
     WebkitFontSmoothing:"antialiased",
     MozOsxFontSmoothing:"grayscale",
     textRendering:"optimizeLegibility",
@@ -1723,28 +1739,28 @@ export default function Loot() {
               <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:18,display:"flex",alignItems:"center"}}>
                 {settings.businessName} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}
               </div>
-              <div style={c.g2(14)}>
-                <div style={{...c.card({padding:28,borderColor:T.goldDim+"66"}),minHeight:110}}>
-                  <div style={c.lbl}>⬡ Gold Spot (AUD/oz)</div>
-                  <div style={{fontSize:34,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:4}}>{fmtAUD(gSpot)}</div>
-                  <div style={{fontSize:13,color:T.muted,marginTop:6}}>Per gram: <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
+              <div style={c.g2(10)}>
+                <div style={c.card({padding:15})}>
+                  <div style={c.lbl}>⬡ Gold (AUD/oz)</div>
+                  <div style={{fontSize:22,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em"}}>{fmtAUD(gSpot)}</div>
+                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>/ g <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
                 </div>
-                <div style={{...c.card({padding:28,borderColor:T.silverDim+"66"}),minHeight:110}}>
-                  <div style={c.lbl}>◈ Silver Spot (AUD/oz)</div>
-                  <div style={{fontSize:34,fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:4}}>{fmtAUD(sSpot)}</div>
-                  <div style={{fontSize:13,color:T.muted,marginTop:6}}>Per gram: <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
+                <div style={c.card({padding:15})}>
+                  <div style={c.lbl}>◈ Silver (AUD/oz)</div>
+                  <div style={{fontSize:22,fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em"}}>{fmtAUD(sSpot)}</div>
+                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>/ g <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
                 </div>
               </div>
-              <div style={{...c.g4(10),margin:"14px 0"}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,margin:"12px 0"}}>
                 {[
                   {l:"Txn 24h",v:(()=>{const now=new Date();const midnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();return txList.filter(t=>t.date&&new Date(t.date).getTime()>=midnight).length;})()},
                   {l:"In Hold",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
                   {l:"For Sale",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},
-                  {l:"Police Hold",v:stock.filter(s=>s.policeHold).length,col:T.red},
+                  {l:"🚔 Hold",v:stock.filter(s=>s.policeHold).length,col:T.red},
                 ].map(st=>(
-                  <div key={st.l} style={c.card({padding:14})}>
-                    <div style={{...c.lbl,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st.l}</div>
-                    <div style={{fontSize:24,fontWeight:"bold",color:st.col||T.text}}>{st.v}</div>
+                  <div key={st.l} style={{...c.card({padding:15}),minWidth:0,overflow:"hidden"}}>
+                    <div style={{...c.lbl,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{st.l}</div>
+                    <div style={{fontSize:23,fontWeight:"bold",color:st.col||T.text,letterSpacing:"-0.02em"}}>{st.v}</div>
                   </div>
                 ))}
               </div>
@@ -1809,7 +1825,7 @@ export default function Loot() {
               {txStep===1&&(
                 <div>
                   <div style={{marginBottom:14}}>
-                    <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Contract: <span style={{color:T.gold}}>{txNo}</span></div>
+                    <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Invoice #<span style={{color:T.gold}}>{txNo}</span></div>
                   </div>
                   {/* ADD ITEM */}
                   <div style={c.card({padding:16,marginBottom:14})}>
@@ -2070,7 +2086,7 @@ export default function Loot() {
               {txStep===3&&(
                 <div>
                   <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:4}}>Client Section — BUY TRANSACTION RECORD</div>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Contract No: {txNo} · {new Date().toLocaleDateString("en-AU")}</div>
+                  <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #: {txNo} · {new Date().toLocaleDateString("en-AU")}</div>
 
                   {/* Privacy Notice */}
                   <div style={c.card({padding:14,marginBottom:14,borderColor:T.blue+"44"})}>
@@ -2477,7 +2493,7 @@ export default function Loot() {
                   <div style={{...c.card({padding:16}),marginBottom:14,borderLeft:"4px solid "+T.gold}}>
                     <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:12,letterSpacing:"0.08em"}}>📋 TRANSACTION SUMMARY</div>
                     <div style={c.g2(10)}>
-                      <div><div style={c.lbl}>Contract</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
+                      <div><div style={c.lbl}>Invoice #</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
                       <div><div style={c.lbl}>Client</div><div style={{color:T.white}}>{client.fullName}</div></div>
                       <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase",color:T.white}}>{txPay}</div></div>
                       {activeStaff&&staffList.find(s=>s.id===activeStaff)&&(
