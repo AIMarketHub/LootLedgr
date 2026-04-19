@@ -744,6 +744,73 @@ export default function Loot() {
   const setGSpotManual = v=>{setGSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
   const setSSpotManual = v=>{setSSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
 
+  // Force reconnect to API — called by "Resume API" button
+  // Tries all 3 APIs in cascade. If one works: clears manual, shows live price.
+  // If none work: extends manual override by 30 minutes.
+  const forceResumeAPI=async()=>{
+    const k1=settings.goldApiKey;
+    const k2=settings.metalsApiKey;
+    const k3=settings.metalsDevKey;
+    if(!k1&&!k2&&!k3){
+      // No API keys — extend by 30min
+      manualTs.current=Date.now()-(MANUAL_TTL-30*60*1000);
+      store.set("manualSpotTs",manualTs.current);
+      pop("No API keys configured — manual price extended 30 min.","warn");
+      return;
+    }
+    pop("Trying to reconnect to API…","ok");
+    const tryFetch=async(url,headers)=>{
+      try{const r=await fetch(url,{headers});if(!r.ok)return null;return await r.json();}catch(e){return null;}
+    };
+    // Try GoldAPI
+    if(k1){
+      const [gD,sD]=await Promise.all([
+        tryFetch("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),
+        tryFetch("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),
+      ]);
+      const g=gD&&(gD.price||gD.ask||gD.bid);
+      const s=sD&&(sD.price||sD.ask||sD.bid);
+      if(g&&s){
+        manualTs.current=0;store.set("manualSpotTs",0);
+        setGSpot(parseFloat(Number(g).toFixed(2)));
+        setSSpot(parseFloat(Number(s).toFixed(2)));
+        setSpotStatus("live");setSpotSource("GoldAPI");
+        pop("🟢 Live price restored from GoldAPI.","ok");return;
+      }
+    }
+    // Try Metals-API
+    if(k2){
+      const d=await tryFetch("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG",{});
+      if(d&&d.success&&d.rates){
+        const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null);
+        const s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);
+        if(g&&s){
+          manualTs.current=0;store.set("manualSpotTs",0);
+          setGSpot(parseFloat(Number(g).toFixed(2)));
+          setSSpot(parseFloat(Number(s).toFixed(2)));
+          setSpotStatus("live");setSpotSource("Metals-API");
+          pop("🟢 Live price restored from Metals-API.","ok");return;
+        }
+      }
+    }
+    // Try Metals.Dev
+    if(k3){
+      const d=await tryFetch("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz",{});
+      if(d&&d.metals&&d.metals.gold&&d.metals.silver){
+        manualTs.current=0;store.set("manualSpotTs",0);
+        setGSpot(parseFloat(Number(d.metals.gold).toFixed(2)));
+        setSSpot(parseFloat(Number(d.metals.silver).toFixed(2)));
+        setSpotStatus("live");setSpotSource("Metals.Dev");
+        pop("🟢 Live price restored from Metals.Dev.","ok");return;
+      }
+    }
+    // All APIs failed — extend manual by 30 min
+    manualTs.current=Date.now()-(MANUAL_TTL-30*60*1000);
+    store.set("manualSpotTs",manualTs.current);
+    setSpotStatus("manual");
+    pop("All APIs unavailable — manual price extended 30 min.","warn");
+  };
+
   useEffect(()=>{
     const k1=settings.goldApiKey;
     const k2=settings.metalsApiKey;
@@ -2621,9 +2688,23 @@ export default function Loot() {
                     <input style={c.inp()} type="number" placeholder="e.g. 48" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
                   </div>
                 </div>
-                <div style={{fontSize:10,color:T.muted,marginTop:6}}>
-                  {spotStatus==="manual"?"🟡 Manual override active — API resumes automatically after 60 minutes.":"Edit here to manually set prices. API resumes after 60 min of no edits."}
-                  {spotSource&&spotStatus!=="manual"&&" Last source: "+spotSource}
+                <div style={{marginTop:8}}>
+                  {spotStatus==="manual"?(
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,color:T.gold,flex:1}}>
+                        {(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})()}
+                      </span>
+                      <button style={c.bsm(T.goldBg,T.gold)}
+                        onClick={forceResumeAPI}>
+                        ↺ Resume API Now
+                      </button>
+                    </div>
+                  ):(
+                    <span style={{fontSize:10,color:T.muted}}>
+                      Edit above to manually set prices. API resumes after 60 min of no edits.
+                      {spotSource&&" Last source: "+spotSource}
+                    </span>
+                  )}
                 </div>
               </div>
               {catalog.filter(p=>p.active).length===0
@@ -2793,9 +2874,16 @@ export default function Loot() {
       {showSet&&(
         <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
           {/* ── SPOT FEED STATUS ── */}
-          {spotSource&&<div style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface}}>
-            {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})():"🟠 No API — price held"}
-          </div>}
+          {(spotSource||spotStatus==="manual")&&(
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
+                {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+mins+" min left";})():"🟠 No API — price held"}
+              </span>
+              {spotStatus==="manual"&&(
+                <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API</button>
+              )}
+            </div>
+          )}
 
           {/* ── ACCORDION SECTIONS ── */}
 
