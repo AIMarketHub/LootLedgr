@@ -502,6 +502,11 @@ export default function Loot() {
   policeStation:"",         // local station name
   dealerLicenceNo:"",       // secondhand dealer licence number
   logoImg:null,
+  scaleProtocol:"auto",   // auto | standard | nordic_uart | custom
+  scaleCustomServiceUUID:"",
+  scaleCustomCharUUID:"",
+  scaleUnit:"g",          // g | oz | ozt
+  scaleFilter:true,       // filter unstable readings
   state:"VIC",
   // Spot price alerts
   goldAlert:null,silverAlert:null,
@@ -520,7 +525,7 @@ export default function Loot() {
   const [photo,setPhoto]         = useState(null);
   const [zoom,setZoom]           = useState(()=>store.get("zoom",100));
   const [simp,setSimp]           = useState(()=>store.get("simp",false));
-  const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,policehelp:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
+  const [settingsOpen,setSettingsOpen] = useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
   const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",14));    // 12-36
@@ -576,6 +581,9 @@ export default function Loot() {
   // Backup/restore
   const [showBackup,setShowBackup]     = useState(false);
   const [showPolice,setShowPolice]     = useState(false);
+  const [scaleLive,setScaleLive]       = useState(null);   // current live reading {g, raw, stable}
+  const [scaleDevice,setScaleDevice]   = useState(null);   // connected BLE device
+  const [scaleStatus,setScaleStatus]   = useState("off");  // off | connecting | connected | error
   const [duressActive,setDuressActive] = useState(false);
   // App-level security (optional, OFF by default)
   const [appUnlocked,setAppUnlocked] = useState(()=>{
@@ -720,7 +728,7 @@ export default function Loot() {
     // Only sync items that changed or were added
     const prev = prevStockRef.current;
     const prevIds = new Set(prev.map(s=>s.id));
-    const currIds = new Set(stock.map(s=>s.id));
+    const currIds = new Set((stock||[]).map(s=>s.id));
     // Deleted items — remove from Supabase
     prev.forEach(s=>{ if(!currIds.has(s.id)) sb.deleteStock(s.id); });
     // New or changed items — upsert to Supabase
@@ -1016,7 +1024,7 @@ export default function Loot() {
     const s2=[["STOCK VALUATION","","","","","","","",""],
       ["Spot used: "+snapNote,"","","","","","","",""],
       ["Item","Invoice #","Metal","Purity","Weight(g)","Bought($)","Melt Value($)","Unrealised P&L($)","GST","Days Held","Status"]];
-    stock.filter(s=>!s.sold).forEach(s=>{
+    (stock||[]).filter(s=>!s.sold).forEach(s=>{
       const mv=calcMelt(s);
       const bought=s.price||0;
       const pl=mv!=null?mv-bought:null;
@@ -1247,6 +1255,193 @@ export default function Loot() {
   };
 
   // ── DURESS ALERT — silent emergency notification ────────────────
+  // ── BLE SCALE ENGINE ─────────────────────────────────────────────────────
+  // Supports 3 protocols auto-detected in order:
+  //   1. Bluetooth SIG standard Weight Scale (service 0x181D, char 0x2A9D)
+  //   2. Nordic UART Service — NUS (most lab/precision balances send ASCII)
+  //   3. Custom UUID (user-configured in Settings)
+  //
+  // Weight output: parsed to grams regardless of scale unit, then converted
+  // to the unit set in Settings (g / oz / ozt).
+
+  // Standard BLE Weight Scale UUIDs (Bluetooth SIG)
+  const SCALE_STD_SVC  = "0000181d-0000-1000-8000-00805f9b34fb";
+  const SCALE_STD_CHAR = "00002a9d-0000-1000-8000-00805f9b34fb";
+  const SCALE_FEAT     = "00002a9e-0000-1000-8000-00805f9b34fb";
+
+  // Nordic UART Service UUIDs (common in Ohaus, Adam, A&D, Kern BLE adapters)
+  const NUS_SVC   = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const NUS_RX    = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  const NUS_TX    = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+  // Parse a weight value from standard BLE binary format (little-endian uint16)
+  const parseStdWeight=(dataView)=>{
+    const flags=dataView.getUint8(0);
+    const raw=dataView.getUint16(1,true); // little-endian
+    const isImperial=(flags&0x01)!==0;
+    const isStable=(flags&0x04)===0; // bit 2 = time-stamp present; bit 1 = user ID present
+    if(isImperial){
+      const lbs=raw*0.01;
+      return{g:lbs*453.592,raw:lbs.toFixed(3)+" lb",stable:true};
+    } else {
+      const kg=raw*0.005;
+      return{g:kg*1000,raw:kg.toFixed(3)+" kg",stable:true};
+    }
+  };
+
+  // Parse weight from ASCII string (Nordic UART output)
+  // Handles formats: "5.234 g", "5.23\r\n", "  5.234g", "+000.05 OZT", "ST,GS,+000005.000g"
+  const parseAsciiWeight=(str)=>{
+    const s=str.replace(/[\r\n]+/g,"").trim();
+    // Format: "ST,GS,+000005.000g" (Ohaus/Kern RS232-style over BLE)
+    const ohaus=/[A-Z]{2},[A-Z]{2},[+-]?(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);
+    if(ohaus){
+      const val=parseFloat(ohaus[1]);
+      const unit=(ohaus[2]||"g").toLowerCase();
+      return toGrams(val,unit);
+    }
+    // Format: "+000.05 OZT" or "5.234 g" or "5.23g"
+    const generic=/[+-]?\s*(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);
+    if(generic){
+      const val=parseFloat(generic[1]);
+      const unit=(generic[2]||"g").toLowerCase();
+      return toGrams(val,unit);
+    }
+    return null;
+  };
+
+  const toGrams=(val,unit)=>{
+    if(!val||isNaN(val)) return null;
+    if(unit==="kg"||unit==="kgs") return{g:val*1000,raw:val.toFixed(3)+"kg",stable:true};
+    if(unit==="lb"||unit==="lbs") return{g:val*453.592,raw:val.toFixed(3)+"lb",stable:true};
+    if(unit==="oz"&&!unit.includes("t")) return{g:val*28.3495,raw:val.toFixed(3)+"oz",stable:true};
+    if(unit==="ozt"||unit==="toz"||unit==="t.oz") return{g:val*31.1035,raw:val.toFixed(3)+"ozt",stable:true};
+    if(unit==="ct"||unit==="cts") return{g:val*0.2,raw:val.toFixed(2)+"ct",stable:true};
+    return{g:val,raw:val.toFixed(3)+"g",stable:true}; // assume grams
+  };
+
+  const fmtScaleWeight=(reading)=>{
+    if(!reading) return "—";
+    const u=settings.scaleUnit||"g";
+    if(u==="ozt") return (reading.g/31.1035).toFixed(4)+" ozt";
+    if(u==="oz")  return (reading.g/28.3495).toFixed(3)+" oz";
+    return (reading.g).toFixed(3)+" g";
+  };
+
+  const connectScale=async()=>{
+    if(!navigator.bluetooth){
+      pop("Web Bluetooth not supported in this browser. Use Chrome or Edge on Android.","err");
+      return;
+    }
+    try{
+      setScaleStatus("connecting");
+      pop("Opening Bluetooth scanner…","ok");
+
+      const proto=settings.scaleProtocol||"auto";
+      const filters=[];
+      const optServices=[];
+
+      if(proto==="auto"||proto==="standard"){
+        optServices.push(SCALE_STD_SVC);
+      }
+      if(proto==="auto"||proto==="nordic_uart"){
+        optServices.push(NUS_SVC);
+      }
+      if(proto==="custom"&&settings.scaleCustomServiceUUID){
+        optServices.push(settings.scaleCustomServiceUUID.toLowerCase());
+      }
+
+      // Request device — browser shows a picker with nearby BLE devices
+      const device=await navigator.bluetooth.requestDevice({
+        acceptAllDevices:true,
+        optionalServices:optServices.length?optServices:[SCALE_STD_SVC,NUS_SVC],
+      });
+
+      device.addEventListener("gattserverdisconnected",()=>{
+        setScaleStatus("off");
+        setScaleDevice(null);
+        setScaleLive(null);
+        pop("Scale disconnected.","warn");
+      });
+
+      const server=await device.gatt.connect();
+      setScaleDevice(device);
+      let connected=false;
+
+      // ── Try standard Weight Scale service ──
+      if((proto==="auto"||proto==="standard")&&!connected){
+        try{
+          const svc=await server.getPrimaryService(SCALE_STD_SVC);
+          const char=await svc.getCharacteristic(SCALE_STD_CHAR);
+          await char.startNotifications();
+          char.addEventListener("characteristicvaluechanged",e=>{
+            const r=parseStdWeight(e.target.value);
+            if(r) setScaleLive(r);
+          });
+          connected=true;
+          pop("Scale connected (Standard BLE Weight Profile).","ok");
+        }catch(e){}
+      }
+
+      // ── Try Nordic UART Service ──
+      if((proto==="auto"||proto==="nordic_uart")&&!connected){
+        try{
+          const svc=await server.getPrimaryService(NUS_SVC);
+          const tx=await svc.getCharacteristic(NUS_TX);
+          await tx.startNotifications();
+          let buf="";
+          tx.addEventListener("characteristicvaluechanged",e=>{
+            const chunk=new TextDecoder().decode(e.target.value);
+            buf+=chunk;
+            if(buf.includes("\n")||buf.includes("\r")||buf.length>30){
+              const r=parseAsciiWeight(buf);
+              if(r) setScaleLive(r);
+              buf="";
+            }
+          });
+          connected=true;
+          pop("Scale connected (Nordic UART / ASCII protocol).","ok");
+        }catch(e){}
+      }
+
+      // ── Try custom UUID ──
+      if((proto==="custom"||proto==="auto")&&!connected&&settings.scaleCustomServiceUUID){
+        try{
+          const svc=await server.getPrimaryService(settings.scaleCustomServiceUUID.toLowerCase());
+          const char=await svc.getCharacteristic(settings.scaleCustomCharUUID.toLowerCase());
+          await char.startNotifications();
+          char.addEventListener("characteristicvaluechanged",e=>{
+            const txt=new TextDecoder().decode(e.target.value);
+            const r=parseAsciiWeight(txt)||parseStdWeight(e.target.value);
+            if(r) setScaleLive(r);
+          });
+          connected=true;
+          pop("Scale connected (custom UUID).","ok");
+        }catch(e){}
+      }
+
+      if(connected){
+        setScaleStatus("connected");
+      } else {
+        setScaleStatus("error");
+        pop("Connected to device but no recognised scale service found. Try setting Protocol in Settings.","warn");
+      }
+    }catch(e){
+      setScaleStatus("off");
+      if(e.name!=="NotFoundError") pop("Scale: "+e.message,"err");
+      else pop("No device selected.","warn");
+    }
+  };
+
+  const disconnectScale=()=>{
+    if(scaleDevice&&scaleDevice.gatt&&scaleDevice.gatt.connected){
+      scaleDevice.gatt.disconnect();
+    }
+    setScaleStatus("off");
+    setScaleDevice(null);
+    setScaleLive(null);
+  };
+
   // ── SEND SMS via configured provider ─────────────────────────────────────
   // Works over WiFi — no SIM required on the tablet when using Twilio/Vonage/Textbelt.
   // sms_uri: opens the SMS app on devices that have a SIM (fallback).
@@ -1630,7 +1825,7 @@ export default function Loot() {
 
   const purge=()=>{
     const expiredTx=txList.filter(t=>isExpired7yr(t.deleteAfter));
-    const expiredStock=stock.filter(s=>isExpired7yr(s.deleteAfter));
+    const expiredStock=(stock||[]).filter(s=>isExpired7yr(s.deleteAfter));
     expiredTx.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});
     setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));
     setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));
@@ -1798,7 +1993,7 @@ export default function Loot() {
       getState:()=>({
         screen,txStep,txPay,txNo,
         gSpot,sSpot,
-        stockCount:stock.filter(s=>!s.sold).length,
+        stockCount:(stock||[]).filter(s=>!s.sold).length,
         txCount:txList.length,
         todayTxCount:txList.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).length,
         activeStaff:(staffList.find(s=>s.id===activeStaff)||{}).name||null,
@@ -1814,14 +2009,14 @@ export default function Loot() {
         },
         txItems:txItems.map(safeItem),
       }),
-      getCatalog:()=>catalog.filter(p=>p.active).map(p=>({id:p.id,label:p.label,cat:p.cat,type:p.type,purity:p.purity,carat:p.carat,unit:p.unit})),
-      getStock:()=>stock.filter(s=>!s.sold).map(safeStock),
+      getCatalog:()=>(catalog||[]).filter(p=>p.active).map(p=>({id:p.id,label:p.label,cat:p.cat,type:p.type,purity:p.purity,carat:p.carat,unit:p.unit})),
+      getStock:()=>(stock||[]).filter(s=>!s.sold).map(safeStock),
       getTodayTransactions:()=>txList.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).map(safeTx),
       getTransaction:(id)=>{const tx=txList.find(t=>t.id===id);return tx?safeTx(tx):null;},
       getSpotPrices:()=>({gold:gSpot,silver:sSpot,unit:"AUD/troy_oz",frozen:!!frozenSnap}),
       getComplianceFlags:()=>{const c=complianceRef.current;return c?c.flags:[];},
       getBlacklist:()=>blacklist.map(b=>({name:b.name})),
-      getStaff:()=>staffList.map(s=>({id:s.id,name:s.name,role:s.role,active:s.id===activeStaff})),
+      getStaff:()=>(staffList||[]).map(s=>({id:s.id,name:s.name,role:s.role,active:s.id===activeStaff})),
       getScreens:()=>["dashboard","newTx","stock","history","prices","clients"],
       getPaymentMethods:()=>["cash","card","bank",...(settings.cryptoEnabled?["crypto"]:[])],
       _commands:{
@@ -1889,7 +2084,7 @@ export default function Loot() {
 
         {/* LEFT: logo + name — click logo to open logo manager */}
         <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,flexGrow:0,width:"auto",maxWidth:160}}>
-          <img src={settings.logoImg} alt="logo"
+          <img src={settings.logoImg||SEED_LOGO} alt="logo"
             onClick={()=>{
               const pin=window.prompt("");
               if(!pin||pin!==settings.staffPin) return;
@@ -1922,9 +2117,12 @@ export default function Loot() {
               type="number" value={sSpot} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
           </div>
           {spotStatus!=="off"&&<span
-            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override (60min)":"Stale — checking APIs"}
+            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override — tap to resume API":"Stale — checking APIs"}
             style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",
               background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}/>}
+          <button
+            style={{...c.bsm(spotStatus==="manual"?T.goldBg:T.border, spotStatus==="manual"?T.gold:T.muted),fontSize:10,padding:"3px 7px",flexShrink:0}}
+            onClick={forceResumeAPI}>↺</button>
           <button style={c.bsm(T.border)} onClick={()=>setShowSet(true)}>⚙</button>
           <button style={{...c.bsm(T.border),flexShrink:0}} onClick={()=>setShowApi(true)}>⇄</button>
         </div>
@@ -1951,12 +2149,27 @@ export default function Loot() {
                   <div style={{fontSize:"clamp(10px,1.2vw,14px)",color:T.muted,marginTop:4}}>/ g <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
                 </div>
               </div>
+              {/* Scale live widget — shown when connected */}
+              {scaleStatus==="connected"&&(
+                <div style={{...c.card({padding:"10px 16px"}),marginBottom:4,display:"flex",alignItems:"center",gap:12,boxShadow:"4px 4px 14px rgba(0,0,0,0.22), 1px 1px 0 rgba(255,255,255,0.05)"}}>
+                  <span style={{fontSize:20}}>⚖</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:9,color:T.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>Scale — {scaleDevice&&scaleDevice.name||"Connected"}</div>
+                    <div style={{fontSize:"clamp(18px,3vw,28px)",fontWeight:"bold",color:T.gold,letterSpacing:"-0.02em",lineHeight:1.1}}>
+                      {scaleLive?fmtScaleWeight(scaleLive):"Place item on scale…"}
+                    </div>
+                  </div>
+                  <div style={{fontSize:9,color:scaleLive?T.gold:T.muted,whiteSpace:"nowrap"}}>
+                    {scaleLive?"● LIVE":"○ waiting"}
+                  </div>
+                </div>
+              )}
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,margin:"12px 0"}}>
                 {[
                   {l:"Txn 24h",v:(()=>{const now=new Date();const midnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();return txList.filter(t=>t.date&&new Date(t.date).getTime()>=midnight).length;})()},
-                  {l:"In Hold",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
-                  {l:"For Sale",v:stock.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},
-                  {l:"🚔 Hold",v:stock.filter(s=>s.policeHold).length,col:T.red},
+                  {l:"In Hold",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
+                  {l:"For Sale",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},
+                  {l:"🚔 Hold",v:(stock||[]).filter(s=>s.policeHold).length,col:T.red},
                 ].map(st=>(
                   <div key={st.l} style={{...c.card({padding:15}),minWidth:0,overflow:"hidden"}}>
                     <div style={{...c.lbl,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{st.l}</div>
@@ -1964,11 +2177,11 @@ export default function Loot() {
                   </div>
                 ))}
               </div>
-              {catalog.filter(p=>p.active).length>0&&(
+              {(catalog||[]).filter(p=>p.active).length>0&&(
                 <div style={c.card({padding:0,overflow:"hidden",marginBottom:14})}>
                   <div style={c.shead(true)}>⬡ Quick Reference Prices</div>
                   <div style={{padding:"10px 14px"}}>
-                    {catalog.filter(p=>p.active).slice(0,6).map(p=>(
+                    {(catalog||[]).filter(p=>p.active).slice(0,6).map(p=>(
                       <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid "+T.border+"33"}}>
                         <span style={{fontSize:12,color:T.text}}>{p.label}</span>
                         <span style={{fontSize:12,fontWeight:"bold",color:T.green}}>{calcUnitPrice(p,gSpot,sSpot,"buy")?fmtAUD(calcUnitPrice(p,gSpot,sSpot,"buy"))+"  buy":"—"}</span>
@@ -1977,7 +2190,7 @@ export default function Loot() {
                   </div>
                 </div>
               )}
-              {catalog.filter(p=>p.active).length===0&&(
+              {(catalog||[]).filter(p=>p.active).length===0&&(
                 <div style={{...c.card({padding:20}),textAlign:"center",color:T.muted,fontSize:12}}>
                   No products yet. Go to <strong style={{color:T.gold}}>Prices → Edit Catalog</strong>
                 </div>
@@ -2043,6 +2256,18 @@ export default function Loot() {
                 ))}
               </div>
 
+              {/* Scale reading bar — visible on all transaction steps when connected */}
+              {scaleStatus==="connected"&&(
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:7,background:T.surface,border:"1px solid "+(scaleLive?T.gold:T.border),marginBottom:12,boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}}>
+                  <span style={{fontSize:16}}>⚖</span>
+                  <span style={{fontSize:10,color:T.muted,flex:1}}>Scale</span>
+                  <span style={{fontSize:16,fontWeight:"bold",color:scaleLive?T.gold:T.muted}}>
+                    {scaleLive?fmtScaleWeight(scaleLive):"Place item on scale…"}
+                  </span>
+                  {scaleLive&&<span style={{fontSize:9,color:T.gold}}>● LIVE</span>}
+                </div>
+              )}
+
               {/* ─── STEP 1: BASKET ─── */}
               {txStep===1&&(
                 <div>
@@ -2071,7 +2296,7 @@ export default function Loot() {
                       </div>
                       <div>
                         <label style={c.lbl}>Product</label>
-                        {catalog.filter(p=>p.active).length===0
+                        {(catalog||[]).filter(p=>p.active).length===0
                           ?<div style={{background:T.orangeBg,border:"1px solid "+T.orange+"44",borderRadius:6,padding:"10px 12px",fontSize:11,color:T.orange}}>
                             No products yet. Go to <strong>Prices → Edit Catalog</strong> to add products first.
                           </div>
@@ -2079,7 +2304,7 @@ export default function Loot() {
                             <option value="">— Select a product —</option>
                             {["Gold","Silver","Other"].map(cat=>(
                               <optgroup key={cat} label={"── "+cat+" ──"}>
-                                {catalog.filter(p=>p.cat===cat&&p.active).map(p=>(
+                                {(catalog||[]).filter(p=>p.cat===cat&&p.active).map(p=>(
                                   <option key={p.id} value={p.id}>{p.label}</option>
                                 ))}
                               </optgroup>
@@ -2088,8 +2313,18 @@ export default function Loot() {
                         }
                       </div>
                       <div>
-                        <label style={c.lbl}>{addProd&&addProd.unit==="pc"?"Quantity":addProd&&addProd.unit==="oz"?"Weight (oz)":"Weight (g)"}</label>
-                        <input style={c.inp()} type="number" placeholder="0" value={addQty} onChange={e=>setAddQty(e.target.value)}/>
+                        <label style={c.lbl}>{addProd&&addProd.unit==="pc"?"Quantity":addProd&&addProd.unit==="oz"?"Weight (oz)":"Weight (g)"}{scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4,fontWeight:"bold"}}>⚖ LIVE</span>}</label>
+                        <div style={c.row(6)}>
+                        <input style={{...c.inp(),flex:1}} type="number" placeholder="0" value={addQty} onChange={e=>setAddQty(e.target.value)}/>
+                        {scaleStatus==="connected"&&scaleLive&&addProd&&(
+                          <button style={{...c.bsm(T.goldBg,T.gold),whiteSpace:"nowrap"}}
+                            onClick={()=>{
+                              const grams=scaleLive.g;
+                              if(addProd.unit==="oz") setAddQty((grams/28.3495).toFixed(3));
+                              else setAddQty(grams.toFixed(3));
+                            }}>⚖ {fmtScaleWeight(scaleLive)}</button>
+                        )}
+                        </div>
                         {addProd&&addQtyN>0&&addUnit!=null&&(
                           <div style={{fontSize:12,color:addMode==="buy"?T.green:T.gold,marginTop:4,fontWeight:"bold"}}>
                             {fmtAUD(addUnit)}/{addProd.unit} → <strong style={{fontSize:14}}>{fmtAUD(addCalc)}</strong>
@@ -2113,7 +2348,7 @@ export default function Loot() {
                         <input style={c.inp()} type="text" placeholder="Markings, condition, source…" value={addNote} onChange={e=>setAddNote(e.target.value)}/>
                       </div>
                     </div>
-                    {catalog.filter(p=>p.active).length>0&&!quickMode&&<button style={c.btn(addMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={handleAddItem}>+ Add to Basket</button>}
+                    {(catalog||[]).filter(p=>p.active).length>0&&!quickMode&&<button style={c.btn(addMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={handleAddItem}>+ Add to Basket</button>}
                   </div>
                   {quickMode&&<div style={c.card({padding:16,marginBottom:14})}>
                     <div style={{...c.bnr("info"),marginBottom:10}}>⚡ <strong>Quick Item</strong> — for unlisted items. Enter details manually.</div>
@@ -2125,7 +2360,15 @@ export default function Loot() {
                       <div><label style={c.lbl}>Unit</label><select style={{...c.sel(),width:"100%"}} value={qf.unit} onChange={e=>setQF(p=>({...p,unit:e.target.value}))}><option value="g">Grams</option><option value="oz">Troy oz</option><option value="pc">Piece</option></select></div>
                       {qf.cat==="Gold"&&<div><label style={c.lbl}>Carat (e.g. 9, 14, 18, 22, 24)</label><input style={c.inp()} type="number" placeholder="e.g. 18" value={qf.carat} onChange={e=>setQF(p=>({...p,carat:e.target.value,purity:""}))}/></div>}
                       {qf.cat==="Silver"&&<div><label style={c.lbl}>Purity (0–1, e.g. 0.925)</label><input style={c.inp()} type="number" step="0.001" placeholder="e.g. 0.925" value={qf.purity} onChange={e=>setQF(p=>({...p,purity:e.target.value,carat:""}))}/></div>}
-                      <div><label style={c.lbl}>Weight / Qty</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.qty} onChange={e=>setQF(p=>({...p,qty:e.target.value}))}/></div>
+                      <div>
+                        <label style={c.lbl}>Weight / Qty {scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4}}>⚖ LIVE</span>}</label>
+                        <div style={c.row(6)}>
+                          <input style={{...c.inp(),flex:1}} type="number" placeholder="0.00" value={qf.qty} onChange={e=>setQF(p=>({...p,qty:e.target.value}))}/>
+                          {scaleStatus==="connected"&&scaleLive&&(
+                            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setQF(p=>({...p,qty:scaleLive.g.toFixed(3)}))}>⚖ Use {fmtScaleWeight(scaleLive)}</button>
+                          )}
+                        </div>
+                      </div>
                       <div><label style={c.lbl}>Price ($) *</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.price} onChange={e=>setQF(p=>({...p,price:e.target.value}))}/></div>
                       <div><label style={c.lbl}>Note</label><input style={c.inp()} type="text" placeholder="Condition, markings…" value={qf.note} onChange={e=>setQF(p=>({...p,note:e.target.value}))}/></div>
                       <div>
@@ -2785,14 +3028,14 @@ export default function Loot() {
               {stock.length>0&&(
                 <div style={{...c.g2(10),marginBottom:12}}>
                   {["Gold","Silver","Other"].map(cat=>(
-                    stock.filter(s=>s.product&&s.product.cat===cat&&!s.sold).length===0 ? null :
+                    (stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold).length===0 ? null :
                     <div key={cat} style={c.card({padding:12,borderLeft:"3px solid "+(cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.muted)})}>
                       <div style={{fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
                       <div style={{fontSize:15,fontWeight:"bold",color:cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.text}}>
-                        {fmtAUD(stock.filter(s=>s.product&&s.product.cat===cat&&!s.sold).reduce((a,s)=>a+(s.price||0),0))}
+                        {fmtAUD((stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold).reduce((a,s)=>a+(s.price||0),0))}
                       </div>
                       <div style={{fontSize:10,color:T.green,marginTop:2}}>
-                        {stock.filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready · {fmtAUD(stock.filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).reduce((a,s)=>a+(s.price||0),0))}
+                        {(stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready · {fmtAUD((stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).reduce((a,s)=>a+(s.price||0),0))}
                       </div>
                     </div>
                   ))}
@@ -2803,7 +3046,7 @@ export default function Loot() {
               </div>
               {stock.length===0
                 ?<div style={{color:T.muted,padding:40,textAlign:"center"}}>No stock items yet.</div>
-                :stock.map((s,i)=>(
+                :(stock||[]).map((s,i)=>(
                   <StockCard key={s.id} s={s} T={T} c={c}
                     fmtAUD={fmtAUD} fmtDate={fmtDate} calcMelt={calcMelt}
                     frozenSnap={frozenSnap} hoursLeft={hoursLeft}
@@ -2934,17 +3177,21 @@ export default function Loot() {
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                  <span style={{fontSize:10,color:spotStatus==="manual"?T.gold:T.muted,flex:1}}>
-                    {spotStatus==="manual"
-                      ?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — API resumes in "+mins+" min";})()
-                      :"Edit above to manually set prices. API resumes after 60 min."+(spotSource?" Last: "+spotSource:"")}
+                  <span style={{fontSize:10,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
+                    {spotStatus==="live"
+                      ?"🟢 Live — "+spotSource
+                      :spotStatus==="manual"
+                        ?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — resumes in "+mins+" min";})()
+                      :"🟠 No API feed — price held"}
                   </span>
-                  {spotStatus==="manual"&&(
-                    <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API Now</button>
-                  )}
+                  <button
+                    style={c.btn(spotStatus==="manual"?T.gold:T.border, spotStatus==="manual"?T.bg:T.muted, {fontSize:11,padding:"7px 16px"})}
+                    onClick={forceResumeAPI}>
+                    ↺ {spotStatus==="manual"?"Resume API Now":"Refresh Prices"}
+                  </button>
                 </div>
               </div>
-              {catalog.filter(p=>p.active).length===0
+              {(catalog||[]).filter(p=>p.active).length===0
                 ?<div style={{...c.card({padding:40}),textAlign:"center"}}>
                   <div style={{fontSize:18,marginBottom:12}}>📂</div>
                   <div style={{color:T.white,fontWeight:"bold",marginBottom:8}}>No products in catalog yet</div>
@@ -2953,10 +3200,10 @@ export default function Loot() {
                 </div>
                 :<div>
                   {["Gold","Silver","Other"].map(cat=>(
-                    catalog.filter(p=>p.cat===cat&&p.active).length===0 ? null :
+                    (catalog||[]).filter(p=>p.cat===cat&&p.active).length===0 ? null :
                     <div key={cat} style={{marginBottom:14}}>
                       <div style={c.shead(cat==="Gold")}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
-                      {catalog.filter(p=>p.cat===cat&&p.active).map(p=>(
+                      {(catalog||[]).filter(p=>p.cat===cat&&p.active).map(p=>(
                         <div key={p.id} style={{...c.card({padding:12}),marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
                           <div style={{flex:1}}>
                             <div style={{fontWeight:"bold",color:T.white,fontSize:13}}>{p.label}</div>
@@ -3093,7 +3340,7 @@ export default function Loot() {
             <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>All Products ({catalog.length})</div>
             {catalog.length===0
               ?<div style={{color:T.muted,fontSize:12,padding:16,textAlign:"center"}}>No products yet. Add one above.</div>
-              :catalog.map(p=>(
+              :(catalog||[]).map(p=>(
                 <div key={p.id} style={{background:T.surface,border:"1px solid "+T.border,borderRadius:8,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:2}}>{p.label}</div>
@@ -3114,16 +3361,6 @@ export default function Loot() {
       {/* Settings */}
       {showSet&&(
         <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
-          {/* ── SPOT FEED STATUS ── */}
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"6px 10px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
-            <span style={{fontSize:11,color:spotStatus==="live"?T.gold:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
-              {spotStatus==="live"?"🟢 Live: "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+mins+" min left";})():"🟠 No API — price held"}
-            </span>
-            {spotStatus==="manual"&&(
-              <button style={c.bsm(T.goldBg,T.gold)} onClick={forceResumeAPI}>↺ Resume API</button>
-            )}
-          </div>
-
           {/* ── ACCORDION SECTIONS ── */}
 
           {/* 1. SPOT FEED & PRICES */}
@@ -3149,6 +3386,16 @@ export default function Loot() {
                     <label style={c.lbl}>Silver alert when ≥ (AUD/oz)</label>
                     <input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/>
                   </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
+                  <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>
+                    {spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — "+mins+" min remaining";})():"🟠 No API feed — price held"}
+                  </span>
+                  <button
+                    style={c.btn(spotStatus==="manual"?T.gold:T.border, spotStatus==="manual"?T.bg:T.muted, {fontSize:11,padding:"7px 16px"})}
+                    onClick={forceResumeAPI}>
+                    ↺ {spotStatus==="manual"?"Resume API Now":"Refresh Prices"}
+                  </button>
                 </div>
               </div>
             )}
@@ -3226,7 +3473,80 @@ export default function Loot() {
             )}
           </div>
 
-          {/* 4. SECURITY */}
+          {/* 4. SCALE */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("scale")}>
+              <span>⚖ Bluetooth Scale</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.scale?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.scale&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
+                  Connect via Bluetooth on this device. Works in Chrome and Edge on Android. Does not work on Safari/iOS.
+                  Scale must be in range and powered on when connecting.
+                </div>
+
+                {/* Connection status + button */}
+                <div style={{...c.card({padding:14}),marginBottom:12}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:"bold",color:T.white}}>
+                        {scaleStatus==="connected"?"⚖ "+((scaleDevice&&scaleDevice.name)||"Scale")+" connected":
+                         scaleStatus==="connecting"?"⚖ Connecting…":
+                         scaleStatus==="error"?"⚠ Connected — no scale service found":
+                         "⚖ No scale connected"}
+                      </div>
+                      {scaleLive&&<div style={{fontSize:13,color:T.gold,fontWeight:"bold",marginTop:4}}>{fmtScaleWeight(scaleLive)}</div>}
+                    </div>
+                    <div style={c.row(8)}>
+                      {scaleStatus!=="connected"
+                        ?<button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 16px"})} onClick={connectScale}>⚖ Connect Scale</button>
+                        :<button style={c.bsm(T.redBg,T.red)} onClick={disconnectScale}>✕ Disconnect</button>
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                {/* Protocol */}
+                <div style={{marginBottom:10}}>
+                  <label style={c.lbl}>Protocol</label>
+                  <select style={{...c.sel(),width:"100%"}} value={settings.scaleProtocol||"auto"} onChange={e=>setSettings(p=>({...p,scaleProtocol:e.target.value}))}>
+                    <option value="auto">Auto-detect (tries all — recommended)</option>
+                    <option value="standard">Standard BLE Weight Scale (Bluetooth SIG 0x181D)</option>
+                    <option value="nordic_uart">Nordic UART / ASCII (Ohaus, Adam, A&D, Kern BLE adapters)</option>
+                    <option value="custom">Custom UUID (advanced)</option>
+                  </select>
+                </div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.6}}>
+                  <strong>Auto</strong> tries Standard BLE then Nordic UART — covers most brands.<br/>
+                  <strong>Nordic UART</strong> covers Ohaus Scout BT kit, Adam BLE, A&D BLE, Kern BLE — these send ASCII weight strings.<br/>
+                  <strong>Standard BLE</strong> covers newer consumer scales (A&D UC-352BLE etc).<br/>
+                  <strong>Custom</strong> — enter your scale's GATT service and characteristic UUIDs from its manual.
+                </div>
+
+                {settings.scaleProtocol==="custom"&&(
+                  <div style={c.g2(8)}>
+                    <F label="Service UUID" value={settings.scaleCustomServiceUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomServiceUUID:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
+                    <F label="Characteristic UUID" value={settings.scaleCustomCharUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomCharUUID:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
+                  </div>
+                )}
+
+                {/* Display unit */}
+                <div style={{marginTop:10}}>
+                  <label style={c.lbl}>Display unit</label>
+                  <div style={c.row(8)}>
+                    {["g","oz","ozt"].map(u=>(
+                      <button key={u} style={c.btn((settings.scaleUnit||"g")===u?T.gold:T.border,(settings.scaleUnit||"g")===u?T.bg:T.text,{padding:"6px 14px",fontSize:11,textTransform:"none"})}
+                        onClick={()=>setSettings(p=>({...p,scaleUnit:u}))}>{u}</button>
+                    ))}
+                  </div>
+                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>Internal precision is always grams. Display unit is cosmetic only.</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 5. SECURITY */}
           <div style={{borderBottom:"1px solid "+T.border}}>
             <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("security")}>
               <span>🔒 Security</span>
@@ -3640,7 +3960,7 @@ export default function Loot() {
             {showAbout&&(
               <div style={{paddingTop:16,textAlign:"center"}}>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:12}}>
-                  <img src={settings.logoImg} alt="logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,background:"#fff",padding:4,marginBottom:10,display:"block"}}/>
+                  <img src={settings.logoImg||SEED_LOGO} alt="logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,background:"#fff",padding:4,marginBottom:10,display:"block"}}/>
                   <div style={{fontSize:16,fontWeight:"bold",color:T.gold,lineHeight:1.2}}>Loot Ledgr</div>
                   <div style={{fontSize:10,color:T.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginTop:4}}>Compliance POS · Second-Hand Sale Tracking</div>
                 </div>
@@ -3824,7 +4144,7 @@ export default function Loot() {
             {logoLib.length===0
               ?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:12}}>No images yet. Drop or browse to add your logo.</div>
               :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:12}}>
-                {logoLib.map(img=>{
+                {(logoLib||[]).map(img=>{
                   const isActive=settings.logoImg===img.data;
                   return(
                     <div key={img.id} style={{...c.card({padding:8}),borderColor:isActive?T.gold:T.border,borderWidth:isActive?2:1,position:"relative",textAlign:"center"}}>
@@ -4009,7 +4329,7 @@ export default function Loot() {
               </div>
             )}
             {staffList.length===0&&staffForm.name===undefined&&<div style={{color:T.muted,padding:20,textAlign:"center"}}>No staff profiles yet.</div>}
-            {staffList.map(s=>(
+            {(staffList||[]).map(s=>(
               <div key={s.id} style={{...c.card({padding:12}),marginBottom:8,borderLeft:"3px solid "+(activeStaff===s.id?T.green:T.border)}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <div>
