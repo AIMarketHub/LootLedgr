@@ -2136,6 +2136,7 @@ export default function Loot() {
             style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",
               background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
           <button style={{...c.bsm(T.border),flexShrink:0,padding:"4px 8px",fontSize:11}} onClick={()=>setShowSet(true)}>⚙</button>
+          <button style={{...c.bsm(T.border),flexShrink:0,padding:"4px 8px",fontSize:11}} onClick={()=>setShowApi(true)}>⇄</button>
         </div>
       </div>
 
