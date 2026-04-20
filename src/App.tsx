@@ -475,7 +475,17 @@ export default function Loot() {
   const [gSpot,setGSpot]   = useState(()=>store.get("gSpot",0));
   const [sSpot,setSSpot]   = useState(()=>store.get("sSpot",0));
   const [catalog,setCatalog]   = useState(()=>store.get("catalog",DEFAULT_CATALOG));
-  const [txList,setTxList]     = useState(()=>store.get("txList",[]));
+  const [txList,setTxList]     = useState(()=>{
+    const raw=store.get("txList",[]);
+    // Re-attach photos from their separate keys when loading
+    return (Array.isArray(raw)?raw:[]).map(t=>{
+      if(t.photoKey&&(!t.photo)&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){
+        const ph=store.get(t.photoKey,null);
+        if(ph) return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};
+      }
+      return t;
+    });
+  });
   const [stock,setStock]       = useState(()=>store.get("stock",[]));
   const [settings,setSettings] = useState(()=>store.get("settings",{
     businessName:"",abn:"",address:"",phone:"",
@@ -697,19 +707,22 @@ export default function Loot() {
     el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
 
-  // Font size + weight applied globally via CSS variable injection
+  // Font size — applied via CSS zoom on the root container.
+  // zoom scales ALL children including hardcoded px values proportionally.
+  // Fallback: transform:scale for browsers that don't support zoom (Firefox).
   useEffect(()=>{
-    // fontSize 14 = default (100%). Scale everything proportionally.
-    const scale=fontSize/14;
+    const scale=fontSize/14; // 14px = 100% baseline
     const weight=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;
+    const root=document.getElementById("root");
+    if(root){
+      root.style.zoom=scale;
+      root.style.fontWeight=weight;
+    }
+    // Also inject weight overrides for non-zoom browsers
     let el=document.getElementById("gf-fontscale");
     if(!el){el=document.createElement("style");el.id="gf-fontscale";document.head.appendChild(el);}
-    el.textContent=
-      ":root{--fs-scale:"+scale+";font-size:"+fontSize+"px;font-weight:"+weight+"}"+
-      "#root *{font-weight:"+weight+"}"+
-      // Preserve bold/semibold elements
-      "#root strong,#root b,#root th{font-weight:"+Math.min(weight+200,900)+"}";
-    document.documentElement.style.fontSize=fontSize+"px";
+    el.textContent="#root,#root *{font-weight:"+weight+" !important}"+
+      "#root strong,#root b,#root th,#root .bold{font-weight:"+Math.min(weight+200,900)+" !important}";
   },[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
@@ -718,8 +731,12 @@ export default function Loot() {
     sb.saveCatalog(catalog);
   },[catalog]);
   useEffect(()=>{
-    store.set("txList",txList);
-    // Sync latest transaction to Supabase in background
+    // Strip base64 photo blobs before saving to localStorage.
+    // Photos are already stored separately under their photoKey.
+    // This prevents localStorage from filling up with image data over time.
+    const txListLean=txList.map(t=>({...t,photo:null,itemPhotos:{}}));
+    store.set("txList",txListLean);
+    // Supabase: sync latest transaction (with full data) in background
     if(txList.length>0) sb.saveTx(txList[0]);
   },[txList]);
   const prevStockRef = useRef([]);
@@ -739,15 +756,18 @@ export default function Loot() {
     prevStockRef.current = stock;
   },[stock]);
   useEffect(()=>{
-    store.set("settings",settings);
-    sb.saveSettings(settings);
+    store.set("settings",settings); // localStorage: instant, always
+    // Supabase: debounced — only write after 2s of no changes to avoid write bomb
+    if(sbSettingsTimer.current) clearTimeout(sbSettingsTimer.current);
+    sbSettingsTimer.current=setTimeout(()=>sb.saveSettings(settings),2000);
   },[settings]);
 
-  // Sync spot prices as part of settings so they transfer across devices
+  // Sync spot prices — localStorage instant, Supabase debounced
   useEffect(()=>{
     store.set("gSpot",gSpot);
     store.set("sSpot",sSpot);
-    sb.saveSettings({...settings,gSpot,sSpot});
+    // Don't write to Supabase here — the settings effect above handles it
+    // after the debounce. Avoids double-writes on every price tick.
   },[gSpot,sSpot]);
 
   useEffect(()=>store.set("vendors",vendors),[vendors]);
@@ -774,6 +794,7 @@ export default function Loot() {
   const [spotSource,setSpotSource] = useState("");
   // Manual override timestamp — stored so it survives re-renders
   const manualTs = useRef(store.get("manualSpotTs",0));
+  const sbSettingsTimer = useRef(null); // debounce Supabase settings writes
   const MANUAL_TTL = 60*60*1000; // 60 minutes in ms
   const isManualActive = ()=>(Date.now()-manualTs.current)<MANUAL_TTL;
 
@@ -789,13 +810,10 @@ export default function Loot() {
     const k2=settings.metalsApiKey;
     const k3=settings.metalsDevKey;
     if(!k1&&!k2&&!k3){
-      // No API keys — extend by 30min
-      manualTs.current=Date.now()-(MANUAL_TTL-30*60*1000);
-      store.set("manualSpotTs",manualTs.current);
-      pop("No API keys configured — manual price extended 30 min.","warn");
+      pop("No API keys — add at least one key in Settings → Spot Feed.","warn");
       return;
     }
-    pop("Trying to reconnect to API…","ok");
+    pop("Fetching live prices…","ok");
     const tryFetch=async(url,headers)=>{
       try{const r=await fetch(url,{headers});if(!r.ok)return null;return await r.json();}catch(e){return null;}
     };
@@ -812,7 +830,7 @@ export default function Loot() {
         setGSpot(parseFloat(Number(g).toFixed(2)));
         setSSpot(parseFloat(Number(s).toFixed(2)));
         setSpotStatus("live");setSpotSource("GoldAPI");
-        pop("🟢 Live price restored from GoldAPI.","ok");return;
+        pop("🟢 Live prices from GoldAPI.","ok");return;
       }
     }
     // Try Metals-API
@@ -826,7 +844,7 @@ export default function Loot() {
           setGSpot(parseFloat(Number(g).toFixed(2)));
           setSSpot(parseFloat(Number(s).toFixed(2)));
           setSpotStatus("live");setSpotSource("Metals-API");
-          pop("🟢 Live price restored from Metals-API.","ok");return;
+          pop("🟢 Live prices from Metals-API.","ok");return;
         }
       }
     }
@@ -838,14 +856,11 @@ export default function Loot() {
         setGSpot(parseFloat(Number(d.metals.gold).toFixed(2)));
         setSSpot(parseFloat(Number(d.metals.silver).toFixed(2)));
         setSpotStatus("live");setSpotSource("Metals.Dev");
-        pop("🟢 Live price restored from Metals.Dev.","ok");return;
+        pop("🟢 Live prices from Metals.Dev.","ok");return;
       }
     }
-    // All APIs failed — extend manual by 30 min
-    manualTs.current=Date.now()-(MANUAL_TTL-30*60*1000);
-    store.set("manualSpotTs",manualTs.current);
-    setSpotStatus("manual");
-    pop("All APIs unavailable — manual price extended 30 min.","warn");
+    // All APIs returned no data
+    pop("Could not reach any price API. Check your keys in Settings → Spot Feed.","warn");
   };
 
   useEffect(()=>{
@@ -1182,7 +1197,7 @@ export default function Loot() {
       storageLocation:staff.storageLocation||"",
       deleteAfter:sevenYrsFrom(now),
     }));
-    setTxList(p=>[tx,...p]);
+    setTxList(p=>[tx,...p].slice(0,500)); // cap in-memory list; full history in Supabase
     setStock(p=>[...newStock,...p]);
     setTxNo(peekInv()); // update display to next invoice preview
     setTxStep(6);
@@ -2100,8 +2115,8 @@ export default function Loot() {
           </div>
         </div>
 
-        {/* RIGHT: spots + controls — always visible */}
-        <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:1,minWidth:0}}>
+        {/* RIGHT: spots + controls */}
+        <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
           <div style={{display:"flex",alignItems:"center",gap:2,background:T.goldBg,
             border:"1px solid "+T.goldDim+"44",borderRadius:5,padding:"2px 5px"}}>
             <span style={{fontSize:8,color:T.muted,flexShrink:0}}>Au</span>
@@ -2116,15 +2131,11 @@ export default function Loot() {
               fontSize:11,fontWeight:"bold",width:42,outline:"none",textAlign:"right"}}
               type="number" value={sSpot} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
           </div>
-          {spotStatus!=="off"&&<span
-            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override — tap to resume API":"Stale — checking APIs"}
+          <span
+            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual — tap ↺ to resume":"No API"}
             style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",
-              background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}/>}
-          <button
-            style={{...c.bsm(spotStatus==="manual"?T.goldBg:T.border, spotStatus==="manual"?T.gold:T.muted),fontSize:10,padding:"3px 7px",flexShrink:0}}
-            onClick={forceResumeAPI}>↺</button>
-          <button style={c.bsm(T.border)} onClick={()=>setShowSet(true)}>⚙</button>
-          <button style={{...c.bsm(T.border),flexShrink:0}} onClick={()=>setShowApi(true)}>⇄</button>
+              background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
+          <button style={{...c.bsm(T.border),flexShrink:0,padding:"4px 8px",fontSize:11}} onClick={()=>setShowSet(true)}>⚙</button>
         </div>
       </div>
 
@@ -3879,8 +3890,8 @@ export default function Loot() {
           <button style={c.btn(T.gold,T.bg,{marginTop:14})} onClick={()=>{
             setAppUnlocked(!settings.requirePin);
             if(settings.requirePin)store.set("sessionActive",false);
-            pop("Settings saved.","ok");setShowSet(false);
-          }}>Save Settings</button>
+            setShowSet(false);
+          }}>✓ Done — All changes saved automatically</button>
           <div style={{marginTop:24,borderTop:"1px solid "+T.border,paddingTop:14}}>
             <div style={{fontSize:11,fontWeight:"bold",color:T.red,marginBottom:6}}>⚠ Danger Zone</div>
             <div style={{...c.bnr("warn"),marginBottom:10,fontSize:11}}>Both actions below require manager PIN confirmation.</div>
