@@ -491,7 +491,18 @@ export default function Loot() {
   walletBTC:"",walletETH:"",walletBNB:"",walletXRP:"",walletSOL:"",
     // Live spot feed (GoldAPI.io — free, no card required)
     goldApiKey:"",metalsApiKey:"",metalsDevKey:"",
+  // Emergency / Duress
+  duressContact1:"",duressContact2:"",duressContact3:"",duressContact4:"",duressContact5:"",
+  duressContact6:"",duressContact7:"",duressContact8:"",duressContact9:"",duressContact10:"",
+  smsProvider:"textbelt",
+  textbeltKey:"textbelt",
+  duressWebhookUrl:"",
+  twilioFnUrl:"",
+  policeEmail:"",           // local station email for police reports
+  policeStation:"",         // local station name
+  dealerLicenceNo:"",       // secondhand dealer licence number
   logoImg:null,
+  state:"VIC",
   // Spot price alerts
   goldAlert:null,silverAlert:null,
   }));
@@ -509,7 +520,7 @@ export default function Loot() {
   const [photo,setPhoto]         = useState(null);
   const [zoom,setZoom]           = useState(()=>store.get("zoom",100));
   const [simp,setSimp]           = useState(()=>store.get("simp",false));
-  const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
+  const [settingsOpen,setSettingsOpen] = useState({appearance:true,business:false,security:false,policehelp:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
   const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",14));    // 12-36
@@ -564,6 +575,8 @@ export default function Loot() {
   const [blacklist,setBlacklist]       = useState(()=>store.get("blacklist",[]));
   // Backup/restore
   const [showBackup,setShowBackup]     = useState(false);
+  const [showPolice,setShowPolice]     = useState(false);
+  const [duressActive,setDuressActive] = useState(false);
   // App-level security (optional, OFF by default)
   const [appUnlocked,setAppUnlocked] = useState(()=>{
     if(!store.get("settings",{}).requirePin) return true;
@@ -1233,6 +1246,193 @@ export default function Loot() {
     }catch(e){return{ok:false,msg:"Square buy failed: "+e.message};}
   };
 
+  // ── DURESS ALERT — silent emergency notification ────────────────
+  // ── SEND SMS via configured provider ─────────────────────────────────────
+  // Works over WiFi — no SIM required on the tablet when using Twilio/Vonage/Textbelt.
+  // sms_uri: opens the SMS app on devices that have a SIM (fallback).
+  const sendDuressSMS=async(contact,msg)=>{
+    const p=settings.smsProvider||"sms_uri";
+
+    // TEXTBELT — direct browser call, CORS allowed, works from WiFi tablets
+    if(p==="textbelt"){
+      try{
+        const r=await fetch("https://textbelt.com/text",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({phone:contact,message:msg,key:settings.textbeltKey||"textbelt"}),
+        });
+        const d=await r.json();
+        return d.success?{ok:true,msg:"Sent via Textbelt"}:{ok:false,msg:"Textbelt: "+(d.error||"quota exceeded — buy credits at textbelt.com")};
+      }catch(e){return{ok:false,msg:"Textbelt error: "+e.message};}
+    }
+
+    // WEBHOOK — Zapier/Make/n8n → Twilio/Vonage. Works from browser, no CORS issue.
+    if(p==="webhook"){
+      if(!settings.duressWebhookUrl) return{ok:false,msg:"Webhook URL not configured"};
+      try{
+        const r=await fetch(settings.duressWebhookUrl,{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({type:"DURESS_ALERT",message:msg,contact,
+            contacts:[contact],address:settings.address||"",
+            business:settings.businessName||"",timestamp:new Date().toISOString()}),
+        });
+        return r.ok||r.status===0?{ok:true,msg:"Sent via webhook"}:{ok:false,msg:"Webhook error: "+r.status};
+      }catch(e){return{ok:false,msg:"Webhook error: "+e.message};}
+    }
+
+    // TWILIO FUNCTION — user-deployed proxy URL, bypasses CORS restriction
+    if(p==="twilio_fn"){
+      if(!settings.twilioFnUrl) return{ok:false,msg:"Twilio Function URL not configured"};
+      try{
+        const r=await fetch(settings.twilioFnUrl,{
+          method:"POST",
+          headers:{"Content-Type":"application/x-www-form-urlencoded"},
+          body:"contact="+encodeURIComponent(contact)+"&message="+encodeURIComponent(msg)+"&contacts="+encodeURIComponent(contact),
+        });
+        const d=await r.json().catch(()=>({}));
+        return d.sent||r.ok?{ok:true,msg:"Sent via Twilio Function"}:{ok:false,msg:"Twilio Function error: "+r.status};
+      }catch(e){return{ok:false,msg:"Twilio Function error: "+e.message};}
+    }
+
+    // SMS APP — opens device SMS app pre-filled (requires SIM or linked phone)
+    const encoded=encodeURIComponent(msg);
+    window.open("sms:"+contact+"?body="+encoded);
+    return{ok:true,msg:"SMS app opened for "+contact};
+  };
+
+  const triggerDuress=async()=>{
+    setDuressActive(true);
+    // Step 1: Get location — GPS → IP → business address
+    let locStr=settings.address||settings.businessName||"Address not set in app";
+    try{
+      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:5000}));
+      const lat=pos.coords.latitude.toFixed(5),lng=pos.coords.longitude.toFixed(5);
+      locStr=(settings.address||"Our address")+" (GPS "+lat+","+lng+" maps.google.com/?q="+lat+","+lng+")";
+    }catch(e){
+      try{
+        const r=await fetch("https://ipapi.co/json/");
+        const d=await r.json();
+        if(d.city) locStr=(settings.address||"Our address")+" (approx "+d.city+", "+d.region+")";
+      }catch(e2){}
+    }
+    // Step 2: Build message
+    const msg="URGENT — There is a robbery/aggression happening at our shop right now. "+
+      "Please call 000 immediately. Our address is: "+locStr;
+    // Step 3: Send to all configured contacts
+    const contacts=[
+      settings.duressContact1,settings.duressContact2,settings.duressContact3,
+      settings.duressContact4,settings.duressContact5,settings.duressContact6,
+      settings.duressContact7,settings.duressContact8,settings.duressContact9,
+      settings.duressContact10,
+    ].map(s=>(s||"").trim()).filter(Boolean);
+    let sent=0;
+    for(const contact of contacts){
+      const r=await sendDuressSMS(contact,msg);
+      if(r.ok) sent++;
+    }
+    const provider=(settings.smsProvider||"sms_uri")==="sms_uri"?"SMS app":settings.smsProvider;
+    pop("🚨 DURESS — "+sent+"/"+contacts.length+" contacts alerted via "+provider+". Call 000 NOW if not done.","err");
+    setTimeout(()=>setDuressActive(false),5*60*1000);
+  };
+
+    // ── POLICE REPORT GENERATOR — Multi-state compliant ─────────────────────
+  // All 8 states/territories covered. Core 10 fields identical across all states.
+  // State differences: hold periods, submission method, contact email, governing act.
+  const STATE_INFO={
+    VIC:{name:"Victoria",act:"Second-Hand Dealers and Pawnbrokers Act 1989 (Vic)",
+      hold:"7 days",freq:"Weekly (within 3 working days)",
+      defaultEmail:settings.policeEmail||"",
+      note:"Submit to your local Victoria Police station by email. No central portal."},
+    NSW:{name:"New South Wales",act:"Pawnbrokers and Second-hand Dealers Act 1996 (NSW)",
+      hold:"14 days",freq:"Within 3 working days of each transaction",
+      defaultEmail:"#PBU@police.nsw.gov.au",
+      note:"Submit via NSW Police Weblink portal using your dealer licence number, OR email #PBU@police.nsw.gov.au"},
+    QLD:{name:"Queensland",act:"Second-hand Dealers and Pawnbrokers Act 2003 (Qld)",
+      hold:"Check local conditions",freq:"Regular forwarding to SPIRS database",
+      defaultEmail:"SPIRS.Admin@police.qld.gov.au",
+      note:"Forward CSV to SPIRS (Stolen Property ID & Recovery System). Police cross-match against stolen property database."},
+    SA:{name:"South Australia",act:"Second-hand Dealers and Pawnbrokers Act 1996 (SA)",
+      hold:"10 days (3 days if full buyer details recorded)",freq:"Keep on premises — available for inspection at any time",
+      defaultEmail:"sapol.leb@police.sa.gov.au",
+      note:"SA requires registration (not licensing). Keep records on premises. Email SAPOL Licensing Enforcement Branch for stolen goods reports."},
+    WA:{name:"Western Australia",act:"Second-hand Dealers and Pawnbrokers Act 1994 (WA)",
+      hold:"3 days minimum",freq:"Available for inspection; submit electronically on request",
+      defaultEmail:settings.policeEmail||"",
+      note:"Keep records on premises. Submit to local WA Police station on request or by standing arrangement."},
+    NT:{name:"Northern Territory",act:"Second-hand Dealers Act (NT)",
+      hold:"14 days",freq:"Available for police inspection at any time",
+      defaultEmail:settings.policeEmail||"",
+      note:"Keep records on premises. Contact local NT Police station. Notify immediately if stolen goods suspected."},
+    ACT:{name:"Australian Capital Territory",act:"Second-Hand Dealers Act 1995 (ACT)",
+      hold:"7 days",freq:"Available for ACT Policing inspection",
+      defaultEmail:settings.policeEmail||"",
+      note:"Keep records on premises and available for ACT Policing inspection."},
+    TAS:{name:"Tasmania",act:"Second-Hand Dealers Act 1994 (Tas)",
+      hold:"7 days",freq:"Available for Tasmania Police inspection",
+      defaultEmail:settings.policeEmail||"",
+      note:"Keep records on premises. Contact your local Tasmania Police station."},
+  };
+
+  const genPoliceReport=(dateFrom,dateTo,suspicious,stateCode)=>{
+    const sc=stateCode||settings.state||"VIC";
+    const st=STATE_INFO[sc]||STATE_INFO.VIC;
+    const txs=txList.filter(t=>{
+      if(!t.date) return false;
+      if(suspicious) return t.smrFlagged;
+      const d=new Date(t.date);
+      return d>=dateFrom&&d<=dateTo;
+    });
+    const dealer=settings.businessName||"[Business Name]";
+    const licence=settings.dealerLicenceNo||"[Licence/Registration No]";
+    const rows=[
+      [st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],
+      ["Governing Act",st.act],
+      ["Dealer Name",dealer],
+      ["ABN",settings.abn||""],
+      ["Dealer Licence / Registration No",licence],
+      ["Business Address",settings.address||""],
+      ["Phone",settings.phone||""],
+      suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],
+      ["Period",suspicious?"All SMR-flagged transactions":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],
+      ["Mandatory Hold Period",st.hold],
+      ["Submission Instructions",st.note],
+      ["Generated",new Date().toLocaleString("en-AU")],
+      [],
+      ["Contract No","Date","Item Description","Serial / ID Marks",
+       "Weight / Qty","Price Paid (AUD)",
+       "Client Full Name","Client DOB","Client Address",
+       "ID Type","ID Number",
+       "KYC Verified","TTR Required","SMR Flagged","Staff Notes"],
+    ];
+    txs.forEach(tx=>{
+      const cl=tx.client||{};
+      (tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{
+        const prod=it.product||{};
+        rows.push([
+          tx.id,
+          new Date(tx.date).toLocaleDateString("en-AU"),
+          prod.label||(it.note?"Unlisted: "+it.note:"Item"),
+          prod.serial||"—",
+          it.qty||"1",
+          (it.price||0).toFixed(2),
+          cl.fullName||"",
+          cl.dob||"",
+          cl.address||"",
+          cl.idType||"",
+          cl.idNumber||"",
+          tx.kycDone?"YES":"NO",
+          tx.ttrRequired?"YES":"NO",
+          tx.smrFlagged?"YES":"NO",
+          it.note||"",
+        ]);
+      });
+    });
+    if(rows.length<=14) rows.push(["(No qualifying buy transactions in this period)"]);
+    return rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\n");
+  };
+
+
   // ── EFTPOS: push payment to physical terminal ────────────────
   // Supports: Square Terminal API + Linkly (PC-EFTPOS) for AU bank terminals
   const sendEftpos=async(amountAUD)=>{
@@ -1740,15 +1940,15 @@ export default function Loot() {
                 {settings.businessName} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}
               </div>
               <div style={c.g2(10)}>
-                <div style={c.card({padding:15})}>
+                <div style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>
                   <div style={c.lbl}>⬡ Gold (AUD/oz)</div>
-                  <div style={{fontSize:22,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em"}}>{fmtAUD(gSpot)}</div>
-                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>/ g <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
+                  <div style={{fontSize:"clamp(18px,3vw,32px)",fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtAUD(gSpot)}</div>
+                  <div style={{fontSize:"clamp(10px,1.2vw,14px)",color:T.muted,marginTop:4}}>/ g <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
                 </div>
-                <div style={c.card({padding:15})}>
+                <div style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>
                   <div style={c.lbl}>◈ Silver (AUD/oz)</div>
-                  <div style={{fontSize:22,fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em"}}>{fmtAUD(sSpot)}</div>
-                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>/ g <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
+                  <div style={{fontSize:"clamp(18px,3vw,32px)",fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtAUD(sSpot)}</div>
+                  <div style={{fontSize:"clamp(10px,1.2vw,14px)",color:T.muted,marginTop:4}}>/ g <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,margin:"12px 0"}}>
@@ -1793,11 +1993,33 @@ export default function Loot() {
                 <button style={c.btn(T.border,T.text,{flex:1,minWidth:100,padding:"13px 0",fontSize:12})}
                   onClick={()=>setShowEOD(true)}>📋 EOD</button>
               </div>
-              <div style={{...c.row(10),marginTop:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:8,flexWrap:"wrap"}}>
                 <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowVendors(true)}>🏪 Suppliers</button>
                 <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowStaff(true)}>👥 Staff</button>
                 <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowBackup(true)}>💾 Backup</button>
                 {activeStaff&&staffList.find(s=>s.id===activeStaff)&&<span style={{fontSize:11,color:T.green,padding:"5px 8px"}}>👤 {(staffList.find(s=>s.id===activeStaff)||{}).name}</span>}
+              </div>
+              <div style={{display:"flex",justifyContent:"center",marginTop:8}}>
+                <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowPolice(true)}>🚔 Police Report</button>
+              </div>
+              {/* DURESS BUTTON — centred, same height as bsm, width of ~2 buttons */}
+              <div style={{display:"flex",justifyContent:"center",marginTop:10}}>
+                <button
+                  style={{
+                    padding:"10px 18px",minWidth:200,maxWidth:280,
+                    background:duressActive?"#cc0000":"#111",
+                    color:"#fff",
+                    border:duressActive?"2px solid #ff4444":"2px solid #333",
+                    borderRadius:8,fontSize:13,fontWeight:"bold",
+                    letterSpacing:"0.08em",cursor:"pointer",
+                    textTransform:"uppercase",whiteSpace:"nowrap",
+                    boxShadow:duressActive
+                      ?"0 0 20px rgba(255,0,0,0.6), 4px 4px 14px rgba(0,0,0,0.5)"
+                      :"4px 4px 14px rgba(0,0,0,0.5), 1px 1px 0 rgba(255,255,255,0.05)",
+                  }}
+                  onClick={()=>{if(!duressActive) triggerDuress();}}>
+                  {duressActive?"🚨 DURESS ACTIVE":"🆘 POLICE HELP"}
+                </button>
               </div>
             </div>
           )}
@@ -2946,6 +3168,10 @@ export default function Loot() {
                   <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
                   <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
                   <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
+                  <F label="Secondhand Dealer Licence No" value={settings.dealerLicenceNo||""} onChange={v=>setSettings(p=>({...p,dealerLicenceNo:v}))} placeholder="e.g. SHD1234"/>
+                  <F label="Local Police Station Name" value={settings.policeStation||""} onChange={v=>setSettings(p=>({...p,policeStation:v}))} placeholder="e.g. Ballarat Police Station"/>
+                  <F label="Police Station Email (for reports)" value={settings.policeEmail||""} onChange={v=>setSettings(p=>({...p,policeEmail:v}))} placeholder="ballaratcid@police.vic.gov.au"/>
+
                 </div>
               </div>
             )}
@@ -3031,7 +3257,124 @@ export default function Loot() {
             )}
           </div>
 
-          {/* 5. COMPLIANCE */}
+          {/* 5. POLICE HELP */}
+          <div style={{borderBottom:"1px solid "+T.border}}>
+            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("policehelp")}>
+              <span>🆘 Police Help — Duress Alerts</span>
+              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.policehelp?"▲":"▾"}</span>
+            </button>
+            {settingsOpen.policehelp&&(
+              <div style={{paddingBottom:14}}>
+                <div style={{...c.bnr("warn"),marginBottom:14,fontSize:11}}>
+                  Pressing <strong>🆘 Police Help</strong> sends SMS to all contacts instantly — no confirmation. Set this up and test it before you ever need it.
+                </div>
+
+                {/* ── SMS PROVIDER ── */}
+                <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:10}}>SMS Provider</div>
+
+                <div style={{marginBottom:10}}>
+                  <label style={c.lbl}>How to send the emergency SMS</label>
+                  <select style={{...c.sel(),width:"100%"}} value={settings.smsProvider||"sms_uri"} onChange={e=>setSettings(p=>({...p,smsProvider:e.target.value}))}>
+                    <option value="textbelt">◈ Textbelt — works directly, 1 free SMS/day, no setup</option>
+                    <option value="webhook">🔗 Webhook (Zapier / Make / n8n → Twilio/Vonage)</option>
+                    <option value="twilio_fn">⬡ Twilio Function URL — deploy once, free forever</option>
+                    <option value="sms_uri">📲 Device SMS App — requires SIM on this device</option>
+                  </select>
+                </div>
+
+                {/* TEXTBELT — works directly from browser */}
+                {settings.smsProvider==="textbelt"&&(
+                  <div style={{...c.card({padding:12}),marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Textbelt</div>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
+                      Works directly from this app — no server needed, no CORS issues. Free key sends 1 SMS/day. Buy credits at textbelt.com for more (~$0.09/SMS AU).
+                    </div>
+                    <F label="Textbelt API Key" value={settings.textbeltKey||"textbelt"} onChange={v=>setSettings(p=>({...p,textbeltKey:v}))} placeholder="textbelt"/>
+                    <div style={{fontSize:10,color:T.muted,marginTop:4}}>
+                      Use <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>textbelt</code> as the key for 1 free SMS/day (no account needed). For paid: sign up at textbelt.com, get a key, paste here.
+                    </div>
+                  </div>
+                )}
+
+                {/* WEBHOOK — Zapier / Make */}
+                {settings.smsProvider==="webhook"&&(
+                  <div style={{...c.card({padding:12}),marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Webhook → SMS Gateway</div>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
+                      This app POSTs a JSON payload to your webhook URL. Wire it to Twilio or any SMS provider via Zapier, Make, or n8n. Works from WiFi — no SIM needed.
+                    </div>
+                    <F label="Webhook URL" value={settings.duressWebhookUrl||""} onChange={v=>setSettings(p=>({...p,duressWebhookUrl:v}))} placeholder="https://hooks.zapier.com/hooks/catch/..."/>
+                    <div style={{fontSize:10,color:T.muted,marginTop:8,lineHeight:1.6}}>
+                      <strong>Setup (Zapier):</strong> New Zap → Trigger: Webhooks by Zapier (Catch Hook) → Action: Twilio (Send SMS). Map <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>message</code> and <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>contacts</code> from the payload. Free Zapier plan works.
+                    </div>
+                    <div style={{fontSize:10,color:T.muted,marginTop:6,lineHeight:1.6}}>
+                      The app sends: <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>{"{type:'DURESS_ALERT', message:'...', contacts:[...], address:'...'}"}</code>
+                    </div>
+                  </div>
+                )}
+
+                {/* TWILIO FUNCTION */}
+                {settings.smsProvider==="twilio_fn"&&(
+                  <div style={{...c.card({padding:12}),marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Twilio Function URL</div>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
+                      Deploy a tiny Twilio Function (free tier) that receives the call and sends the SMS. You get a URL to paste here. Works over WiFi, no CORS issues.
+                    </div>
+                    <F label="Twilio Function URL" value={settings.twilioFnUrl||""} onChange={v=>setSettings(p=>({...p,twilioFnUrl:v}))} placeholder="https://xx.twil.io/duress-sms"/>
+                    <div style={{fontSize:10,color:T.muted,marginTop:8,lineHeight:1.7}}>
+                      <strong>Setup (5 min):</strong><br/>
+                      1. Sign up free at twilio.com (no credit card for trial)<br/>
+                      2. Console → Functions → Create Service → Add Function<br/>
+                      3. Paste this code:<br/>
+                      <code style={{display:"block",background:T.surface,padding:"8px",borderRadius:4,marginTop:4,fontSize:9,lineHeight:1.5,wordBreak:"break-all"}}>
+                        {"exports.handler=(ctx,ev,cb)=>{const c=new(require('@twilio/runtime-handler').Context)(ctx);const t=require('twilio')(ctx.ACCOUNT_SID,ctx.AUTH_TOKEN);ev.contacts.split(',').forEach(n=>t.messages.create({to:n,from:ctx.FROM,body:ev.message}));cb(null,{sent:true});}"}
+                      </code>
+                      <br/>4. Add environment vars: ACCOUNT_SID, AUTH_TOKEN, FROM (your Twilio number)<br/>
+                      5. Deploy → copy the URL → paste above
+                    </div>
+                  </div>
+                )}
+
+                {/* SMS APP */}
+                {settings.smsProvider==="sms_uri"&&(
+                  <div style={{...c.bnr("warn"),marginBottom:10,fontSize:10}}>
+                    Opens your device SMS app pre-filled with the emergency message. Only works on devices with a SIM card, or iPhone with SMS Relay, or Android with Messages web. If this is a WiFi-only tablet, use Textbelt or Webhook instead.
+                  </div>
+                )}
+
+                {/* ── EMERGENCY CONTACTS ── */}
+                <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:6,marginTop:14}}>Emergency Contacts (up to 10)</div>
+                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
+                  International format — +614XXXXXXXX. All contacts receive the SMS simultaneously.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {[1,2,3,4,5,6,7,8,9,10].map(n=>(
+                    <div key={n}>
+                      <label style={c.lbl}>Contact {n}</label>
+                      <input style={c.inp()} type="tel" placeholder="+61400000000"
+                        value={settings["duressContact"+n]||""}
+                        onChange={e=>setSettings(p=>({...p,["duressContact"+n]:e.target.value.trim()}))}/>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Test button */}
+                <button style={{...c.bsm(T.border,T.muted),marginTop:14,width:"100%"}}
+                  onClick={async()=>{
+                    const contacts=[1,2,3,4,5,6,7,8,9,10]
+                      .map(n=>settings["duressContact"+n]||"").filter(Boolean);
+                    if(!contacts.length){pop("No contacts configured.","warn");return;}
+                    const testMsg="TEST — This is a test of the Loot Ledgr duress alert system for "+
+                      (settings.businessName||"your shop")+". No action required.";
+                    let sent=0;
+                    for(const c of contacts){const r=await sendDuressSMS(c,testMsg);if(r.ok)sent++;}
+                    pop("Test sent to "+sent+"/"+contacts.length+" contact(s).","ok");
+                  }}>📲 Send Test SMS to All Contacts</button>
+              </div>
+            )}
+          </div>
+
+{/* 6. COMPLIANCE */}
           <div style={{borderBottom:"1px solid "+T.border}}>
             <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("compliance")}>
               <span>📋 Compliance — TTR</span>
@@ -3056,7 +3399,7 @@ export default function Loot() {
             )}
           </div>
 
-          {/* 6. CRYPTO */}
+          {/* 7. CRYPTO */}
           <div style={{borderBottom:"1px solid "+T.border}}>
             <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("crypto")}>
               <span>₿ Cryptocurrency Payments</span>
@@ -3104,7 +3447,7 @@ export default function Loot() {
             )}
           </div>
 
-          {/* 7. AI AGENT */}
+          {/* 8. AI AGENT */}
           <div style={{borderBottom:"1px solid "+T.border}}>
             <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("ai")}>
               <span>🤖 AI Agent</span>
@@ -3141,7 +3484,7 @@ export default function Loot() {
             )}
           </div>
 
-          {/* 8. INTEGRATIONS */}
+          {/* 9. INTEGRATIONS */}
           <div style={{borderBottom:"1px solid "+T.border}}>
             <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("integrations")}>
               <span>🔗 Integrations</span>
@@ -3696,6 +4039,111 @@ export default function Loot() {
               setCliNoteId(null);pop("Note saved.","ok");
             }}>Save Note</button>
           </Modal>
+        )}
+
+        {/* ── POLICE REPORT MODAL ── */}
+        {showPolice&&(
+          <div style={{position:"fixed",inset:0,background:"#000000d0",zIndex:1500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+            onClick={()=>setShowPolice(false)}>
+            <div style={{...c.card({padding:24}),maxWidth:480,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+              <div style={{...c.row(0),justifyContent:"space-between",marginBottom:20}}>
+                <span style={{fontSize:15,fontWeight:"bold",color:T.white}}>🚔 Police Report</span>
+                <button style={c.bsm()} onClick={()=>setShowPolice(false)}>✕</button>
+              </div>
+              <div style={{marginBottom:14}}>
+                <label style={c.lbl}>State / Territory</label>
+                <select style={{...c.sel(),width:"100%"}} value={settings.state||"VIC"} onChange={e=>setSettings(p=>({...p,state:e.target.value}))}>
+                  {["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(s=>(
+                    <option key={s} value={s}>{s} — {(STATE_INFO[s]||{}).name||s}</option>
+                  ))}
+                </select>
+              </div>
+              {(()=>{const st=STATE_INFO[settings.state||"VIC"]||STATE_INFO.VIC;return(
+                <div style={{...c.bnr("info"),marginBottom:14,fontSize:11}}>
+                  <strong>{st.act}</strong><br/>
+                  Hold period: <strong>{st.hold}</strong> · Submit: <strong>{st.freq}</strong><br/>
+                  {st.note}
+                </div>
+              );})()}
+
+              {/* Option 1: Immediate suspicious item report */}
+              <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.red}}>
+                <div style={{fontSize:12,fontWeight:"bold",color:T.red,marginBottom:6}}>🚨 Immediate — Suspicious Item Report</div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+                  Generates a report of all SMR-flagged transactions. Use when you have purchased an item you suspect may be stolen and need to notify police immediately.
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button style={c.btn(T.red,"#fff",{fontSize:12})} onClick={()=>{
+                    const csv=genPoliceReport(new Date(0),new Date(),true,settings.state||"VIC");
+                    const flagged=txList.filter(t=>t.smrFlagged).length;
+                    if(flagged===0){pop("No SMR-flagged transactions found.","warn");return;}
+                    dlFile(csv,"suspicious_items_"+(settings.state||"VIC")+"_"+new Date().toISOString().slice(0,10)+".csv","text/csv");
+                    pop("Suspicious items report downloaded — "+flagged+" transaction(s).","ok");
+                  }}>⬇ Download CSV</button>
+                  {((STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail)&&(
+                    <button style={c.bsm(T.border,T.muted)} onClick={()=>{
+                      const stateEmail=(STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail||"";
+                            window.open("mailto:"+stateEmail+
+                        "?subject=Suspicious+Item+Report+—+"+(settings.businessName||"Secondhand+Dealer")+
+                        "&body=Please+find+attached+our+suspicious+item+report.+Licence+No:+"+(settings.dealerLicenceNo||"[Licence]")+
+                        ".+ABN:+"+(settings.abn||"[ABN]")+".");
+                    }}>📧 Open Email Draft</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Option 2: Weekly report */}
+              <div style={{...c.card({padding:14}),marginBottom:14,borderLeft:"3px solid "+T.gold}}>
+                <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>📋 Weekly Transaction Report</div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+                  Covers all buy transactions in the selected 7-day period. Required weekly under the Secondhand Dealers & Pawnbrokers Act 1989 (Vic).
+                </div>
+                {(()=>{
+                  const now=new Date();
+                  const dayOfWeek=now.getDay();
+                  const lastMonday=new Date(now);lastMonday.setDate(now.getDate()-(dayOfWeek===0?6:dayOfWeek-1));lastMonday.setHours(0,0,0,0);
+                  const lastSunday=new Date(lastMonday);lastSunday.setDate(lastMonday.getDate()+6);lastSunday.setHours(23,59,59,999);
+                  const txCount=txList.filter(t=>{
+                    if(!t.date) return false;
+                    const d=new Date(t.date);
+                    return d>=lastMonday&&d<=lastSunday&&(t.items||[]).some(i=>i.mode==="buy");
+                  }).length;
+                  return(
+                    <div>
+                      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+                        Period: {lastMonday.toLocaleDateString("en-AU")} — {lastSunday.toLocaleDateString("en-AU")} · {txCount} buy transaction(s)
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button style={c.btn(T.gold,T.bg,{fontSize:12})} onClick={()=>{
+                          const csv=genPoliceReport(lastMonday,lastSunday,false,settings.state||"VIC");
+                          dlFile(csv,"police_report_"+(settings.state||"VIC")+"_"+lastMonday.toISOString().slice(0,10)+".csv","text/csv");
+                          pop("Weekly police report downloaded — "+txCount+" transaction(s).","ok");
+                        }}>⬇ Download CSV</button>
+                        {((STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail)&&(
+                          <button style={c.bsm(T.border,T.muted)} onClick={()=>{
+                            window.open("mailto:"+settings.policeEmail+
+                              "?subject=Weekly+Transaction+Report+—+"+(settings.businessName||"Secondhand+Dealer")+
+                              "+w/e+"+(lastSunday.toLocaleDateString("en-AU").replace(/\//g,"-"))+
+                              "&body=Please+find+attached+our+weekly+transaction+report+for+the+period+"+
+                              lastMonday.toLocaleDateString("en-AU")+" to "+lastSunday.toLocaleDateString("en-AU")+
+                              ".+Dealer+Licence+No:+"+(settings.dealerLicenceNo||"[Licence]")+
+                              ".+ABN:+"+(settings.abn||"[ABN]")+".");
+                          }}>📧 Open Email Draft</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Station config reminder */}
+              {(!settings.policeEmail||!settings.dealerLicenceNo)&&(
+                <div style={c.bnr("warn")}>
+                  ⚠ Set your <strong>police station email</strong> and <strong>dealer licence number</strong> in Settings → Business to enable email drafts.
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* ── BACKUP / RESTORE MODAL ── */}
