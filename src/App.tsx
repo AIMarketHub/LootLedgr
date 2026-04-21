@@ -410,8 +410,8 @@ export default function Loot(){
     if(k1){
       try{
         const[gR,sR]=await Promise.all([
-          fetch("https://www.goldapi.io/api/XAU/AUD",{"headers":{"x-access-token":k1,"Content-Type":"application/json"}}),
-          fetch("https://www.goldapi.io/api/XAG/AUD",{"headers":{"x-access-token":k1,"Content-Type":"application/json"}}),
+          fetch("https://www.goldapi.io/api/XAU/AUD",{"headers":{"x-access-token":k1}}),
+          fetch("https://www.goldapi.io/api/XAG/AUD",{"headers":{"x-access-token":k1}}),
         ]);
         const gD=await gR.json(), sD=await sR.json();
         if(!gR.ok){pop("GoldAPI error "+gR.status+": "+(gD.message||gD.error||JSON.stringify(gD)),"warn");}
@@ -454,7 +454,7 @@ export default function Loot(){
     const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok){console.warn("Spot API",r.status,url);return null;}return await r.json();}catch(e){console.warn("Spot API network:",e.message,url);return null;}};
     const fetchSpot=async()=>{
       if(isManualActive()){setSpotStatus("manual");return;}setSpotStatus("stale");
-      if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applySpot(parseFloat(g),parseFloat(s),"GoldAPI");return;}}
+      if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applySpot(parseFloat(g),parseFloat(s),"GoldAPI");return;}}
       if(k2){const d=await tF("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");if(d&&d.success&&d.rates){const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null),s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);if(g&&s){applySpot(g,s,"Metals-API");return;}}}
       if(k3){const d=await tF("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");if(d&&d.metals&&d.metals.gold&&d.metals.silver){applySpot(d.metals.gold,d.metals.silver,"Metals.Dev");return;}}
       setSpotStatus("stale");
