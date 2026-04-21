@@ -1,2191 +1,695 @@
-// LOOT — Compliance POS · Gold & Precious Metals · Android
-// Legal: AML/CTF Act 2006 (Cth), SHD Act 1989 (Vic), Privacy Act 1988 (Cth)
-// Square: BUY → vendor expense (Orders+Payments API) · SELL → checkout link
-// Shopify: BUY → draft order tagged vendor-purchase · SELL → completed order
-// Compliance: 168h hold, KYC/CDD, TTR, SMR, PEP/TFS, 7yr retention
+// LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
+// AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
+import React,{useState,useEffect,useRef,useMemo} from "react";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-
-const DARK={
-  bg:"#080c09",surface:"#0e130b",card:"#131a10",cardHi:"#182015",
-  border:"#1c2619",borderHi:"#2a3826",
-  gold:"#c9a84c",goldLight:"#e8c86a",goldDim:"#7a6520",goldBg:"#1a1500",
-  silver:"#8fb5ad",silverDim:"#4a6560",silverBg:"#0a1510",
-  green:"#c9a84c",greenDim:"#7a6520",greenBg:"#1a1500",
-  orange:"#d4722a",orangeDim:"#7a3a10",orangeBg:"#1a0c04",
-  red:"#cc3f3f",redDim:"#5a1a1a",redBg:"#1a0404",
-  blue:"#c9a84c",blueBg:"#1a1500",
-  text:"#ddd8ce",textDim:"#a09a90",muted:"#5a6055",white:"#f5f0e8",
-  ff:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-};
-const LIGHT={
-  bg:"#F5F4F0",surface:"#FFF",card:"#FFF",cardHi:"#F8F7F3",
-  border:"rgba(0,0,0,0.12)",borderHi:"rgba(0,0,0,0.22)",
-  gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",
-  silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",
-  green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",
-  orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",
-  red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",
-  blue:"#9C7A00",blueBg:"#FEFBEE",
-  text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",
-  ff:"'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-};
+const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
 
-const THRESH = { CASH_WARN:2000, BULLION_CDD:5000, CASH_TTR:10000, HOLD_HOURS:168 };
-const TROY_OZ = 31.1035;
+const THRESH={CASH_WARN:2000,BULLION_CDD:5000,CASH_TTR:10000,HOLD_HOURS:168};
+const TROY_OZ=31.1035;
+const APP_VERSION="5";
 
-// Catalog starts empty — add your own products via the Catalog Editor (Prices tab → Edit Catalog)
-const DEFAULT_CATALOG = [];
-
-const uid = () => Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
-const fmt2 = n => (n==null||isNaN(n)||!isFinite(n))?"—":Number(n).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtAUD = n => (n==null||isNaN(n)||!isFinite(n))?"—":"$"+fmt2(n);
-const fmtDate = iso => iso?new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
-const addHours = (iso,h) => new Date(new Date(iso).getTime()+h*3600000).toISOString();
-const hoursLeft = iso => Math.max(0,(new Date(iso)-Date.now())/3600000);
-const fmtHold = iso => { if(!iso) return "—"; const h=hoursLeft(iso); if(h<=0) return "EXPIRED"; return Math.floor(h)+"h "+Math.floor((h%1)*60)+"m"; };
-const sevenYrsFrom = iso => addHours(iso,7*365.25*24);
-const isExpired7yr = iso => iso&&new Date(iso)<new Date();
+// Defensive sanitisers — guard all data from users, servers, APIs
+const sN=n=>(n==null||isNaN(n)||!isFinite(n))?0:Number(n);
+const sS=v=>v==null?"":String(v);
+const uid=()=>Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
+const fmt2=n=>sN(n).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtAUD=n=>(n==null||isNaN(n)||!isFinite(n))?"—":"$"+fmt2(n);
+const fmtDate=iso=>iso?new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+const addHours=(iso,h)=>new Date(new Date(iso).getTime()+h*3600000).toISOString();
+const hoursLeft=iso=>Math.max(0,(new Date(iso)-Date.now())/3600000);
+const fmtHold=iso=>{if(!iso)return"—";const h=hoursLeft(iso);if(h<=0)return"EXPIRED";return Math.floor(h)+"h "+Math.floor((h%1)*60)+"m";};
+const sevenYrsFrom=iso=>addHours(iso,7*365.25*24);
+const isExpired7yr=iso=>iso&&new Date(iso)<new Date();
+const nowISO=()=>new Date().toISOString();
+const todayStr=()=>nowISO().slice(0,10);
 
 const store={
-  get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(e){return d;}},
-  set:(k,v)=>{try{localStorage.setItem("gf_"+k,JSON.stringify(v));}catch(e){}},
-  del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(e){}},
+  get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
+  set:(k,v)=>{try{localStorage.setItem("gf_"+k,JSON.stringify(v));}catch(_){}},
+  del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(_){}},
 };
 
-// ── SUPABASE SYNC LAYER ───────────────────────────────────────────────────────
-// All data still saves to localStorage first (instant, offline-safe).
-// Supabase syncs in the background for multi-device sharing.
-const SB_URL = "https://uimrnctjkwhhgwewgmzm.supabase.co";
-const SB_KEY = "sb_publishable_wgIxqpsjftysrlJuWZPS6g_EmDiaoaR";
-const SHOP_ID = "default"; // Plan B: replace with business login ID
-
-const sbFetch = async (path, opts={}) => {
-  try {
-    const r = await fetch(SB_URL+"/rest/v1/"+path, {
-      ...opts,
-      headers: {
-        "apikey": SB_KEY,
-        "Authorization": "Bearer "+SB_KEY,
-        "Content-Type": "application/json",
-        "Prefer": opts.prefer||"",
-        ...opts.headers,
-      },
-    });
-    if(!r.ok) return null;
-    const text = await r.text();
-    return text ? JSON.parse(text) : null;
-  } catch(e) { return null; }
+const SB_URL="https://uimrnctjkwhhgwewgmzm.supabase.co";
+const SB_KEY="sb_publishable_wgIxqpsjftysrlJuWZPS6g_EmDiaoaR";
+const SHOP_ID="default";
+const sbFetch=async(path,opts={})=>{try{const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});if(!r.ok)return null;const t=await r.text();return t?JSON.parse(t):null;}catch(_){return null;}};
+const ts=()=>new Date().toISOString();
+const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(tbl==="settings"?"shop_id":"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
+const sb={
+  saveTx:async tx=>upsSB("transactions",{id:tx.id,shop_id:SHOP_ID,data:tx,updated_at:ts()}),
+  loadTxList:async()=>{const r=await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");return r?r.map(x=>x.data):null;},
+  deleteTx:async id=>sbFetch("transactions?id=eq."+id,{method:"DELETE"}),
+  saveStock:async item=>upsSB("stock",{id:item.id,shop_id:SHOP_ID,data:item,updated_at:ts()}),
+  loadStock:async()=>{const r=await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");return r?r.map(x=>x.data):null;},
+  deleteStock:async id=>sbFetch("stock?id=eq."+id,{method:"DELETE"}),
+  saveSettings:async s=>upsSB("settings",{shop_id:SHOP_ID,data:s,updated_at:ts()}),
+  loadSettings:async()=>{const r=await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
+  saveCatalog:async cat=>upsSB("catalog",{id:"catalog_"+SHOP_ID,shop_id:SHOP_ID,data:cat,updated_at:ts()}),
+  loadCatalog:async()=>{const r=await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
 };
 
-const sb = {
-  // Transactions
-  saveTx: async (tx) => {
-    await sbFetch("transactions?on_conflict=id", {
-      method:"POST",
-      prefer:"resolution=merge-duplicates",
-      body: JSON.stringify({id:tx.id, shop_id:SHOP_ID, data:tx, updated_at:new Date().toISOString()}),
-    });
-  },
-  loadTxList: async () => {
-    const rows = await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");
-    return rows ? rows.map(r=>r.data) : null;
-  },
-  deleteTx: async (id) => {
-    await sbFetch("transactions?id=eq."+id, {method:"DELETE"});
-  },
-  // Stock
-  saveStock: async (item) => {
-    await sbFetch("stock?on_conflict=id", {
-      method:"POST",
-      prefer:"resolution=merge-duplicates",
-      body: JSON.stringify({id:item.id, shop_id:SHOP_ID, data:item, updated_at:new Date().toISOString()}),
-    });
-  },
-  loadStock: async () => {
-    const rows = await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");
-    return rows ? rows.map(r=>r.data) : null;
-  },
-  deleteStock: async (id) => {
-    await sbFetch("stock?id=eq."+id, {method:"DELETE"});
-  },
-  // Settings
-  saveSettings: async (settings) => {
-    await sbFetch("settings?on_conflict=shop_id", {
-      method:"POST",
-      prefer:"resolution=merge-duplicates",
-      body: JSON.stringify({shop_id:SHOP_ID, data:settings, updated_at:new Date().toISOString()}),
-    });
-  },
-  loadSettings: async () => {
-    const rows = await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");
-    return rows && rows[0] ? rows[0].data : null;
-  },
-  // Catalog
-  saveCatalog: async (catalog) => {
-    // Save catalog as a single JSON blob under a fixed ID
-    await sbFetch("catalog?on_conflict=id", {
-      method:"POST",
-      prefer:"resolution=merge-duplicates",
-      body: JSON.stringify({id:"catalog_"+SHOP_ID, shop_id:SHOP_ID, data:catalog, updated_at:new Date().toISOString()}),
-    });
-  },
-  loadCatalog: async () => {
-    const rows = await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");
-    return rows && rows[0] ? rows[0].data : null;
-  },
-};
-// ─────────────────────────────────────────────────────────────────────────────
+const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};
 
-// Photo handler — no artificial size cap, browser quota is the only limit
-const MAX_PHOTO_B64 = Infinity;
-const checkPhotoSize = (b64, cb) => { if(b64) cb(b64); };
-
-// ── STARTUP CLEANUP ─────────────────────────────────────────────────────────
-// Version stamp — bump this any time a breaking change is deployed.
-// When the stored version doesn't match, ALL localStorage is wiped clean.
-const APP_VERSION = "5";
-const DEFAULT_LOGO = null; // logo lives in logoLib (seeded by migration)
-
-// Default logo data — seeded into logoLib on first run
-const SEED_LOGO = "data:image/jpeg;base64,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AAAQ4gIAAIAAAAAAAAAAAAAkwgAAAAAAAAAAAAAIgAAoA4sAQAAAAAAgAUIAAAAAEQAkAAAAAAAAAAAAAAAEAgAAAAAAAAAAAAAAEAAAgAQYgQgAAAAYAAEgAAIAAAgIEAAAAAAAAAAAAAAAAAoAAAAAAAAAYAAAEAAAAgAs04AAAAAAgAAEAAAAAAAACUIAgAAAAAAAAAAAAAAQwAAAAAAAYAAAAQAAAEAEEEAAAAAAEgAEMgAAAAAAAAC0AQIIAAAAAAAAEgAAAEUAAAAAAAAAAEwAAAYAEk8gAAAAAYAAQiAAM0kEIAAAQwIQQMIAAAAAAcAAAIEwAAAAIAAAAA44AAQAAAUAEAAAAAAAUIgAAwAIUUIAAAQ8AAAEIAAAEQAAAUYwAAAMEAAAAAU4AAEgAAAYAAAAAAMAAU5AA4EYAAUAIAAAAQAAAQwwwAAAAAcAAAAQg0sAAAEwgAAwAAAs0oAAAAUAAAkgAeIoAAAAQ8AAAAAUAIAAAAAAAM8AAAAEcoA0cMMcYYwkAAAAIUQAAIEAAAUMAA0QAAAAAAQYkAAAAEsAAAAAAEkgAAAMAYAAAwYAI0gAgAAAAcAoAAUAAAAEoQcgAAAAAAAAQgMAAAAAYEAAAAYgAAAcYgAAAAAAAQQEgAAAAAQQAA44AAAAgE8AAAAAAAAAAEkIkIAAAG0YQIIAAAE0YAAAAAAAAAAAoAAAEAgAMAAwAAAAAMgEIAEAAEAEAEc8A0MIAAAwIUQAAAAIoQAgAEAAAAAMYAAAAAAAAAAAgAAAAAQYUoAoAAAAAsYAAAAg8IAAAQAAAAQMwAAAAAQAEA8gAAAAAUAAAAAAAAAAAAAgAAAMAAAAAAAAA0EME40AAAAAAAEoAAEAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAAAAUAgAAEIAAAAAEIAAU8AAAAAAAAAAAAAAEgAAAAAAAAAAAAAAM4AAAAAAAAAAAQAAAEAgAAAAAAgIAUAAAAAAAAAAAAAAAQAAEAAAAAAAAMwwQAAAAAAAAAAAAAgAAAYgAAAAAAAAwIQIAAAAAAAAAAAAAAAIAQgAAAAAAAAAAAAAAAAAAAAAAEAgAEUAAAAAIAAAAAEoQIEIAAAAAAAMMYEUYAAgAAAUoAAAgAAAAAAAAAAAAoYAAE4gAAEUAksIAAAQkoAgAEAAAAA8AAAAAAAAAUAAA0AEAEAAAAAAAAAAAYQgAMEgAAAkAYAU0IAAAAgIIAAAAEAAogAAAAAAAAEoAAAIAAUAAAAAAMIAAAAAAMEgAAE4AoAAAgcMAAAAEoIAAAAcEoAAAAAAAAAEAAAEIAAAEAAAAAAAAAAAQMogAAAsAgAAAAAQggAAAAw4MIAAAAAAAAAAAAAAQAEAEoAgQcAoAAAAAAAAMMIAAAEAgAAAAAAAAAsEAAAAQkcwIAAAEMMMMAAAAA4AIAAEQoAAQYwIAAAAMwAAAAAsYMIMM8AAAAAQs0AAAAAUs4wIAAAUMIAgAQwgggAIAAAAAAAAAMIIMcgAAAAIcYAQAAQkMIAcEQkoAAAAAAQAUAAAAAEAAAAAAAAEoQoIAAAAAM4wAUAAAAAEQgAAAAAAAAQwQYAUoAAAAAAQsAgAQgAwAAAEIAAAAUAAgAAAAwggMIIAAAAMYQAAAAAAAAAAAAgAAQwMAAAAAAEIIA4AwIAAEgAAAAAAAAAAAAscAkoUIIAoQAAAAAAAAAAAAIAkAAAAQYEAAAAQEoAoAAgA44AAAIAIAAoQgAAE4EAQkYRIEIAAAAAAAAAAAAAAgAAAAoEwsAAAAUAAQAAAQAgAAAMACAAQgAAAAgwUIAA0+EsAAAAAAAAAEMEAAgAAAAoAAgqAAAAAAAAAQMgwIAAAAAAAIgAAAAAAQEoIAAAgAAAAAAgAAAAAAAAAAAAoAAAwAMUMAAAAAAEwkgAAAEg4MwAAAAAAAAQQ0k88kYIAEAAAAAAAAAAAEAwwMwwwwwww0AAgAAMMQAAAAAAEAIAEAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEcAEsAAAAAEAogAAAAAQAEIgAQAAcAEIAIEMEMMgQkYUEgws80Q4IIgIcQAEAcIUEIAIAAQAoEAAAAAAAAUoA0sMwwkYQwAAAAMIAAEAEEIMEIMIEAEEMAMAAwAAQgASxYcIAqYAAAAAAAAU0gMwAEEMggAMIo0yQggggwQgwwgwoQsYA8cMIcgQALiKGIQEMIqUAAAAAEkAUEgAAAgg0sMAMMIsEQIIIE844AAUgcwAAE888ckQgEkmAwgEs4AKsIAAAAAwAUAEwcMAAAAAQQwgQwwQAwAgwAwQAggAgwAwgQQQAAAAAAAEs8AkqoAAAAAAAAUoAAkswEEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMwkAAAUqoAAAAAAAAUoIAEAgwUwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEwAwogAAAQgoAAAAAAEAU8AAQAIAUYw0gOAIMEIAAAAAAAAAAAAAAEEMAIEM4QoAAAAEQgAoAAAMAAAQIU8AAAAAAgcQAUog0A04wosEMsY84gU8EkgA0wogAAQcEAAEQAAUooAAAAAAAAAUEYw4wwwOMMMMMOOOOEIAIuIgksc8MMMMOOMAAUAEIsEEMAIAAAAAAAA//8QAHREAAgMBAQEBAQAAAAAAAAAAAAEQEVAgQDAxYP/aAAgBAwEBPxBQ8yyy/hfCFw5Q8N+FQofpcL6sQxeZDFnV9FLFnvlD13zfC8zF7X0oXmZ+le2h8oYvKz9wHunusrhbLLKK1r4ezXD3HusW4cLasfzfnvcYvW4W4/7tbzhb6GWIeyip/SthDmtlRWdfaHytCor+HW5UMXTLL1GKLLLhxWF+eBc1LKK012s2yyyyyy5W6t1bq5vSfS4cLXQ4Q4Wi+1DhaqhQxDlbtZ1jh/OhZzFD2mIfxRWixcrlaTFytdi5Q9Zi5Wuxbz8qi16X9EP62WWWWXzZZZZZc2WWXxfFll/G5ssuL6//xAAfEQACAgIDAAMAAAAAAAAAAAABEQBQEDAgQGAxcID/2gAIAQIBAT8QvD+wjBdmfN4YLl5MF0MG6ODYDab42rj9E7Ucz1TdP3h7xg+4zBtcFaZ87VF6o3p0GL9vu9MHpj0B2hTnA3CrOBFsUUXFx/QDjjjulFFFBg9pZWpx4ccceBxcYjj5HpLsHWmg3pvT5R+2XJRRRcVrUXW//8QAKxABAAIBAgQFBAMBAQAAAAAAAQARITFBEDBRYSBAcYGhkbHB8FDR8eFg/9oACAEBAAE/EI8Twt/Ih4jiR88+XfIA+B5QMOLpzx/gwPnSPKDq4Hq8o6HE08bpweaMGnBg8Z8y/wA6cOWa+WY8LxHlQ45eTCH+ZMOJhzgPkxGDgZc8I8B549v4RhwYcHt4w8R5Ejy4MPOB/EGHJDxI/wAQDwHmgebHlxhDxI8qnkVav0mf6phfkxE3VPf3jg2gTHhqkBGncRTOpNBnIeB5ejzo3qfVDODUGDEV1BYehE8YFfXVI0g36JG2M6Ptx/wFqF9EuvmFHIeUDwPhHq5AjDg8T4B5A0LP1jJBZJ2bongkGVfI+xOg40ru4lskZL7wzpr0nelxsrstNIHocxmWhyeE+WOcMlX0uptdiF+sI2rlU/YuLsjH9dCAzOcJWzLN7sXpcAOAlNKmy9tMwdpK63R8ofWkx70e3IavLAHxjgHkwHS/vLLHveAsPbtyu6QAwqsE74kLF1ji+7O9MingNOILRDG9y72Ktq2CfVA1VA13twsMAxt4WCNnlRyl7PxHtQoQOqxrcG8e6T7/AGPcRg9iLWO0Q+2kU6xT40Vkr5YVi36hMLLpQs/Pj1cx4LeeAeSAVKkCDjemmBK53+ojtLH8ehZRrFVqtu4qtuXw5u0kDoEwkdpe70HaB5z7YCFFeI8Fvyo5BeXoCXDVD/3IdWWr+0bvtNNkws77oyqquW+YkFSpW7bl0vo8gGDkPbyAHwHEeaVmmesabVbPpbq9pSRB7iIzMd6NsC9hiOKnGIrw08FMJevA/jBQL8NnGQ29YVUeyHYHjeB5M5Abn2S+Qoe3YHVm41ID1RSHB9og4I7i/SIr0vmmpHwO2ujAXqgGq0q77eMdUqvNghwBDygqKzJkUwsQ1VxBXooWrhMPYBiWxlr1itHPgE3W0rNau0F6KibsKeHQv3hq/e+TcmilyHyp4zQpC5yIof3Kxv7hCo7TrR6YCY6P4iqq58g1seNkYkFN9lniecLZ5wQhxy1cBagqYGqu0Zvfq+hPsntvucEENMRKt8XogZsssmAPrPp6QQMXhCnQrkrHyQ4g8Jm6IdPaBaEWkVp7CNfQiH+lQnQPzFgrbGK37xT5JKsi0ZW9B4niDzIOIchUqFiabyqkmPCWbgPU/c7xgLr1rWOSsYz477/iFlFnV/QQ7eB3YDb1jmK9uU6+TGPEwalHpC4WlR2QflENdIvur0iOlnrFLbWehUu/KZk0HtbxPEcpeeOA5JQE1Q4YW6DeX2ol9ydiKHC3tPW4ot9It6+MTmsdZ0ZuoGx3bTI3Zl7mAZ7s45b5gchN4zYiOBW7P1MBAHePN600xbXy4oLZfLxDxEHJE4HNCOPAALoiAybaVGot7RFaUdg4TG0sodXpKrFtB/cIn3d+DpoD0qWOnIC3EeYgAtXaK4vvx3ek7QgtTfQhzT5IIGfANL0i28mU6Q/KHSwT67PslAinv5cFwQSqKsWA9beMeJyXTnhGDgQQpSJ6B6sS+rdC/ozLhkMyA+4D/oy7JWJLY/Mwm2OD1RqlGbv2v4jAq779OQFtEAyrOgiPUDrPpDEgNA6c0fKBwYBkO4jcQii20q18IBGz5hE01eH0g8UId1lLaDeh4XwDzIDjYNESW1ordHVjmXnbAHwipzYjjaPUw5YbjfrNm9T15Ji8mcsCq6zA66ExvlkIQ8snU5g+UOKiBloNT0nQzQMlu6GBPvhbrFtt8zqjWr2IkU3YDwviXHHMADyhwdQhbblOS9HVihgCaNhbqKWaOEzcVVrfMGvSBzH3Z7jLmZV3BApVm3KHu8yYAgVwADqsSzaYo3f8xQFyotX1i3r5o1i2gXqNB4j4RwYcA8Dwh5ZwXUjetUgGuYMPi6LRfaaFa9ea5wW1oMsf5RvQfuICFFeB+fWHiHp50UvXMYJAWVj3dpS0XLHW3SIrqWt6vnNWI5qPrYZc+J8I8I8TnBx0aYfKGDjczox+rE0N92a8u1twfeHpxYA0ojZ+Jbsju/6lRUVAD05D5s4K2QdxIW6F6u8UOxdnV87qtz6zGEEtb/oPE+E8YYQ6cw8DfJLa5j6azVGPYm1eZc7Jn87erUZmc+wt0nUxoLDW/wCECLNwpbhap0DMvx8IahWKpXK+dVW1h1D7IdNEdKPx4nwCMHgNCHE8s8GiNGoL9FY5z7fR8JvYb9h4v8HGRgyNlDSzV9YttK86Fv8AUdAGhpi+18b4BwJv4DXg6cs8JYmedGHzEtE/Ur5uRUaHW/XG5hbCfYri/wAGaQn1cC/iJrbj745fO3vtBvmtxoD7vjPhHBm/lRS2X6SI9+akcNQMFJxBpdlustoqiiaJ4H+ADgH46kkxBWzoEOvlK5IdS92LfMpExK3D/nidPGeEj5GUamLeAewpiD4st21Z2lgGPHZh0+mYuwZsr/OIAEBoHZ/gw68HXSn7xlomQr+VpcdRfQr7/E08kKy5ItvJvitwYwvySgx6vG+DRwEYwKOaeMDxg2Ak9YKnH9+K63xye4CGJkXlQkQpZL4K/dIPw1h54U8Ckuq3GS/MYENzz2fzL23d735EKo6XFvTByVFWABAOLawTQfDmBNHAxFnOPGLpbhoq/J7R+rhbpb9/IKYcnRgmn2eogLfqEy1kNxceezHhPnhkKsziialMEH+UBbIbIxcg7PkHHKyy3ltXb1qHKI6AFB41eviGry4YMEb/ALQxpBgVD6L8igckDN49i/V3lccP2KN4lZfp/Bit45sZiK1ejgfmLBIDR3LZ35w1fKD0uGc31Roxfeop43wDgDgx1rnHiX173dxHdilmAyF38xbt8lTRd+n5gij9RBrD+IP7NDvG8AP8AVHRE8t2baPXslyZAGP7qVVW+We8FRxmW9Qr3g7BzwFDkPhPVwIeBb5h4r2IoasjRABEy+IGIuXLWIiz/cRVp6xcUOOWNaTO9JXoRuRTA+4j9BpFRfTZ8TqvzpSewjL/ADotxjY7zOYA9bjaeWs102lDV4OFq+i/SVWb5g4EojzjwjWoDMAvQwPeJyZK2TNdOp4qWd8JuSypVKB24NKQOr3LugRgitwN4dzu7cuxC8Brif12hVWFcSINQdmt+YDkBbXEVGw6x0AcIPQ2JZHRl7LYERW+VFuhGLIB6ZmXxNL8uwVPgl84cHMSvJDZnB1Zf/QEdX7RmFozuWeI6qway6xg4jQRrvGPQ/NKU7oDKUV6EWmQsaeo7pdwAC6F295a9TWWwy41rlAWHUEN56W8AmukghdwHy4HjCWtMQlZRW/T0jGifSTsRbatHJpedI40YPTmBWib76wcjpdRe5iDnBBxdPIlS6YnNWA7tCMPMXYXBFvXxI0FpoA3gHvVHenqwY2i9ceAYHRxB1uKxxaGrd/ohEjPQGtIiNOHlJWVYm0eQQzTZe0QPmFi6g84VG7cK2tpS9d4YqO6LYp/5yQvSCmuZc7AsdMpszTq934gUQz6BgK9ucEGJR5RTCDHDImDletkCqrGPFiK1vLdUfZG6H7Sj8YDTYHG+LYt0XRiYxH6DdyEg6G/cdTvAiiU8oA77Y3hhnjZPc69kzhSeGkT3rfyIp5LKFDKszjcanWpv3jbJt2j35IbVO964JngCgegyikKMY6cw/CNWSHXG+Vzd0NIDe3r4nxqxDgPlAVfQGALhqXGb0QexfvErnPhBWjMuTAXgG16v7lNt4xxF+FzZDMUhqGQOnQzvCcBJl7JOW9jQ0uHcgAw63/9JjkEx8YQFvGfGAp5L3IYiZfAHWNlm47vetf0IhC6it3yQtxNCF677wjczbEf9EonJJ6sHyRZcWtaOnQzARsd65QDm76RStw1Tf8AilMKejHjPj24HAc0HhGzTLOtNNnd+5iLc9+vhG1sO7BgxpfZggNJeqFPC4+NS506zGn5+goW3XIU2+yRQLZjlFKxNY2Evpk2e8C1qsu99TWVVbMG62eUSafeUSAuB3isBL7sHX7kZlVXVXlNfoAWr6QQe0H0OzFb1naADgwAgcjMhlfTm3h7qKGkKp5FirdBtKVuSx2e7NN+chgOeIeIhxyg5AAXNELBep9Yj4LadukDV20E2CCqMlHoN94/wI8oqZSMXB679Nm0QV5on0TXujCtUfnlnVw4ZOibnaYbb0xBU1eyGhPJJaoSifHA6HftGltE2ZpT8It68oKLLAnQIcciFDp2b7SqUioBoHgq1uwCekMuEoi7vQwmuB5GojAqlv08AXpDBUFNc7ekA4bH3KekBJmOd2oFI9G8ceQAcR5R42NnZaH4Lg0BNHUbX58NtF5xjFMrFn5am/T1ijfA8xgfqADtUdeDM9VG5CwkIhSe3LL0uqCd4XzpPQWBwFjW5r5C4bQpfoI+CJkDgvz2pexpygu19nt03XQ1YRCCCo7e7Fq9GyPhU31Obg2JnbmG8MsMYC67hHCxBvSUwS9IdChddH/IHLVx3WwhDtDeiOnQQO568D5EDyRELHZ6RBva2FbrfhJYgkhtF3ILXXvAaFcHnG02CrdPeVYs+pjZdm8d2Jd0BWZ6Q55T8qLZkZTnTMth1DvBiJKgdxlHTnbVLiVZC8/WLjiNfHTfRmKn578kTa8b1tE1tZLrdAGZrZvK3rbY6QqUrEfGzb+VjqIUZOCJ0tlKZUH6biJEi2lfeqKlN3hOkXohMqHrChpNHQhGHgB5RDxPE8TkDoONsWfiFNbvtifoR1fAGyqFm6+vSHOO6Cz1Fj5G4Y9Eo8KH4Ee8WTWsIff1i6uTpF0afv8AUtuiNu8/ptDLUWKuz0dqiOsy5a41zUHdiCfjIdKI7aIxV15FAFQI1k794ug75JbvaBvxBdYvyqGWkeUwxpCC3WIH/CPE54I8R4zlDzIak/QxhVa5eIW1BfmtRbBPovnGL0tNTyehrFHA61RCpWZHYbBErXlthE0B3ehgHAFRuCGk5RcOYWkm/wCAyM8I0/YgiurPJLgSu8x0ag7urCNhpR1WosfIvA4nmjwHIOScFxbTQP2/i4rehxcwtWgC8xCsZJnqzqm7yowH5hh0qb0jv2RGRLvur2e0SnlLZ9sTMlxfcBBOaqOCAD3R8fpEpQHx3TMxt90V5SpYOuIa9VaGfQO8ExU0Hlw+VBCMOSfC+TsP8j6XbeL6fbiLTT3mZaotLT2IfYcA2hXlWbxQ8IkdAmzKyfddunTe+8SuUFro6ZzZLPgG0Ak2Tp+M9oslmw8HgcAVjLnOWb33h2Zb4jkhbiOITQFm/SPz1wXR0HaA21UgOnl3mHKOBMf45KkqvvwYcJUp3ZVawLlB+QPZPsBDm/F8neY8qPA4KgA9lBA5mFdE3gBo5a+kSmnk0IfQCMBsKBXr1jGubXvp/Yhra4gnRPAyq2UtUQPKB9TV7920vuia1dXkiVBcsrweW2msg7HQ6rA4CABoTHl3yEMPCw5YFfWN1gfbhcIisoY9oA1mLjNSItPlwGEeKnJdlAkeU/uF/oRSasER9Ila8mjsNUYaTK2BjQ0j8ABfY3fslDkrof3Tgyr1ODqsbFuFddW0IkZaq19+T6A6wai7gq7vbvDsjC2Ttb5Qx1t68HieTPlwOYNkwRe1UTVB4ZvQYAISZyNToXrFCBg8L4jwHgYQwQ+A4BiD6dOiAbsRyY6onpLdXeOUmiCx/ZYfAwOgDYfay6cC4YqI2GDrcTXXAsdIp1btu+TrnB6Sr6BHcE2JmtVMj8ZCr7Jp5UGEfMBzKu7/AJLMKjaGRXYlUQ9wU0J7vb14CACjSMHgeYcXkYodJVrIrVGJs536uusptUTA/UEStSuVbvaAEtFQvB1+3JEuC4JYN5sI3Eh9SL1doI2zZbu9nZAVDArBy68Yc4NHkBjmU6yaU9R2Zna0uX2UJABoHSHnwAYwdJ7jrE3qRvznZFX5H1qHV2gAr02TyRIaavGs1wKu20cEirBCAMwH6zcMBDFVCnf+CAXp5uoxv5scD4itc+0OrJR2mwYio+VH3X3jpRLyXueRvSGd6h9F5w9+v6wsZ9GK16mFFL+GBn+BfOgAqiOi0JXvHV5Iye6tTvF1ZntEWSucFtEAhq0Lp+htKBw2AdoUeE/+CMPnwkxlmE0PWFnWSuoPTtAQKBRsqucR7B4TZWew1Cy/7YAGnJB/gBj+Af4A5KhJxAOiQNKaC6lPw3ikuAUo25gWiNi1jbccjslkKx1fG+6+iG0gaHieAf58wf4E3OMdYEQpjXDV7TGBmQm5qq1WV6FByzm2C0OPBgglFdvr4w3Q2E8T/wCBA+Zp5CdbuIC6wDqu6F2ctxbrz0PtsNRinlSVps6zvDYkpwdxhQOjwP8ADhnywUzPR5s5GMwpgO7Lq0t0bdfnEzcXWD1fImIWpZb1fb2igTrZXR2MMg4vnlMSvGYPLGj+CAF2uP8AM++AinUG+h/RmyZzn18nWDZcnWNfXE/QawQwiit5jc7kB0bbri/wwZ/kh4gLWDu7od41BlVidP7T/g5V7tXv6cuih0OsbsQsR6jZFsFrgH61BpSwB2OD5o5QOkHBl/Gg8aKfyi6NWvuBF5KxQfIyxryQvSCXV00W+OWmrVtXB7fhuAOrB4DaTUeXW04MzIEUoutk0EOI2SNGDXWSLD1QdDg8SPkNQFz3T3T3Su09CZ6fE93B7p7oej4jlAenjGDkB808R4lEy9JdHjblr2d4wNdf9MHV3i255NKKM7sutF0h/W5VY40AHywHDQJUceD02MVMLtR1WQjhs3zyhRWw43r23hrGnRo+vWfXMoc25Ae3OhPbwB8gcBC9Ri/JviYRj/X8CeA8TU+Z9N7kKA9Mjan0QJYxoaHIFoLlTtelPeAbY4pNnTugtgVp6HHVINwejUdn8xuyRUOsbiUPU9OU963Mw1kJoBkMNywtW+XoWwzuTueIeWPKj42HE6eE0PMHBg8IXgz0QZDf8EcYm/K/dpcvQ7chFRNhT1qaPlzJ1f1cGD6vA6HB43Jgz2+VEtwNUiH6nAsNJtXLGmFxZcv6gEts3HteruRCdBw8iPLFeMeA+AfLnIJkALVSomAaAlnq90dA99hqsei1gy4zvjkas0BcCALGgAysZZliFoH7N4R3VGA0Dg+KH1KbAFxD7Q2HZ2lN02cz6t1vAnvHgMKC+JlHLA+E8qbvBtLxfjY/xyB8mxyw6STJQbse3JgdUhmKLVcrLjWDkBWiMSpNQsvigHtgXSB3aQAG00MeP14TK+nzhuR3pqK9sn0MOcba+vMYcq0qp9Z9C1kJ1kDei9l2crH+OB4nlTZuduQ+EHB5ontPbnH1fwNBED8Nht6vHT7RGpNe+feK3PIDEwhnLFwO26YbcGE923ioAAUK0j2hyO7SU0IV97GoBICjFcPuJ2l/YljuREc8oabJRDdqfSFkbZfcNvtDSCQa/Q2f05TxRh5U+YFPAK5wmNRQvnKHobk9JA1h/oiqocS7115CqvvMozFjbSobkp9Hob/ZAoABABQe3MrELyUgLEh1/EHdYdYTG6GiiV0mj8coacT04hb4LzrBPzPiOsCNyFhX8CDyHkHDgZcazK8odTNQx7yy/qExcqPSk9TFtt5N7Qp0b7QboLojpD9NUI5kOteyaYNOf0j2jIVnWfTaKTXWA7QA0JVXyxpxiC6lTHGz1IQExcPs7oAJgYd+8rz7R5BrD4Di8AQfXgeUHR8oft4/pgIy+2mu2HXvFbjB0vkgXod94KoR7U9iXQX1S6fo6QNaZhjDyNbQxmCm7F/YiV4rKDqdSWmLDXlqkY/07qFdoF8DM9F1HfWCDAa0BTKlSvOaoOAZmvwEeYHkiKIY1UI7ZcmAfQe30Y6R3OS6Yb4gKvuvQIRMbbQHc695Wn4QANDybJ2R2BMML+GemD8CKpaV0vPMFHEGHhefu6S5STBHobPGuTcuXLlz2ntPae0t0luktNoLtC1YZlvT5lt6T0z0R6y4QeEceMcgIeAc0e2ld44ZtWFvt9IqJ7TtgdzSK0XYcmy10OEUG0C3GLwvn6sCtyGCuQwcxdayyotoOgkKdoxe9F+CK5AtQp19oiNPLTQxBCe8S7217wff/lXr1d0xMNCVKlcoeN5IYh4HjDxOQR4jkjMqW0TfWEUuFhfoI02VqD35NXpBLnEEk29Pq7d5Y8O8L/vcxWeIB8AMOalNo6UpbDv0M9M4lh6PrAKqpAyfeEVs0xaXywBF9MRJlH0AepChsoX6RiBQw9EZi+NeM90tl95feX3l95bzx5YN3JD1lS6INO8S6sF9T1z9EWYS+E3vlbi0uiQCwbZ7vYhZAgafjCLAWevMAhzRaguvhYF2i1RET9LXumQ4t68y5gjqUj1uHr9ATsSBV6sg9VxKZ4vnz5MqRJc/ReAlx/QNWKe5/E3YCA+Khsy2N+0ebcv+dovRbF/JEBQO1ZWC7IU+8qwcq7u8Sx15Jt0gpemMN47EJHkHL8BH2PbgPmwANJtfhbJK1Zq11j0/xFjMRilc1BvFia3iXy2Lkd4CT5tnsm7tKnB5geSwjxeezVY3qKOqyg1WXvOb+jesWiqp5TqB7Rfb0gi047xZzEuRazH2YDctMPfO7GJ3KhOqsW9eVnJiB3K9CElz6mRsEvkU38yBsx4TVKKMAaGHqQT9GMlbRB9ObSVVk9+sZsn3I/oC33wPzCh4PhfEHkj5IGUzvcL0JdDwtU9fQiYW1XjEbyxbjlHm5WdymxGOqd4gO0Cja9HmjbwGiEo6RSCzaXFj/QnxXFnAqJW9dO/NVNzcdOHxhBQX3bu7I6aVXjecHKHTyATAuK21SfTUeotzajbDr5EyItp6soH9p1Qf6Igny4PmR4x4KrzU4H5CMxRaL+thzhNnvoNGEWnQG6V2cg2Ft4zHmgcs+QNHeJkqJetYfaLBet8bjnSPpymTrLpdcwKWkQSDyg3AFhYOeonZEppxysYcL9au70J688h1ejoQ1WPR/DA7wqo7d+EWOXf+pEV2D6/OOaB9LFJ1uVU8YobLoPePkOA4SC9Hr4HmBSHLdPIGUpCkr9V2X34klunaC4dLnK1xfSJyJcUVgp3YAhnRYiUYPLBo+pQpWurAVYFW+vAcXVG6uUNGuMb3PUeI0rm+8LBZ6gB1M+UtaG4YCv0+dDlLhmMNgW+xBnx9CuHRqJTnXmIrNYiFUGxmomAb9p9EdW2HwPiDo8Bghyhy15Zp4WXGl9iKy3gsL7pbTc18Bhqm3aV6FMiigCDsjkHUJTW2OAiLVArXRe81NkrVFB+jknSGYe3AY1Nm0F7FsoOwOVwWbLRRhc9P+RKfANek7nRG/szmAGVagrUfNBxpwOUYHRLE+ThhX7MCgArFb/usRNeYBUiVINjcAqdz0a+3geUDwPKgax5A3NnCgCRUo3W5/wAD4QI0agsYMaYhi7xId+rNqneI397gcInTjRmm28ZmW8FqJLqJtO/5oVjGO6Ork9N9TRHzaOj28FI2ladol24PoK9VUU0svzocoPDuFO8T62/INEm5QSBqHczpH7nVgIwKUJ6vLGondN0NTwOUeQeI5D4HXg6PjDTkMdSK2QWUDQQD+gg7YGo7eErQ31VAZcUoJpN5ShRjZpDPwIufdTZH5ON82TYQC9E7P9cwMqBe/HXRq4CCVITrqDMvRrgFifw4PEBCsSXZvB3Yy3ZduzeMX4FSGyRKc8o11qJW6i2p4HXyrHF08V94w5R4E0oQLB3hTZE7GCC0FNZ1O0aa+G6lxr1v6Cbz5xCAWQDDsVp0PVBtr3AD4CR1axxsCa/dG43kt8fx5sY5kPgbEVtC4xobTBfoYjUtcUfjvL2hlNeSQFRQN52RopnfivA6+MOI4GDxkHE6eVAbGHRHK47D8JZwx7amx6xEiUmvhEY26SnXSq0gPpqnZQ5lVf3jrS11gZxwC2tJ7npErT5RQIYeRQ+JoYdZ3uh65C+lDAfqCCntfjAY6I52Q+prSD6MDYaeB15KfCcwVv5SFMGA6eL4T0YAmZ90H3IuQuV0fkgpzylkrNAbs9sbgDeSMcR5AAy4Y/x5EPjyE3plho1N0yPoRHqmv7semsXUe/hBWjKwBCnrutgP+Qky4Zk6vpiYX4B15Ix/iMOMeQCV5E0QYKiWj1H5Iy60pi6TF3JTEP59pjb+NGZBuiwHFurC8GAMB/DgA8k1VW74UG9haC6ChZQJnMQ3gO0M6NfpFxFQNrMlkOttvwcH6w0fhEpEavAdeSHwDlngR4nkxUaGJYkQIdEa426d4Y+mjLyBHE+jHLWnoy2hTbWIiek0QovVwfWY1jeukJtosjeN7+kUII7w6YCnpwP8DcuXL4qlSpUqVKlRlKhAOjojpzmjL1WRah6kB6kB7MLeaaK9d9HD6QxjIDAcQ6vAHljmDxOBh5YeiGV/EbojdntV8oKvgtTHYKAsG6vHYPsTMz9L+4i9dNMPUX7INQWW0ei5+ntK2Cij6lqu6ANmPSVK4JjEzWWZmt7iq1TQ1egoNnX6jy94Kt1GwyYYLchsjNW3fpC9RjjUryDyzzAAp5EP/APhfIHgOYYHgDWN2MUynr/4wy5fiB5ZngO/Bg8kCqSMOnvxHE8SvKmbR6p7JdBLbWtw/M9jSEXnobJZU3Q/5j25v+RPqBhGUpukx5kLb+mWsNi/ZuEa75/whmPQKEPs3BRTRPZI/CAxNp/a7z96/M/evzOiv26xH2TNS9onyjGJD3hMawneHyhRaz6h4Iv2wxvqdHDoN+pmI1p2h/Mrr72UDX0OxBFL3HpBJW2pmICqOR5D4HnHE4OteTCMfEo6w62INLLg9U0lz4InRGFiNgPW2XobqBPRUn/MSzBZP2Y8ti1WH6Qajzr7p2oYB+Zam3rL7VKokzYPwQROrn+0OPU+m6RR6X/2zBxphqTW1a0/BFVG9UhoJquTLlv1Zi5e6r/MYtL9N4/IJx1iw6xMstuWW8BqD2mOkW9fDdd5fpLdZbrO6vpMNCfrM9n0l9MS9US8zvQa0lwanSYI0WHxCU+FxT4zP7ozbGdNzXeUWmVgoZQvS0+71w8KhRIwS+nWdpU+9/aM0Z+8Aev2Q1ndZmHywl2HbHxBGHp8wav0yn8z2yH3CN/o20YGTO0L7kZNJ6JbpBvlHB18mCMeKpUqGg3noiK36GAli1QGf7TEBAoL1LVDKUK1j9WDBMwg3AgXe0epVdY4WSosh6qOuWOPvNxMOV0P2E02u/8AbLB6vvzPn8YpWrl6q6O38tcu9fBcuL5CWhj9Sma81Z/19oRYBlHPtMH64H6jKMdq9A4zH0TR71mRFhdI6bIYTS2ZBV9cRw+viBP+kvAaeEa8HLyYRjwY1MpSRDVcMvKpSo0WjAa2pHaCfmKnYOkzD7DHI0UFrO6pBoVoSrJVpXwjTiLbzqXSWq6xKYFvrO4+xLfSfeqDXFfWWravWKNZfpL9KlsWVKdyDaJ9Cdp+jN+30mxJ0fqoM0E+uPQI2ZP4jf8Akz/TynY98631kt/vT/YT/dSrX6qX6L6TupU0jc7T9JbYv04U9JbpK9Jb0l7pKe+IlS3TyhjQoqoPE72F2PX7wM1gv3y+orSMiZQMAPkaboY8AMWMFRQdfAGvB8mRcz+5pqzM02vhSvsT7QiwY2fARX4j2cUkVb9op1luM+ktpbVV7cjFijVmjwC9JfY094o27y0U9ZpcZpTp/QjCd0L+JSU9leMV36CrMSdZOsEFCbpFCBAnE4QmBeIgGX+6MZWSRZdkusr2CQC/XqZmj2mM/eEIMJEGNqQzIoFXeQe+sIGgfCds0S9JjLA/rtNC/d9Ifsn4j+q/aP7L9p1f2O0f1A+02X7PaOoT9ekf3B+keGKrGqL2T5yIeqxDXA74RRf0WGYHokLp9gT7zUh+skXFafTTtH7oEVmB8wj/ADM0SASwm39SW7s8ZYFgstp1ksFKbiFrWa5MLcE5ode3aVZzOux7SqNdFPvLdqiJrybrSCK7MHSCXYA/QfSA4gFYIwDyEBshwDXg5eTEdY0RegexQUsYtdBQVGjVjA67vXxAumYCWOl0V+dQF1/EAWgQ+6ElkWLdMeloQWAkQOuICKKKC+iAwf1kqVe1mj3ZWuS7rPaOsVnw0LJqEB98bB0sTezBI+hDyodohb+Eo6caOnm3wVKleBlSpUqVKndAGkK4h3lke1Do2iRZjhkQ744HD3hi3MUqLc/8QiXN+jPWAhVjFY6MPXGgFdYLUVaId69A9YgQJ7FMpiN8IhWen3iI0j4Coq/aXqSYZvpNIRJaZ6m4+kzLwDXg6weSAjrH9wrCoDmv+kevjDfaPOBpY6MpipQ/rDFv0IcOGgoQMlO0wWINMO6wL+OjAYCbKl6Mb3GpT0ibdJptd1S3o/TlqGr4b5Nz2ly5fQl+K5fGpUrxrUs6y5Z1lz24WdYtSkDKDcsupfiHeVBh035mYOFb2feWpGCfhQOmtta6/wDJjs82WnrLunrDNSjEMe60hgLi1/pRX+pgCV3YZWtncurWkW23PgRqNIXWev8AyWMkYQLHR/wgA2LbjR8wo8AbcGCAzy3xCOsbQczQdE0RRhWzJLXuvrFSCk8anSWvsS711vpL6LCt8xK3uFRMvYTRK0jderPtYFZWaNt6xQCdbb7EQ+sYX+UxDpkP9lb3GfkxM9PQV3YqfeEJ2ob95X6Xqu8M211+zQBk+8j5pJsYi9LHw4PuE3Z+tYqbYsp8d398Hv0T+2XPsX9s0Bf16wG/2xvD45f2TUH7Jqi9sP6jn+dn+Bn+Vgmn03Cn+Mn+Mn+M4C/z0/wM/wA7H/iJRr9FE9T9v9zQF+3WfKh/ZMX69/bPn0/tnybf2z5GP7Yvlu39kSy3qzYU6l+Jdu4nFzZ2ohXZ51+H2/7w97GmCMx2pHpBifaNWk7yHX9QGk9aCGxhrMJBUQvoz2i+zP8AkEXsv9WGXxrQffmKi3m7WKLYV7wroHuDO4v1i3ryAVQW9JThvvW37UUAIWMC24JQIgsQAgABoxxNeDGDmPhEdY/ONkFrUS2Sz7QUTckXID/oMVrk1wp19ZZ0PmKLwnXnW7Mtu3CmpZLHNL9JQw+sxCjjHvKOp9pQNL95e95neiK0PeVuD94G+QzIA90M4funx0B+Z8bX9s+FQfzP08feBqGGkWiB6RGknqNIY8EeXLkzwDsd1vUTPAWVIWvUH/MR+uRdGz9cx+Vn9sUvrF/2T5n/AO6Ksz3x++DOr9fFFq36xbFOuYbGfUnps7spe47zL/kMtIhcS0uWi35Byo2Xkf3vKRRdtrnHpBApVoDNsyypWNB9Qi4Yk9oNXSgqWOCurA7uANw14PkyOsfnwY+g7SmbAORLWzQy2bMmOQPUQI1cB3TQSkYkFjnTEcCZoqtND+Cvjb/GowUBqp00lLAyJcqtWhVB2DgaZHsRskyYQXW3gIa8HyZHxBZW+qozTfBpYqdsKPtz2sjBrGGlwuvLF6BADox1L67zIChv1ih7f+M1VDETYsbBHortdoi2ql+hKEufinBoy+yVqH6bQy+o8RDXg+TIx0fERgDGQcwp+UX6bZbR+h1hhQ3L0YtuwkZS198SjeNLpH/Yia/+Gzu2neWNArtMNBCQbrjoff1A/UwKXmFJBvrlCEKDBW0eQQ14PkyMeUDEzlY6qjrOImfcn2RUh6DQYHUwcdIUGU8FsyqBYXTNX2ljOf8AwNO0pdIzKRCqrX3SOHaLTAL9TGGA3bYUHoXAY5AtjA6OA8khrwfJkY+IPiEBBTeEdsowVhqvCFQKu2Q3FsTPWLfuOJVq3wPrK9OHa/mwzA6Xxpw1RHJRYLFtll0grdiT8AUGsBa6ooisnpMf44PLGIbcHyZGbeJ8akBHbsmhK3yLV7vgir+9OMfL6JkJMJmoZ+qMkoY25ZUWF6nb97fzBqRIf3h+ItCRFa3b+pCeot72XYxcSI3vccewfSU9jYYlLus8s8MaHB1g05weARiY9+SHxBStjeUFGIWYDJU20fWM9og4hs6zDD00TsQ+6JLYMBRslxUIRoppZ3aRy9jWH0VvFcuURCmKWSvfgFqiq67St1eZtpjXVDSG98IuwU9YlOeNPG8JtgtjQB3WHmKYllEu5Th2lpTKZ6yp8EhCQ1+5UpyDoXfWtJRHpqDNdX6QZfHxuYJBFqRemP7SocfB67UYJrsAoqEA6AQi8co+M0ODl4mdOQ+ARm3NDGjgcPUJYtikp0hlUbDYuyVauaVDrZRrO1sEL9fPtjIbCAviXzbg+faA3UUzfrLtBNxv0YKg3uj1i/72tImi1rv+mMJXP+Cif14I6pPWPW+C6f2mrhVaLEd2/eFtwgEab8H61ldoNrWezMb59OFdyI7ypioFyoBmpL2i315Z9NQ/4lRRPT+mZCCFi6CxfmPVZ1+4LlcHcSUB+bX+2GG66j7xMdT+4zKw1RFSDZ/GdhqD9kZsbPzCBoACr4gZQjsEYCnTgUa8HgcoB8RDg+TEZt5gKbL9eBuUlOIEmD5RGhp0g9H6hLj9aNo3bfU4EyZnfe0PX2QU/WQO8D9eGui8VUEyz0oY6+xKXm82X9T45IaQkdH9npP2X9cGCGlfoj5oIb+QPulBH3ZDXPUx1m7gW8zYW6l+ZUj7l5W17br+JQ+3zfC449u+p+JiTu0J/wCOCgulMpKcFI8AMOQ55QPIIcHyrbiGXLly5cuXLly5fnLdZnwZ4Z4Z45mZnymnEt04lukvwDu8YLZb4QHy23AQcWXyLly5cuXLly5cuXLly5cuXLl8LlPWWy3rLestBxLly5ql3M9eFPWXLly5cuXLly5cuXLly5cuXLiy2Wy2WzorwNY8FzVEhrwZfA6eA+E5f//Z";
+const SEED_LOGO="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23c9a84c'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='28' font-family='serif' fill='%23080c09'%3ELL%3C/text%3E%3C/svg%3E";
 
 function runMigration(){
   try{
-    // If version matches, nothing to do
-    // Seed default logo into logoLib if not already present
-    try{
-      const lib = JSON.parse(localStorage.getItem('gf_logoLib')||'[]');
-      if(!lib.length){
-        const seeded=[{id:'default-logo',data:SEED_LOGO,isLogo:true}];
-        localStorage.setItem('gf_logoLib',JSON.stringify(seeded));
-        localStorage.setItem('gf_settings',JSON.stringify({...JSON.parse(localStorage.getItem('gf_settings')||'{}'),logoImg:SEED_LOGO}));
-      }
-    }catch(e){}
-    if(localStorage.getItem("gf_version")===APP_VERSION) return;
-
-    // Version mismatch — wipe everything except user data we want to keep
-    const keep = {}; // nothing to keep — fresh start
-
-    // Collect every key in localStorage
-    const allKeys = [];
-    for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i);
-      if(k) allKeys.push(k);
-    }
-
-    // Delete ALL keys — old prefixes, new prefixes, bare keys, everything
-    allKeys.forEach(k=>{
-      // Keep nothing from old versions — complete clean slate
-      localStorage.removeItem(k);
-    });
-
-    // Stamp the new version
-    localStorage.setItem("gf_version", APP_VERSION);
-  }catch(e){}
+    try{const lib=JSON.parse(localStorage.getItem("gf_logoLib")||"[]");if(!lib.length){localStorage.setItem("gf_logoLib",JSON.stringify([{id:"default-logo",data:SEED_LOGO,isLogo:true}]));const s=JSON.parse(localStorage.getItem("gf_settings")||"{}");localStorage.setItem("gf_settings",JSON.stringify({...s,logoImg:SEED_LOGO}));}}catch(_){}
+    if(localStorage.getItem("gf_version")===APP_VERSION)return;
+    const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k)keys.push(k);}
+    keys.forEach(k=>localStorage.removeItem(k));
+    localStorage.setItem("gf_version",APP_VERSION);
+  }catch(_){}
 }
 runMigration();
-function peekInv(){
-  // Returns what the NEXT invoice number will be — does NOT increment the counter
-  const d=new Date(),dd=String(d.getDate()).padStart(2,"0"),
-    mm=String(d.getMonth()+1).padStart(2,"0"),yy=String(d.getFullYear()).slice(-2),today=dd+mm+yy;
-  const rec=store.get("invday",{d:"",n:0});
-  const n=(rec.d===today?rec.n:0)+1;
-  return today+n;
-}
-function makeInv(){
-  // Increments the counter and returns the new invoice number — call only when finalising a transaction
-  const d=new Date(),dd=String(d.getDate()).padStart(2,"0"),
-    mm=String(d.getMonth()+1).padStart(2,"0"),yy=String(d.getFullYear()).slice(-2),today=dd+mm+yy;
-  let rec=store.get("invday",{d:"",n:0});
-  if(rec.d!==today)rec={d:today,n:0};
-  rec.n+=1;store.set("invday",rec);
-  return today+rec.n;
-}
 
-function calcUnitPrice(p, gSpot, sSpot, mode="buy") {
-  if(!p||!gSpot||!sSpot) return null;
-  const gPerG=gSpot/TROY_OZ, sPerG=sSpot/TROY_OZ;
-  const isG=p.cat==="Gold";
-  const perG=isG?gPerG:sPerG, perOz=isG?gSpot:sSpot;
-  if(mode==="buy") {
-    // Carat-based scrap formula: (spot/24) × carats × buyMult
-  if(p.buyMode==="carat"&&p.carat) return (gPerG/24)*p.carat*p.buyMult;
-    if(p.buyMult==null) return null;
-    if(p.weightG&&p.purity) return perG*p.purity*p.weightG*p.buyMult;
-    if(p.unit==="oz") return perOz*(p.purity||1)*p.buyMult;
-    return perG*(p.purity||1)*p.buyMult;
-  } else {
-    if(p.sellMult==null) return null;
-    if(p.weightG&&p.purity) return perG*p.purity*p.weightG*p.sellMult;
-    if(p.unit==="oz") return perOz*(p.purity||1)*p.sellMult;
-    return perG*(p.purity||1)*p.sellMult;
-  }
-}
+const invDay=()=>{const d=new Date();return String(d.getDate()).padStart(2,"0")+String(d.getMonth()+1).padStart(2,"0")+String(d.getFullYear()).slice(-2);};
+function peekInv(){const t=invDay(),r=store.get("invday",{d:"",n:0});return t+((r.d===t?r.n:0)+1);}
+function makeInv(){const t=invDay();let r=store.get("invday",{d:"",n:0});if(r.d!==t)r={d:t,n:0};r.n++;store.set("invday",r);return t+r.n;}
 
-function checkCompliance(items, payment, ttrEnabled=true) {
-  const isCash=payment==="cash";
-  // Only BUY items count toward cash thresholds — we are receiving cash for those
-  const buyItems=items.filter(i=>i.mode==="buy");
-  const total=buyItems.reduce((s,i)=>s+(Math.abs(i.price)||0),0);
-  const bullionCash=isCash?buyItems.filter(i=>i.product&&i.product.type==="bullion").reduce((s,i)=>s+(Math.abs(i.price)||0),0):0;
-  const anyCash=isCash?total:0;
-  const flags=[];
-  flags.push({level:"info",key:"id",msg:"🪪 ID must be sighted for EVERY transaction — Victorian law s.19, no exceptions for gold/silver."});
-  if(isCash&&total>=THRESH.CASH_WARN&&bullionCash<THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
-    flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Internal policy: Manager must acknowledge before proceeding."});
-  if(bullionCash>=THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
-    flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" in BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory before proceeding. Cannot be waived."});
-  if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)
-    flags.push({level:"block",key:"ttr",msg:"🔴 $"+fmt2(anyCash)+" cash — AUSTRAC HARD BLOCK: Full KYC/CDD required + Threshold Transaction Report (TTR) must be filed within 10 business days."});
-  return {flags,total,bullionCash,anyCash,requiresKYC:bullionCash>=THRESH.BULLION_CDD||(ttrEnabled&&anyCash>=THRESH.CASH_TTR)};
-}
-
-const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+(biz||"[Business Name]")+"  ABN "+(abn||"[ABN]")+"\n\nWe are collecting your personal information (name, date of birth, address and identification details) to verify your identity as required by:\n• Anti-Money Laundering & Counter-Terrorism Financing Act 2006 (Cth)\n• Second-Hand Dealers & Pawnbrokers Act 1989 (Vic)\n\nThis information will be securely stored and retained for 7 years from the date of your transaction. It may be reported to AUSTRAC if required by law. It may also be disclosed to Victoria Police under the Second-Hand Dealers & Pawnbrokers Act 1989.\n\nYou have the right to access and correct the personal information we hold about you.\n\nBy proceeding, you consent to the collection and use of your personal information for these purposes.";
-
-// ── STYLE UTILS ──────────────────────────────────────────────────────────────
-const c = {
-  app:   {fontFamily:T.ff,background:T.bg,minHeight:"100vh",color:T.text,WebkitFontSmoothing:"antialiased",paddingBottom:60,boxSizing:"border-box"},
-  // φ=1.618 · 1/√8=0.3536 · border-radius φ×6=10 · shadow offset 1/√8×16=6px · blur φ×12=19px · opacity 1/√8÷2=0.177
-  card:  (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,
-    boxShadow:"6px 6px 19px rgba(0,0,0,0.18), 3px 3px 0 rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.07)",
-    ...x}),
-  inp:   (x={})=>({background:T.surface,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",
-    boxShadow:"inset 2px 2px 5px rgba(0,0,0,0.09)",...x}),
-  sel:   (x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",
-    boxShadow:"inset 1px 1px 4px rgba(0,0,0,0.07)",...x}),
-  btn:   (bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,
-    boxShadow:"4px 4px 14px rgba(0,0,0,0.22), 1px 1px 0 rgba(255,255,255,0.10)"}),
-  bsm:   (bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",
-    boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}),
-  lbl:   {fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
-  row:   (g=12)=>({display:"flex",alignItems:"center",gap:g}),
-  col:   (g=12)=>({display:"flex",flexDirection:"column",gap:g}),
-  g2:    (g=16)=>({display:"grid",gridTemplateColumns:"1fr 1fr",gap:g}),
-  g3:    (g=12)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:g}),
-  g4:    (g=13)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:g}),
-  th:    {padding:"8px 12px",fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"left",borderBottom:"1px solid "+T.border,background:T.surface,whiteSpace:"nowrap"},
-  td:    (x={})=>({padding:"9px 12px",fontSize:12,borderBottom:"1px solid "+T.border+"22",verticalAlign:"middle",...x}),
-  dot:   (col)=>({width:10,height:10,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"99",flexShrink:0,display:"inline-block"}),
-  badge: (col,bg)=>({display:"inline-block",padding:"2px 7px",borderRadius:4,fontSize:10,fontWeight:"bold",color:col,background:bg||col+"22",letterSpacing:"0.06em"}),
-  bnr:   (lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6,boxShadow:"2px 2px 8px rgba(0,0,0,0.10)"};},
-  shead: (g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver,display:"flex",alignItems:"center",gap:8}),
+const c={
+  card:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,boxShadow:"6px 6px 19px rgba(0,0,0,0.18),3px 3px 0 rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.07)",...x}),
+  inp:(x={})=>({background:T.surface,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
+  sel:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",...x}),
+  btn:(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"}),
+  bsm:(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}),
+  lbl:{fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
+  row:(g=12)=>({display:"flex",alignItems:"center",gap:g}),
+  g2:(g=16)=>({display:"grid",gridTemplateColumns:"1fr 1fr",gap:g}),
+  g3:(g=12)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:g}),
+  g4:(g=13)=>({display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:g}),
+  th:{padding:"8px 12px",fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"left",borderBottom:"1px solid "+T.border,background:T.surface},
+  td:(x={})=>({padding:"9px 12px",fontSize:12,borderBottom:"1px solid "+T.border+"22",verticalAlign:"middle",...x}),
+  dot:(col)=>({width:10,height:10,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"99",flexShrink:0,display:"inline-block"}),
+  badge:(col,bg)=>({display:"inline-block",padding:"2px 7px",borderRadius:4,fontSize:10,fontWeight:"bold",color:col,background:bg||col+"22"}),
+  bnr:(lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6};},
+  shead:(g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver}),
 };
 
-// ── MICRO COMPONENTS ────────────────────────────────────────────────────────
+function checkCompliance(items,payment,ttrEnabled=true){
+  const isCash=payment==="cash";
+  const buys=(items||[]).filter(i=>i.mode==="buy");
+  const total=buys.reduce((s,i)=>s+sN(i.price),0);
+  const bullionCash=isCash?buys.filter(i=>i.product&&i.product.type==="bullion").reduce((s,i)=>s+sN(i.price),0):0;
+  const anyCash=isCash?total:0;
+  const flags=[{level:"info",key:"id",msg:"🪪 ID must be sighted for every transaction — Victorian law s.19, no exceptions."}];
+  if(isCash&&total>=THRESH.CASH_WARN&&bullionCash<THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
+    flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Manager must acknowledge before proceeding."});
+  if(bullionCash>=THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
+    flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory."});
+  if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)
+    flags.push({level:"block",key:"ttr",msg:"🔴 $"+fmt2(anyCash)+" cash — AUSTRAC HARD BLOCK: KYC/CDD + TTR required within 10 business days."});
+  return{flags,total,bullionCash,anyCash,requiresKYC:bullionCash>=THRESH.BULLION_CDD||(ttrEnabled&&anyCash>=THRESH.CASH_TTR)};
+}
+
+function calcUnitPrice(p,gSpot,sSpot,mode="buy"){
+  if(!p||!gSpot||!sSpot)return null;
+  const isG=p.cat==="Gold",perG=(isG?gSpot:sSpot)/TROY_OZ,perOz=isG?gSpot:sSpot;
+  const mult=mode==="buy"?p.buyMult:p.sellMult;
+  if(mode==="buy"&&p.buyMode==="carat"&&p.carat)return(perG/24)*p.carat*p.buyMult;
+  if(mult==null)return null;
+  if(p.weightG&&p.purity)return perG*p.purity*p.weightG*mult;
+  if(p.unit==="oz")return perOz*(p.purity||1)*mult;
+  return perG*(p.purity||1)*mult;
+}
+
+const GOLD_P={"24ct":1,"23ct":0.9583,"22ct":0.9167,"21ct":0.875,"20ct":0.8333,"18ct":0.75,"14ct":0.5833,"10ct":0.4167,"9ct":0.375};
+const SILV_P={".999":0.999,".925":0.925,".900":0.9,".835":0.835,".800":0.8,".500":0.5};
+function calcMeltFn(item,frozenSnap,gSpot,sSpot){
+  const g=frozenSnap?frozenSnap.gSpot:gSpot,s=frozenSnap?frozenSnap.sSpot:sSpot;
+  const metal=sS(item.product&&item.product.cat||item.metalCat);
+  const weight=sN(item.weight_g||item.qty);
+  if(!weight)return null;
+  const pk=sS(item.purity||(item.product&&item.product.purity));
+  const pn=sN(item.purity||(item.product&&item.product.purity));
+  const cn=sN(item.carat||(item.product&&item.product.carat));
+  if(metal==="Gold"){
+    if(GOLD_P[pk])return weight*(g/TROY_OZ)*GOLD_P[pk];
+    if(cn>0)return weight*(g/TROY_OZ)*(cn/24);
+    if(pn>0&&pn<=1)return weight*(g/TROY_OZ)*pn;
+    return null;
+  }
+  if(metal==="Silver"){
+    if(SILV_P[pk])return weight*(s/TROY_OZ)*SILV_P[pk];
+    if(pn>0&&pn<=1)return weight*(s/TROY_OZ)*pn;
+    return null;
+  }
+  return null;
+}
+
+function makeReceiptFn(tx,settings){
+  const b=sS(settings.businessName)||"The Gold Shop";
+  const L=["========================================",b.toUpperCase(),"ABN: "+sS(settings.abn),sS(settings.address),"========================================","CONTRACT:  "+sS(tx.id),"DATE:      "+new Date(tx.date).toLocaleString("en-AU"),"CLIENT:    "+sS(tx.client&&tx.client.fullName),"----------------------------------------"];
+  (tx.items||[]).forEach((it,i)=>{L.push((i+1)+". "+sS(it.product&&it.product.label||"Item").slice(0,30));L.push("   "+it.mode.toUpperCase()+" "+fmtAUD(it.price));if(it.note)L.push("   "+sS(it.note).slice(0,40));});
+  L.push("----------------------------------------");
+  if(tx.buyTotal>0)L.push("BUY TOTAL:  "+fmtAUD(tx.buyTotal));
+  if(tx.sellTotal>0)L.push("SELL TOTAL: "+fmtAUD(tx.sellTotal));
+  L.push("NET:        "+fmtAUD(Math.abs(tx.net||0))+(sN(tx.net)>=0?" (client pays)":" (we pay)"));
+  L.push("PAYMENT:    "+sS(tx.payment).toUpperCase(),"========================================","Signature: _____________________________","Date:      _____________________________","========================================","Licensed — SHD Act 1989 (Vic) | AUSTRAC entity");
+  return L.join("\n");
+}
+
+function makeTxt(tx){
+  const cl=tx.client||{},st=tx.staff||{};
+  return["LOOT LEDGR — TRANSACTION RECORD","Invoice: "+sS(tx.id),"Date: "+fmtDate(tx.date),"Payment: "+sS(tx.payment).toUpperCase(),"","── CLIENT ──────────────────","Name: "+sS(cl.fullName),"DOB: "+sS(cl.dob),"Phone: "+sS(cl.phone),"Address: "+sS(cl.address),"","── ID ──────────────────────","Type: "+sS(cl.idType),"Number: "+sS(cl.idNumber),"Sighted: "+(tx.idSighted?"Yes":"No"),"","── ITEMS ───────────────────",
+    ...(tx.items||[]).filter(i=>i.mode==="buy").map((it,n)=>"  "+(n+1)+". [BUY] "+sS(it.product&&it.product.label||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
+    ...(tx.items||[]).filter(i=>i.mode==="sell").map((it,n)=>"  "+(n+1)+". [SELL] "+sS(it.product&&it.product.label||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
+    "","Buy Total: "+fmtAUD(tx.buyTotal),"Sell Total: "+fmtAUD(tx.sellTotal),"","── COMPLIANCE ──────────────","KYC: "+(tx.kycDone?"Completed":"N/A"),"TTR: "+sS(tx.ttrStatus||"N/A"),"SMR: "+(tx.smrFlagged?"YES":"No"),"Staff: "+sS(st.staffName),"Storage: "+sS(st.storageLocation),"","Delete After: "+fmtDate(tx.deleteAfter)
+  ].join("\n");
+}
+
+const STATE_INFO={
+  VIC:{name:"Victoria",act:"Second-Hand Dealers and Pawnbrokers Act 1989 (Vic)",hold:"7 days",freq:"Weekly (within 3 working days)",defaultEmail:"",note:"Submit to your local Victoria Police station by email."},
+  NSW:{name:"New South Wales",act:"Pawnbrokers and Second-hand Dealers Act 1996 (NSW)",hold:"14 days",freq:"Within 3 working days",defaultEmail:"#PBU@police.nsw.gov.au",note:"Submit via NSW Police Weblink or email #PBU@police.nsw.gov.au"},
+  QLD:{name:"Queensland",act:"Second-hand Dealers and Pawnbrokers Act 2003 (Qld)",hold:"Check local conditions",freq:"Regular forwarding to SPIRS",defaultEmail:"SPIRS.Admin@police.qld.gov.au",note:"Forward CSV to SPIRS (Stolen Property ID & Recovery System)."},
+  SA:{name:"South Australia",act:"Second-hand Dealers and Pawnbrokers Act 1996 (SA)",hold:"10 days (3 if full buyer details)",freq:"Keep on premises — available for inspection",defaultEmail:"sapol.leb@police.sa.gov.au",note:"Keep records on premises. Email SAPOL Licensing Enforcement Branch."},
+  WA:{name:"Western Australia",act:"Second-hand Dealers and Pawnbrokers Act 1994 (WA)",hold:"3 days minimum",freq:"Available for inspection on request",defaultEmail:"",note:"Submit to local WA Police on request."},
+  NT:{name:"Northern Territory",act:"Second-hand Dealers Act (NT)",hold:"14 days",freq:"Available for police inspection at any time",defaultEmail:"",note:"Contact local NT Police station."},
+  ACT:{name:"Australian Capital Territory",act:"Second-Hand Dealers Act 1995 (ACT)",hold:"7 days",freq:"Available for ACT Policing inspection",defaultEmail:"",note:"Available for ACT Policing inspection."},
+  TAS:{name:"Tasmania",act:"Second-Hand Dealers Act 1994 (Tas)",hold:"7 days",freq:"Available for Tasmania Police inspection",defaultEmail:"",note:"Contact your local Tasmania Police station."},
+};
+
+function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
+  const sc=stateCode||sS(settings.state)||"VIC";
+  const st=STATE_INFO[sc]||STATE_INFO.VIC;
+  const txs=(txList||[]).filter(t=>{if(!t.date)return false;if(suspicious)return t.smrFlagged;const d=new Date(t.date);return d>=dateFrom&&d<=dateTo;});
+  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Notes"]];
+  txs.forEach(tx=>{const cl=tx.client||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(it.note)]);});});
+  if(rows.length<=15)rows.push(["(No qualifying buy transactions in this period)"]);
+  return rows.map(r=>r.map(v=>'"'+sS(v).replace(/"/g,'""')+'"').join(",")).join("\n");
+}
+
+const DEFAULT_SETTINGS={businessName:"",abn:"",address:"",phone:"",staffPin:"1234",squareToken:"",squareLoc:"",squareRedirect:"",sheetsId:"",sheetsRange:"Sheet1!A1",sheetsToken:"",webhookUrl:"",shopifyDomain:"",shopifyToken:"",xeroToken:"",xeroTenantId:"",xeroBuyCode:"310",xeroSellCode:"200",requirePin:false,sessionTimeout:"never",ttrEnabled:true,eftposProvider:"none",squareTerminalId:"",linklyBaseUrl:"http://localhost:4242",aiAgentEnabled:false,aiAgentLevel:1,aiAgentUrl:"",aiAgentName:"Sophiie",cryptoEnabled:false,walletBTC:"",walletETH:"",walletBNB:"",walletXRP:"",walletSOL:"",goldApiKey:"",metalsApiKey:"",metalsDevKey:"",duressContact1:"",duressContact2:"",duressContact3:"",duressContact4:"",duressContact5:"",duressContact6:"",duressContact7:"",duressContact8:"",duressContact9:"",duressContact10:"",smsProvider:"textbelt",textbeltKey:"textbelt",duressWebhookUrl:"",twilioFnUrl:"",policeEmail:"",policeStation:"",dealerLicenceNo:"",logoImg:null,scaleProtocol:"auto",scaleCustomServiceUUID:"",scaleCustomCharUUID:"",scaleUnit:"g",scaleFilter:true,state:"VIC",goldAlert:null,silverAlert:null};
+
+function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}
+
+const ID_OPTIONS=[{value:"",label:"— Select —"},{value:"dl",label:"Driver's Licence"},{value:"pp",label:"Passport"},{value:"lp",label:"Learner Permit"},{value:"fl",label:"Firearms Licence"},{value:"op",label:"Other Photo ID"},{value:"2doc",label:"Two Non-Photo Documents"}];
+const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS(abn)+"\n\nWe collect your personal information (name, DOB, address, ID) to verify your identity as required by:\n• Anti-Money Laundering & Counter-Terrorism Financing Act 2006 (Cth)\n• Second-Hand Dealers & Pawnbrokers Act 1989 (Vic)\n\nRetained 7 years. May be reported to AUSTRAC or Victoria Police if required by law.";
+
+const SCALE_STD_SVC="0000181d-0000-1000-8000-00805f9b34fb";
+const SCALE_STD_CHAR="00002a9d-0000-1000-8000-00805f9b34fb";
+const NUS_SVC="6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_TX="6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+function toGrams(val,unit){if(!val||isNaN(val))return null;if(unit==="kg"||unit==="kgs")return{g:val*1000,raw:val.toFixed(3)+"kg",stable:true};if(unit==="lb"||unit==="lbs")return{g:val*453.592,raw:val.toFixed(3)+"lb",stable:true};if(unit==="oz"&&!unit.includes("t"))return{g:val*28.3495,raw:val.toFixed(3)+"oz",stable:true};if(unit==="ozt"||unit==="toz")return{g:val*31.1035,raw:val.toFixed(3)+"ozt",stable:true};if(unit==="ct"||unit==="cts")return{g:val*0.2,raw:val.toFixed(2)+"ct",stable:true};return{g:val,raw:val.toFixed(3)+"g",stable:true};}
+function parseStdWeight(dv){const flags=dv.getUint8(0),raw=dv.getUint16(1,true),isImp=(flags&0x01)!==0;if(isImp){const lb=raw*0.01;return{g:lb*453.592,raw:lb.toFixed(3)+" lb",stable:true};}const kg=raw*0.005;return{g:kg*1000,raw:kg.toFixed(3)+" kg",stable:true};}
+function parseAsciiWeight(str){const s=sS(str).replace(/[\r\n]+/g,"").trim();const o=/[A-Z]{2},[A-Z]{2},[+-]?(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(o)return toGrams(parseFloat(o[1]),(o[2]||"g").toLowerCase());const g=/[+-]?\s*(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(g)return toGrams(parseFloat(g[1]),(g[2]||"g").toLowerCase());return null;}
+function fmtScaleWeight(reading,unit){if(!reading)return"—";if(unit==="ozt")return(reading.g/31.1035).toFixed(4)+" ozt";if(unit==="oz")return(reading.g/28.3495).toFixed(3)+" oz";return reading.g.toFixed(3)+" g";}
+
 function HoldTimer({holdUntil,policeHold}){
-  const [,tick]=useState(0);
+  const[,tick]=useState(0);
   useEffect(()=>{const t=setInterval(()=>tick(p=>p+1),30000);return()=>clearInterval(t);},[]);
-  if(policeHold) return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
-  if(!holdUntil||hoursLeft(holdUntil)<=0) return <span style={c.row(5)}><span style={c.dot(T.green)}/><span style={c.badge(T.green)}>FREE</span></span>;
+  if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
+  if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.green)}/><span style={c.badge(T.green)}>FREE</span></span>;
   return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
 }
-
 function Modal({title,onClose,wide,children}){
-  return(
-    <div style={{position:"fixed",inset:0,background:"#000000d0",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:12}}
-      onClick={onClose}>
-      <div style={{...c.card({padding:24,maxWidth:wide?980:580,width:"100%",maxHeight:"93vh",overflowY:"auto"})}}
-        onClick={e=>e.stopPropagation()}>
-        <div style={{...c.row(0),justifyContent:"space-between",marginBottom:20}}>
-          <span style={{fontSize:15,fontWeight:"bold",color:T.white}}>{title}</span>
-          <button style={c.bsm()} onClick={onClose}>✕ Close</button>
-        </div>
-        {children}
-      </div>
+  return <div style={{position:"fixed",inset:0,background:"#000000d0",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={onClose}>
+    <div style={{...c.card({padding:24,maxWidth:wide?980:580,width:"100%",maxHeight:"93vh",overflowY:"auto"})}} onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:20,alignItems:"center"}}><span style={{fontSize:15,fontWeight:"bold",color:T.white}}>{title}</span><button style={c.bsm()} onClick={onClose}>✕ Close</button></div>
+      {children}
     </div>
-  );
+  </div>;
 }
-
 function F({label,value,onChange,type="text",placeholder,required,readOnly,note,as}){
-  return(
-    <div style={{marginBottom:14}}>
-      <label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label>
-      {as==="textarea"
-        ?<textarea style={{...c.inp(),height:80,resize:"vertical"}} value={value||""} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>
-        :<input style={c.inp({opacity:readOnly?0.6:1})} type={type} value={value||""} readOnly={readOnly} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>
-      }
-      {note&&<div style={{fontSize:10,color:T.muted,marginTop:3}}>{note}</div>}
-    </div>
-  );
+  const lbl=<label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label>;
+  const val=value==null?"":value;
+  return <div style={{marginBottom:14}}>{lbl}{as==="textarea"?<textarea style={{...c.inp(),height:80,resize:"vertical"}} value={val} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>:<input style={c.inp({opacity:readOnly?0.6:1})} type={type} value={val} readOnly={readOnly} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>}{note&&<div style={{fontSize:10,color:T.muted,marginTop:3}}>{note}</div>}</div>;
 }
-
 function SF({label,value,onChange,options,required}){
-  return(
-    <div style={{marginBottom:14}}>
-      <label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label>
-      <select style={{...c.sel(),width:"100%"}} value={value||""} onChange={e=>onChange(e.target.value)}>
-        {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
+  return <div style={{marginBottom:14}}><label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label><select style={{...c.sel(),width:"100%"}} value={value||""} onChange={e=>onChange(e.target.value)}>{(options||[]).map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
 }
-
 function Notif({msg,type,onClose}){
-  if(!msg) return null;
+  if(!msg)return null;
   const col=type==="ok"?T.green:type==="warn"?T.orange:T.red;
-  return(
-    <div style={{position:"fixed",bottom:70,right:16,zIndex:2000,background:T.card,border:"1px solid "+col,borderRadius:8,padding:"12px 18px",fontSize:13,color:col,maxWidth:340,boxShadow:"0 4px 20px #00000080"}}>
-      {msg}<button style={{...c.bsm(T.border),marginLeft:12,fontSize:10}} onClick={onClose}>✕</button>
-    </div>
-  );
+  return <div style={{position:"fixed",bottom:70,right:16,zIndex:2000,background:T.card,border:"1px solid "+col,borderRadius:8,padding:"12px 18px",fontSize:13,color:col,maxWidth:340,boxShadow:"0 4px 20px #00000080"}}>{msg}<button style={{...c.bsm(T.border),marginLeft:12,fontSize:10}} onClick={onClose}>✕</button></div>;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  MAIN APP
-// ═══════════════════════════════════════════════════════════════════════════
-function TxPhotoManager({selTx,store,setTxList,setSelTx,T,c}){
-  const phKey=selTx.photoKey||("photos_"+selTx.id);
-  // Read from embedded tx object first, fall back to localStorage
-  const localPh=store.get(phKey,{idPhoto:null,itemPhotos:{}});
-  const ph={
-    idPhoto:selTx.photo||localPh.idPhoto||null,
-    itemPhotos:{...localPh.itemPhotos,...(selTx.itemPhotos||{})},
-  };
-  const imgs=Object.entries(ph.itemPhotos||{});
-  const save=(updated)=>{
-    store.set(phKey,updated);
-    const hasPh=!!(updated.idPhoto||Object.keys(updated.itemPhotos||{}).length);
-    setTxList(prev=>prev.map(t=>t.id===selTx.id?{...t,hasPhotos:hasPh,photoKey:phKey}:t));
-    setSelTx(prev=>({...prev,hasPhotos:hasPh,photoKey:phKey}));
-  };
-  return(
-    <div>
-      <div style={{marginBottom:12}}>
-        <div style={{fontSize:11,color:T.muted,marginBottom:6}}>ID / KYC Photo</div>
-        {ph.idPhoto
-          ?<div style={{display:"flex",alignItems:"center",gap:10}}>
-            <img src={ph.idPhoto} alt="ID" style={{width:80,height:80,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/>
-            <button style={c.bsm(T.redBg,T.red)} onClick={()=>save({...ph,idPhoto:null})}>Remove</button>
-          </div>
-          :<label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>
-            Add ID Photo
-            <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-              const f=e.target.files&&e.target.files[0];if(!f)return;
-              const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,idPhoto:d}));r.readAsDataURL(f);e.target.value="";
-            }}/>
-          </label>
-        }
-      </div>
-      <div>
-        <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Item Photos ({imgs.length})</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
-          {imgs.map(([key,src])=>(
-            <div key={key} style={{position:"relative"}}>
-              <img src={src} alt="item" style={{width:72,height:72,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/>
-              <button onClick={()=>{const n={...ph,itemPhotos:{...ph.itemPhotos}};delete n.itemPhotos[key];save(n);}}
-                style={{position:"absolute",top:-4,right:-4,background:T.red,color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:11,cursor:"pointer",padding:0,lineHeight:"18px",textAlign:"center"}}>x</button>
-            </div>
-          ))}
-        </div>
-        <label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>
-          Add Item Photo
-          <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-            const f=e.target.files&&e.target.files[0];if(!f)return;
-            const r=new FileReader();const k="img_"+Date.now();
-            r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,itemPhotos:{...(ph.itemPhotos||{}),[k]:d}}));
-            r.readAsDataURL(f);e.target.value="";
-          }}/>
-        </label>
-      </div>
-    </div>
-  );
-}
-
-// ── AI Agent ghost indicator ─────────────────────────────────────────────────
-// Renders nothing when AI is off. Shows a small pulsing dot when connected.
-// Level 1 = blue (listening). Level 2 = amber (autonomous — v2.0).
 function AIGhost({settings,label}){
-  if(!settings||!settings.aiAgentEnabled) return null;
+  if(!settings||!settings.aiAgentEnabled)return null;
   const col=settings.aiAgentLevel>=2?"#F59E0B":"#3B82F6";
-  return(
-    <div title={(settings.aiAgentName||"AI")+" listening — "+label} style={{display:"inline-flex",alignItems:"center",gap:4,opacity:0.55,marginLeft:6}}>
-      <span style={{width:6,height:6,borderRadius:"50%",background:col,
-        boxShadow:"0 0 6px "+col,
-        animation:"none",display:"inline-block"}}/>
-      <span style={{fontSize:9,color:col,letterSpacing:"0.06em",fontFamily:"monospace"}}>
-        {settings.aiAgentName||"AI"}
-      </span>
-    </div>
-  );
+  return <div title={sS(settings.aiAgentName||"AI")+" — "+label} style={{display:"inline-flex",alignItems:"center",gap:4,opacity:0.55,marginLeft:6}}><span style={{width:6,height:6,borderRadius:"50%",background:col,boxShadow:"0 0 6px "+col,display:"inline-block"}}/><span style={{fontSize:9,color:col,fontFamily:"monospace"}}>{settings.aiAgentName||"AI"}</span></div>;
 }
 
-// ── StockCard: extracted to avoid block-body map in JSX ──────────────────────
-function StockCard({s,T,c,fmtAUD,fmtDate,calcMelt,frozenSnap,hoursLeft,
-  togglePoliceHold,setPinModal,setPinVal,setStock,setEditStockId,setEditStockVal,nowISO,GOLD_P,SILV_P}){
-  const mv=calcMelt(s);
-  const pl=mv!=null?mv-(s.price||0):null;
-  return(
-    <div style={{...c.card({padding:14}),marginBottom:10,
-      borderLeft:"4px solid "+(s.policeHold?T.red:s.sold?T.muted:hoursLeft(s.holdUntil)>0?T.orange:T.green)}}>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10}}>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:3}}>
-            {s.description||(s.product&&s.product.label)||"—"}
-            {s.sold&&<span style={{...c.badge(T.muted),marginLeft:6,fontSize:9}}>SOLD</span>}
-          </div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:2}}>
-            Contract: <span style={{color:T.gold}}>{s.txId}</span> · {fmtDate(s.date)}
-          </div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:2}}>
-            Paid: <span style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(s.price)}</span>
-            {s.weight_g&&s.purity?" · "+s.weight_g+"g "+s.purity:""}
-            {s.storageLocation?" · 📍 "+s.storageLocation:""}
-          </div>
-          {mv!=null&&(
-            <div style={{fontSize:11,marginBottom:2}}>
-              Melt: <span style={{color:T.gold,fontWeight:"bold"}}>{fmtAUD(mv)}</span>
-              {pl!=null&&<span style={{color:pl>=0?T.green:T.red,marginLeft:8,fontSize:10}}>{pl>=0?"▲ +":""}{fmtAUD(pl)}</span>}
-              {frozenSnap&&<span style={{color:T.muted,fontSize:9}}> ❄</span>}
-            </div>
-          )}
-          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
-            <span style={{fontSize:10,color:T.muted}}>GST</span>
-            <button style={{...c.bsm(s.gstApplicable===false?T.border:T.goldBg,s.gstApplicable===false?T.muted:T.gold),fontSize:9,padding:"2px 8px"}}
-              onClick={()=>setStock(p=>p.map(x=>x.id===s.id?{...x,gstApplicable:x.gstApplicable===false?true:false}:x))}>
-              {s.gstApplicable===false?"OFF":"ON"}
-            </button>
-            <HoldTimer holdUntil={s.holdUntil} policeHold={s.policeHold}/>
-          </div>
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
-          <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}}
-            onClick={()=>{setEditStockId(s.id);setEditStockVal({description:s.description||"",weight_g:s.weight_g||"",purity:s.purity||"",storageLocation:s.storageLocation||"",price:s.price||""});}}>✎</button>
-          {!s.policeHold
-            ?<button style={{...c.bsm(T.redBg,T.red),padding:"6px 10px",fontSize:11}}
-                onClick={()=>togglePoliceHold(s.id,true)}>🚔</button>
-            :<button style={{...c.bsm(T.greenBg,T.green),padding:"6px 10px",fontSize:11}}
-                onClick={()=>{setPinModal({reason:"Release police hold — manager PIN required.",cb:()=>togglePoliceHold(s.id,false)});setPinVal("");}}>✓</button>
-          }
-          {!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold&&(
-            <button style={{...c.bsm(T.greenBg,T.green),padding:"6px 10px",fontSize:11}}
-              onClick={()=>setStock(p=>p.map(x=>x.id===s.id?{...x,sold:true,soldDate:nowISO()}:x))}>💰</button>
-          )}
-          <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}}
-            onClick={()=>setStock(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
-        </div>
+function TxPhotoManager({selTx,store,setTxList,setSelTx}){
+  const phKey=selTx.photoKey||("photos_"+selTx.id);
+  const localPh=store.get(phKey,{idPhoto:null,itemPhotos:{}});
+  const ph={idPhoto:selTx.photo||localPh.idPhoto||null,itemPhotos:{...localPh.itemPhotos,...(selTx.itemPhotos||{})}};
+  const imgs=Object.entries(ph.itemPhotos||{});
+  const save=updated=>{store.set(phKey,updated);const hasPh=!!(updated.idPhoto||Object.keys(updated.itemPhotos||{}).length);setTxList(prev=>prev.map(t=>t.id===selTx.id?{...t,hasPhotos:hasPh,photoKey:phKey}:t));setSelTx(prev=>({...prev,hasPhotos:hasPh,photoKey:phKey}));};
+  return <div>
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:11,color:T.muted,marginBottom:6}}>ID / KYC Photo</div>
+      {ph.idPhoto?<div style={c.row(10)}><img src={ph.idPhoto} alt="ID" style={{width:80,height:80,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/><button style={c.bsm(T.redBg,T.red)} onClick={()=>save({...ph,idPhoto:null})}>Remove</button></div> :
+      <label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>Add ID Photo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,idPhoto:d}));r.readAsDataURL(f);e.target.value="";  }}/></label>}
+    </div>
+    <div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Item Photos ({imgs.length})</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>{imgs.map(([key,src])=><div key={key} style={{position:"relative"}}><img src={src} alt="item" style={{width:72,height:72,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/><button onClick={()=>{const n={...ph,itemPhotos:{...ph.itemPhotos}};delete n.itemPhotos[key];save(n);}} style={{position:"absolute",top:-4,right:-4,background:T.red,color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:11,cursor:"pointer",padding:0,lineHeight:"18px",textAlign:"center"}}>x</button></div>)}</div>
+      <label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>Add Item Photo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();const k="img_"+Date.now();r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,itemPhotos:{...(ph.itemPhotos||{}),[k]:d}}));r.readAsDataURL(f);e.target.value="";  }}/></label>
+    </div>
+  </div>;
+}
+
+function StockCard({s,frozenSnap,gSpot,sSpot,togglePoliceHold,setPinModal,setPinVal,setStock,setEditStockId,setEditStockVal}){
+  const mv=calcMeltFn(s,frozenSnap,gSpot,sSpot),pl=mv!=null?mv-sN(s.price):null;
+  return <div style={{...c.card({padding:14}),marginBottom:10,borderLeft:"4px solid "+(s.policeHold?T.red:s.sold?T.muted:hoursLeft(s.holdUntil)>0?T.orange:T.green)}}>
+    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:3}}>{sS(s.description||(s.product&&s.product.label)||"—")}{s.sold&&<span style={{...c.badge(T.muted),marginLeft:6,fontSize:9}}>SOLD</span>}</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:2}}>Contract: <span style={{color:T.gold}}>{sS(s.txId)}</span> · {fmtDate(s.date)}</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:2}}>Paid: <span style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(s.price)}</span>{s.weight_g&&s.purity?" · "+s.weight_g+"g "+s.purity:""}{s.storageLocation?" · 📍 "+s.storageLocation:""}</div>
+        {mv!=null&&<div style={{fontSize:11,marginBottom:2}}>Melt: <span style={{color:T.gold}}>{fmtAUD(mv)}</span>{pl!=null&&<span style={{marginLeft:8,fontSize:10,color:pl>=0?T.green:T.red}}>{pl>=0?"▲ +":"▼ "}{fmtAUD(Math.abs(pl))}</span>}{frozenSnap&&<span style={{marginLeft:4,fontSize:9,color:T.muted}}>❄</span>}</div>}
+        <div style={{display:"flex",gap:6,marginTop:4}}><HoldTimer holdUntil={s.holdUntil} policeHold={s.policeHold}/>{s.suspicious&&<span style={c.badge(T.orange)}>SUSPICIOUS</span>}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+        <button style={{...c.bsm(s.policeHold?T.redBg:T.border,s.policeHold?T.red:T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>{if(s.policeHold){setPinModal({reason:"Remove police hold — manager PIN required.",cb:()=>togglePoliceHold(s.id,false)});setPinVal("");}else togglePoliceHold(s.id,true);}}>{s.policeHold?"🚔 Held":"🚔 Hold"}</button>
+        <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>{setEditStockId(s.id);setEditStockVal({description:s.description||"",weight_g:sS(s.weight_g),purity:s.purity||"",storageLocation:s.storageLocation||"",price:sS(s.price)});}}>✎ Edit</button>
+        {!s.sold&&hoursLeft(s.holdUntil)<=0&&!s.policeHold&&<button style={{...c.bsm(T.greenBg,T.green),padding:"6px 10px",fontSize:11}} onClick={()=>setStock(p=>p.map(x=>x.id===s.id?{...x,sold:true,soldDate:nowISO()}:x))}>💰</button>}
+        <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>setStock(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
       </div>
     </div>
-  );
+  </div>;
 }
 
-export default function Loot() {
-  const [screen,setScreen] = useState("dashboard");
-  const [gSpot,setGSpot]   = useState(()=>store.get("gSpot",0));
-  const [sSpot,setSSpot]   = useState(()=>store.get("sSpot",0));
-  const [catalog,setCatalog]   = useState(()=>store.get("catalog",DEFAULT_CATALOG));
-  const [txList,setTxList]     = useState(()=>{
-    const raw=store.get("txList",[]);
-    // Re-attach photos from their separate keys when loading
-    return (Array.isArray(raw)?raw:[]).map(t=>{
-      if(t.photoKey&&(!t.photo)&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){
-        const ph=store.get(t.photoKey,null);
-        if(ph) return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};
-      }
-      return t;
-    });
-  });
-  const [stock,setStock]       = useState(()=>store.get("stock",[]));
-  const [settings,setSettings] = useState(()=>store.get("settings",{
-    businessName:"",abn:"",address:"",phone:"",
-    staffPin:"1234",
-    squareToken:"",squareLoc:"",squareRedirect:"",
-    sheetsId:"",sheetsRange:"Sheet1!A1",sheetsToken:"",
-    webhookUrl:"",shopifyDomain:"",shopifyToken:"",xeroClientId:"",xeroSecret:"",xeroToken:"",xeroTenantId:"",xeroBuyCode:"310",xeroSellCode:"200",
-    // Security — optional PIN lock (OFF by default)
-    requirePin:false,sessionTimeout:"never",ttrEnabled:true,
-  eftposProvider:"none",squareTerminalId:"",linklyBaseUrl:"http://localhost:4242",
-  aiAgentEnabled:false,aiAgentLevel:1,aiAgentUrl:"",aiAgentName:"Sophiie",
-  cryptoEnabled:false,
-  walletBTC:"",walletETH:"",walletBNB:"",walletXRP:"",walletSOL:"",
-    // Live spot feed (GoldAPI.io — free, no card required)
-    goldApiKey:"",metalsApiKey:"",metalsDevKey:"",
-  // Emergency / Duress
-  duressContact1:"",duressContact2:"",duressContact3:"",duressContact4:"",duressContact5:"",
-  duressContact6:"",duressContact7:"",duressContact8:"",duressContact9:"",duressContact10:"",
-  smsProvider:"textbelt",
-  textbeltKey:"textbelt",
-  duressWebhookUrl:"",
-  twilioFnUrl:"",
-  policeEmail:"",           // local station email for police reports
-  policeStation:"",         // local station name
-  dealerLicenceNo:"",       // secondhand dealer licence number
-  logoImg:null,
-  scaleProtocol:"auto",   // auto | standard | nordic_uart | custom
-  scaleCustomServiceUUID:"",
-  scaleCustomCharUUID:"",
-  scaleUnit:"g",          // g | oz | ozt
-  scaleFilter:true,       // filter unstable readings
-  state:"VIC",
-  // Spot price alerts
-  goldAlert:null,silverAlert:null,
-  }));
 
-  // TX builder
-  const [txStep,setTxStep]       = useState(1);
-  const [txItems,setTxItems]     = useState([]);
-  const [txPay,setTxPay]         = useState("cash");
-  const [txNo,setTxNo]           = useState(()=>peekInv());
-  const [client,setClient]       = useState({});
-  const [staff,setStaff]         = useState({});
-  const [kycDone,setKycDone]     = useState(false);
-  const [privAck,setPrivAck]     = useState(false);
-  const [idSighted,setIdSighted] = useState(false);
-  const [photo,setPhoto]         = useState(null);
-  const [zoom,setZoom]           = useState(()=>store.get("zoom",100));
-  const [simp,setSimp]           = useState(()=>store.get("simp",false));
-  const [settingsOpen,setSettingsOpen] = useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,crypto:false,ai:false,integrations:false,danger:false});
+export default function Loot(){
+  const[screen,setScreen]=useState("dashboard");
+  const[gSpot,setGSpot]=useState(()=>store.get("gSpot",0));
+  const[sSpot,setSSpot]=useState(()=>store.get("sSpot",0));
+  const[catalog,setCatalog]=useState(()=>store.get("catalog",[]));
+  const[txList,setTxList]=useState(()=>initTxList());
+  const[stock,setStock]=useState(()=>store.get("stock",[]));
+  const[settings,setSettings]=useState(()=>({...DEFAULT_SETTINGS,...store.get("settings",{})}));
+  const[txStep,setTxStep]=useState(1);
+  const[txItems,setTxItems]=useState([]);
+  const[txPay,setTxPay]=useState("cash");
+  const[txNo,setTxNo]=useState(()=>peekInv());
+  const[client,setClient]=useState({});
+  const[staff,setStaff]=useState({});
+  const[kycDone,setKycDone]=useState(false);
+  const[privAck,setPrivAck]=useState(false);
+  const[idSighted,setIdSighted]=useState(false);
+  const[photo,setPhoto]=useState(null);
+  const[itemPhotos,setItemPhotos]=useState({});
+  const[zoom,setZoom]=useState(()=>store.get("zoom",100));
+  const[simp,setSimp]=useState(()=>store.get("simp",false));
+  const[contrast,setContrast]=useState(()=>store.get("contrast",0));
+  const[fontSize,setFontSize]=useState(()=>store.get("fontSize",14));
+  const[settingsOpen,setSettingsOpen]=useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,crypto:false,ai:false,integrations:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
-  const [contrast,setContrast]     = useState(()=>store.get("contrast",0));    // -5 to +5
-  const [fontSize,setFontSize]     = useState(()=>store.get("fontSize",14));    // 12-36
-  // Quick item
-  const [quickMode,setQuickMode] = useState(false);
-  const [qmMode,setQMMode]       = useState("buy");
-  const [qf,setQF]               = useState({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:""});
-  // Negotiated price per item
-  const [adjId,setAdjId]         = useState(null);
-  const [adjVal,setAdjVal]       = useState("");
-  // Item photos (stored separately from tx record)
-  const [itemPhotos,setItemPhotos] = useState({});
-  // Client data screen
-  const [cliSearch,setCliSearch] = useState("");
-  const [cliFrom,setCliFrom]     = useState("");
-  const [cliTo,setCliTo]         = useState("");
-  // Stock photo
-  const [selStockItem,setSelStockItem] = useState(null);
-  // Logo
-  const [logoLib,setLogoLib]           = useState(()=>store.get("logoLib",[]));
-  const [showLogoLib,setShowLogoLib]   = useState(false);
-  const [logoDragOver,setLogoDragOver] = useState(false);
-  // Stock edit modal
-  const [editStockId,setEditStockId]   = useState(null);
-  const [editStockVal,setEditStockVal] = useState({});
-  // Void transaction
-  const [voidId,setVoidId]             = useState(null);
-  // Receipt modal
-  const [receiptTx,setReceiptTx]       = useState(null);
-  // Client notes / blacklist modal
-  const [cliNoteId,setCliNoteId]       = useState(null);
-  const [cliNoteVal,setCliNoteVal]     = useState("");
-  // Supplier/vendor db (separate from client KYC records)
-  const [vendors,setVendors]           = useState(()=>store.get("vendors",[]));
-  const [showVendors,setShowVendors]   = useState(false);
-  const [editVendor,setEditVendor]     = useState(null);
-  const [vendorForm,setVendorForm]     = useState({});
-  // Staff profiles
-  const [staffList,setStaffList]       = useState(()=>store.get("staffList",[]));
-  const [showStaff,setShowStaff]       = useState(false);
-  const [staffForm,setStaffForm]       = useState({});
-  const [activeStaff,setActiveStaff]   = useState(()=>store.get("activeStaff",""));
-  // Daily summary
-  const [showEOD,setShowEOD]           = useState(false);
-  // Accounting snapshot
-  const [frozenSnap,setFrozenSnap]     = useState(()=>store.get("frozenSnap",null));
-  // Spot history log (last 30 entries)
-  const [spotLog,setSpotLog]           = useState(()=>store.get("spotLog",[]));
-  // History filter
-  const [histFilter,setHistFilter]     = useState("all");
-  // Client blacklist
-  const [blacklist,setBlacklist]       = useState(()=>store.get("blacklist",[]));
-  // Backup/restore
-  const [showBackup,setShowBackup]     = useState(false);
-  const [showPolice,setShowPolice]     = useState(false);
-  const [scaleLive,setScaleLive]       = useState(null);   // current live reading {g, raw, stable}
-  const [scaleDevice,setScaleDevice]   = useState(null);   // connected BLE device
-  const [scaleStatus,setScaleStatus]   = useState("off");  // off | connecting | connected | error
-  const [duressActive,setDuressActive] = useState(false);
-  // App-level security (optional, OFF by default)
-  const [appUnlocked,setAppUnlocked] = useState(()=>{
-    if(!store.get("settings",{}).requirePin) return true;
-    const timeout = store.get("settings",{}).sessionTimeout||"never";
-    if(timeout==="never") return !!store.get("sessionActive",false);
-    const last = store.get("sessionLast",0);
-    const limits = {"1h":3600000,"8h":28800000,"close":0};
-    if(timeout==="close") return false;
-    return Date.now()-last < (limits[timeout]||Infinity);
-  });
-  const [appPinInput,setAppPinInput] = useState("");
-  const [pinModal,setPinModal]   = useState(null);
-  const [pinVal,setPinVal]       = useState("");
-  const [flagNote,setFlagNote]   = useState("");
-  const [showFlag,setShowFlag]   = useState(false);
-  const [showCat,setShowCat]     = useState(false);
-  const [showSet,setShowSet]     = useState(false);
-  const [showAbout,setShowAbout] = useState(false);
-  const [showApi,setShowApi]     = useState(false);
-  const [selTx,setSelTx]         = useState(null);
-  const [notify,setNotify]       = useState(null);
-  const [editProd,setEditProd]   = useState(null);
-  const [newProd,setNewProd]     = useState({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});
-  const [addMode,setAddMode]     = useState("buy");
-  const [addId,setAddId]         = useState("");
-  const [addQty,setAddQty]       = useState("");
-  const [addCustom,setAddCustom] = useState("");
-  const [addNote,setAddNote]     = useState("");
-  const fileRef = useRef();
-  const itemFileRef = useRef();
-  const stockPhotoRef = useRef();
-  const pendingPhotoId = useRef(null);
+  const[quickMode,setQuickMode]=useState(false);
+  const[qmMode,setQMMode]=useState("buy");
+  const[qf,setQF]=useState({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:""});
+  const[adjId,setAdjId]=useState(null);
+  const[adjVal,setAdjVal]=useState("");
+  const[cliSearch,setCliSearch]=useState("");
+  const[cliFrom,setCliFrom]=useState("");
+  const[cliTo,setCliTo]=useState("");
+  const[logoLib,setLogoLib]=useState(()=>store.get("logoLib",[]));
+  const[showLogoLib,setShowLogoLib]=useState(false);
+  const[logoPinMode,setLogoPinMode]=useState(false);
+  const[logoPinVal,setLogoPinVal]=useState("");
+  const[logoDragOver,setLogoDragOver]=useState(false);
+  const[editStockId,setEditStockId]=useState(null);
+  const[editStockVal,setEditStockVal]=useState({});
+  const[receiptTx,setReceiptTx]=useState(null);
+  const[cliNoteId,setCliNoteId]=useState(null);
+  const[cliNoteVal,setCliNoteVal]=useState("");
+  const[vendors,setVendors]=useState(()=>store.get("vendors",[]));
+  const[showVendors,setShowVendors]=useState(false);
+  const[editVendor,setEditVendor]=useState(null);
+  const[vendorForm,setVendorForm]=useState({});
+  const[staffList,setStaffList]=useState(()=>store.get("staffList",[]));
+  const[showStaff,setShowStaff]=useState(false);
+  const[staffForm,setStaffForm]=useState({});
+  const[activeStaff,setActiveStaff]=useState(()=>store.get("activeStaff",""));
+  const[showEOD,setShowEOD]=useState(false);
+  const[frozenSnap,setFrozenSnap]=useState(()=>store.get("frozenSnap",null));
+  const[spotLog,setSpotLog]=useState(()=>store.get("spotLog",[]));
+  const[histFilter,setHistFilter]=useState("all");
+  const[blacklist,setBlacklist]=useState(()=>store.get("blacklist",[]));
+  const[showBackup,setShowBackup]=useState(false);
+  const[showPolice,setShowPolice]=useState(false);
+  const[scaleLive,setScaleLive]=useState(null);
+  const[scaleDevice,setScaleDevice]=useState(null);
+  const[scaleStatus,setScaleStatus]=useState("off");
+  const[duressActive,setDuressActive]=useState(false);
+  const[appUnlocked,setAppUnlocked]=useState(()=>{const s=store.get("settings",{});if(!s.requirePin)return true;const t=s.sessionTimeout||"never";if(t==="never")return !!store.get("sessionActive",false);if(t==="close")return false;const limits={"1h":3600000,"8h":28800000};return Date.now()-store.get("sessionLast",0)<(limits[t]||Infinity);});
+  const[appPinInput,setAppPinInput]=useState("");
+  const[pinModal,setPinModal]=useState(null);
+  const[pinVal,setPinVal]=useState("");
+  const[flagNote,setFlagNote]=useState("");
+  const[showFlag,setShowFlag]=useState(false);
+  const[showCat,setShowCat]=useState(false);
+  const[showSet,setShowSet]=useState(false);
+  const[showAbout,setShowAbout]=useState(false);
+  const[showApi,setShowApi]=useState(false);
+  const[selTx,setSelTx]=useState(null);
+  const[notify,setNotify]=useState(null);
+  const[editProd,setEditProd]=useState(null);
+  const[newProd,setNewProd]=useState({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});
+  const[addMode,setAddMode]=useState("buy");
+  const[addId,setAddId]=useState("");
+  const[addQty,setAddQty]=useState("");
+  const[addCustom,setAddCustom]=useState("");
+  const[addNote,setAddNote]=useState("");
+  const fileRef=useRef();
+  const sbSettingsTimer=useRef(null);
+  const prevStockRef=useRef([]);
+  const[spotStatus,setSpotStatus]=useState("off");
+  const[spotSource,setSpotSource]=useState("");
+  const manualTs=useRef(store.get("manualSpotTs",0));
+  const MANUAL_TTL=60*60*1000;
+  const isManualActive=()=>(Date.now()-manualTs.current)<MANUAL_TTL;
 
   T=LIGHT;
-  // Contrast slider — ranges from -5 (softer) to +5 (very high contrast)
-  if(contrast!==0){
-    const cv=contrast; // cv to avoid clash with c style utils
-    T={...T,
-      border:cv>0?"rgba(0,0,0,"+(0.12+cv*0.075)+")":"rgba(0,0,0,"+(0.12+cv*0.02)+")",
-      borderHi:cv>0?"rgba(0,0,0,"+(0.22+cv*0.1)+")":"rgba(0,0,0,"+(0.22+cv*0.02)+")",
-      muted:cv>0?"#"+Math.max(0,0x73-cv*18).toString(16).padStart(2,"0").repeat(3):"#737373",
-      text:cv>0?"#000":"#"+Math.max(0x11,0x11+Math.round(cv*8)).toString(16).padStart(2,"0").repeat(3),
-      card:cv>0?"#fff":"#"+Math.max(0xfa,0xff-Math.abs(cv)*2).toString(16).padStart(2,"0").repeat(3),
-      bg:cv>0?"#dedad4":"#"+Math.max(0xee,0xf5-Math.abs(cv)*3).toString(16).padStart(2,"0"),
-      gold:cv>0?"#7a5200":"#9C7A00",
-    };
-  }
-  // Simplified view overrides — larger tap targets and text when simp=true
-  if(simp){
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:8,padding:"14px 24px",fontFamily:T.ff,fontSize:15,fontWeight:"bold",letterSpacing:"0.06em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:6,padding:"10px 16px",fontFamily:T.ff,fontSize:13,cursor:"pointer",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"});
-    c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:8,color:T.text,fontFamily:T.ff,fontSize:15,padding:"13px 14px",outline:"none",width:"100%",boxSizing:"border-box",...x});
-    c.lbl={fontSize:12,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,display:"block"};
-  } else {
-    c.btn=(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"});
-    c.bsm=(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"});
-    c.inp=(x={})=>({background:"#ffffff08",border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x});
-    c.lbl={fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"};
-  }
+  if(contrast!==0){const cv=contrast;T=Object.assign({},T,{border:"rgba(0,0,0,"+(cv>0?(0.12+cv*0.075):(0.12+cv*0.02))+")",muted:cv>0?"#"+Math.max(0,0x73-cv*18).toString(16).padStart(2,"0").repeat(3):"#737373",text:cv>0?"#000":"#"+Math.max(0x11,0x11+Math.round(cv*8)).toString(16).padStart(2,"0").repeat(3),gold:cv>0?"#7a5200":"#9C7A00"});}
+  const S=simp;
+  Object.assign(c,{
+    btn:(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:S?8:6,padding:S?"14px 24px":"14px 28px",fontFamily:T.ff,fontSize:S?15:14,fontWeight:"bold",letterSpacing:S?"0.06em":"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"}),
+    bsm:(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:S?6:5,padding:S?"10px 16px":"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:S?undefined:"600",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}),
+    inp:(x={})=>({background:T.surface,border:"1px solid "+T.border,borderRadius:S?8:6,color:T.text,fontFamily:T.ff,fontSize:S?15:13,padding:S?"13px 14px":"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
+    lbl:{fontSize:S?12:10,color:T.muted,letterSpacing:S?"0.1em":"0.15em",textTransform:"uppercase",marginBottom:S?6:5,display:"block"},
+  });
+
+  useEffect(()=>{document.body.style.cssText="background:"+T.bg+";margin:0;padding:0";document.documentElement.style.background=T.bg;},[]);
   useEffect(()=>{
-    document.body.style.background=T.bg;
-    document.body.style.margin="0";
-    document.body.style.padding="0";
-    document.documentElement.style.background=T.bg;
+    if(!document.getElementById("gf-fonts")){const l=document.createElement("link");l.id="gf-fonts";l.rel="stylesheet";l.href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap";document.head.appendChild(l);const s=document.createElement("style");s.id="gf-reset";s.textContent="*{box-sizing:border-box}html,body{margin:0;padding:0;background:"+LIGHT.bg+";min-height:100%}";document.head.appendChild(s);}
+    const el=document.getElementById("gf-focus")||document.createElement("style");el.id="gf-focus";if(!el.parentNode)document.head.appendChild(el);
+    el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
+  useEffect(()=>{const sc=fontSize/14,w=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;const root=document.getElementById("root");if(root){root.style.zoom=sc;root.style.fontWeight=w;}const el=document.getElementById("gf-fontscale")||document.createElement("style");el.id="gf-fontscale";if(!el.parentNode)document.head.appendChild(el);el.textContent="#root,#root *{font-weight:"+w+" !important}#root strong,#root b{font-weight:"+Math.min(w+200,900)+" !important}";},[fontSize]);
+  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}})();},[]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("contrast",contrast),[contrast]);
   useEffect(()=>store.set("fontSize",fontSize),[fontSize]);
-  // ── INITIAL LOAD FROM SUPABASE ─────────────────────────────────────────────
-  // On first mount, pull latest data from Supabase.
-  // localStorage is used instantly (no flicker), Supabase overwrites if newer.
-  useEffect(()=>{
-    (async()=>{
-      try {
-        const [sbTxList, sbStock, sbSettings, sbCatalog] = await Promise.all([
-          sb.loadTxList(),
-          sb.loadStock(),
-          sb.loadSettings(),
-          sb.loadCatalog(),
-        ]);
-        if(sbTxList&&sbTxList.length>0) setTxList(sbTxList);
-        if(sbStock&&sbStock.length>0) setStock(sbStock);
-        if(sbSettings&&Object.keys(sbSettings).length>0){
-          setSettings(p=>({...p,...sbSettings}));
-          if(sbSettings.gSpot) setGSpot(sbSettings.gSpot);
-          if(sbSettings.sSpot) setSSpot(sbSettings.sSpot);
-        }
-        if(sbCatalog&&sbCatalog.length>0) setCatalog(sbCatalog);
-      } catch(e) {
-        // Supabase unavailable — app continues with localStorage data
-        console.log("Supabase offline, using local data");
-      }
-    })();
-  },[]);
-  // ─────────────────────────────────────────────────────────────────────────
-
-  useEffect(()=>{
-    if(document.getElementById("gf-fonts"))return;
-    const l=document.createElement("link");l.id="gf-fonts";l.rel="stylesheet";
-    l.href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap";
-    document.head.appendChild(l);
-    const s=document.createElement("style");s.id="gf-reset";
-    s.textContent="*{box-sizing:border-box}html,body{margin:0;padding:0;background:"+LIGHT.bg+";min-height:100%}";
-    document.head.appendChild(s);
-  },[]);
-  useEffect(()=>{
-    let el=document.getElementById("gf-focus");
-    if(!el){el=document.createElement("style");el.id="gf-focus";document.head.appendChild(el);}
-    el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
-  },[]);
-
-  // Font size — applied via CSS zoom on the root container.
-  // zoom scales ALL children including hardcoded px values proportionally.
-  // Fallback: transform:scale for browsers that don't support zoom (Firefox).
-  useEffect(()=>{
-    const scale=fontSize/14; // 14px = 100% baseline
-    const weight=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;
-    const root=document.getElementById("root");
-    if(root){
-      root.style.zoom=scale;
-      root.style.fontWeight=weight;
-    }
-    // Also inject weight overrides for non-zoom browsers
-    let el=document.getElementById("gf-fontscale");
-    if(!el){el=document.createElement("style");el.id="gf-fontscale";document.head.appendChild(el);}
-    el.textContent="#root,#root *{font-weight:"+weight+" !important}"+
-      "#root strong,#root b,#root th,#root .bold{font-weight:"+Math.min(weight+200,900)+" !important}";
-  },[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
-  useEffect(()=>{
-    store.set("catalog",catalog);
-    sb.saveCatalog(catalog);
-  },[catalog]);
-  useEffect(()=>{
-    // Strip base64 photo blobs before saving to localStorage.
-    // Photos are already stored separately under their photoKey.
-    // This prevents localStorage from filling up with image data over time.
-    const txListLean=txList.map(t=>({...t,photo:null,itemPhotos:{}}));
-    store.set("txList",txListLean);
-    // Supabase: sync latest transaction (with full data) in background
-    if(txList.length>0) sb.saveTx(txList[0]);
-  },[txList]);
-  const prevStockRef = useRef([]);
-  useEffect(()=>{
-    store.set("stock",stock);
-    // Only sync items that changed or were added
-    const prev = prevStockRef.current;
-    const prevIds = new Set(prev.map(s=>s.id));
-    const currIds = new Set((stock||[]).map(s=>s.id));
-    // Deleted items — remove from Supabase
-    prev.forEach(s=>{ if(!currIds.has(s.id)) sb.deleteStock(s.id); });
-    // New or changed items — upsert to Supabase
-    stock.forEach(s=>{
-      const old = prev.find(p=>p.id===s.id);
-      if(!old||JSON.stringify(old)!==JSON.stringify(s)) sb.saveStock(s);
-    });
-    prevStockRef.current = stock;
-  },[stock]);
-  useEffect(()=>{
-    store.set("settings",settings); // localStorage: instant, always
-    // Supabase: debounced — only write after 2s of no changes to avoid write bomb
-    if(sbSettingsTimer.current) clearTimeout(sbSettingsTimer.current);
-    sbSettingsTimer.current=setTimeout(()=>sb.saveSettings(settings),2000);
-  },[settings]);
-
-  // Sync spot prices — localStorage instant, Supabase debounced
-  useEffect(()=>{
-    store.set("gSpot",gSpot);
-    store.set("sSpot",sSpot);
-    // Don't write to Supabase here — the settings effect above handles it
-    // after the debounce. Avoids double-writes on every price tick.
-  },[gSpot,sSpot]);
-
+  useEffect(()=>{store.set("catalog",catalog);sb.saveCatalog(catalog);},[catalog]);
+  useEffect(()=>{store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));if(txList.length)sb.saveTx(txList[0]);},[txList]);
+  useEffect(()=>{store.set("stock",stock);const prev=prevStockRef.current,curr=new Set((stock||[]).map(s=>s.id));prev.forEach(s=>{if(!curr.has(s.id))sb.deleteStock(s.id);});(stock||[]).forEach(s=>{const o=prev.find(p=>p.id===s.id);if(!o||JSON.stringify(o)!==JSON.stringify(s))sb.saveStock(s);});prevStockRef.current=stock;},[stock]);
+  useEffect(()=>{store.set("settings",settings);if(sbSettingsTimer.current)clearTimeout(sbSettingsTimer.current);sbSettingsTimer.current=setTimeout(()=>sb.saveSettings(settings),2000);},[settings]);
   useEffect(()=>store.set("vendors",vendors),[vendors]);
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
-  // Seed default logo on first run
-  useEffect(()=>{
-    if(logoLib.length===0&&typeof SEED_LOGO==="string"&&SEED_LOGO.length>0){
-      const entry={id:"default-logo",data:SEED_LOGO,isLogo:true};
-      setLogoLib([entry]);
-      setSettings(p=>p.logoImg?p:{...p,logoImg:SEED_LOGO});
-    }
-  },[]);
+  useEffect(()=>{if(logoLib.length===0&&SEED_LOGO){setLogoLib([{id:"default-logo",data:SEED_LOGO,isLogo:true}]);setSettings(p=>p.logoImg?p:{...p,logoImg:SEED_LOGO});}},[]);
   useEffect(()=>store.set("staffList",staffList),[staffList]);
   useEffect(()=>store.set("activeStaff",activeStaff),[activeStaff]);
   useEffect(()=>store.set("frozenSnap",frozenSnap),[frozenSnap]);
   useEffect(()=>store.set("spotLog",spotLog),[spotLog]);
   useEffect(()=>store.set("blacklist",blacklist),[blacklist]);
 
-  // ── LIVE SPOT FEED — 3-tier cascade ────────────────────────────────────────
-  // Priority: 1) GoldAPI.io  2) Metals-API.com  3) Metals.dev
-  // Manual override (Prices screen) beats all 3 for 12 hours after entry.
-  // Dot colours: green=live API, amber=stale/fallback, grey=off/manual only
-  const [spotStatus,setSpotStatus] = useState("off");
-  const [spotSource,setSpotSource] = useState("");
-  // Manual override timestamp — stored so it survives re-renders
-  const manualTs = useRef(store.get("manualSpotTs",0));
-  const sbSettingsTimer = useRef(null); // debounce Supabase settings writes
-  const MANUAL_TTL = 60*60*1000; // 60 minutes in ms
-  const isManualActive = ()=>(Date.now()-manualTs.current)<MANUAL_TTL;
+  const setGSpotManual=v=>{setGSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
+  const setSSpotManual=v=>{setSSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
 
-  // Called when user edits spot in Prices screen
-  const setGSpotManual = v=>{setGSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
-  const setSSpotManual = v=>{setSSpot(v);manualTs.current=Date.now();store.set("manualSpotTs",manualTs.current);setSpotSource("manual");setSpotStatus("manual");};
-
-  // Force reconnect to API — called by "Resume API" button
-  // Tries all 3 APIs in cascade. If one works: clears manual, shows live price.
-  // If none work: extends manual override by 30 minutes.
   const forceResumeAPI=async()=>{
-    const k1=settings.goldApiKey;
-    const k2=settings.metalsApiKey;
-    const k3=settings.metalsDevKey;
-    if(!k1&&!k2&&!k3){
-      pop("No API keys — add at least one key in Settings → Spot Feed.","warn");
-      return;
-    }
+    const{goldApiKey:k1,metalsApiKey:k2,metalsDevKey:k3}=settings;
+    if(!k1&&!k2&&!k3){pop("No API keys configured in Settings → Spot Feed.","warn");return;}
     pop("Fetching live prices…","ok");
-    const tryFetch=async(url,headers)=>{
-      try{const r=await fetch(url,{headers});if(!r.ok)return null;return await r.json();}catch(e){return null;}
-    };
-    // Try GoldAPI
-    if(k1){
-      const [gD,sD]=await Promise.all([
-        tryFetch("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),
-        tryFetch("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),
-      ]);
-      const g=gD&&(gD.price||gD.ask||gD.bid);
-      const s=sD&&(sD.price||sD.ask||sD.bid);
-      if(g&&s){
-        manualTs.current=0;store.set("manualSpotTs",0);
-        setGSpot(parseFloat(Number(g).toFixed(2)));
-        setSSpot(parseFloat(Number(s).toFixed(2)));
-        setSpotStatus("live");setSpotSource("GoldAPI");
-        pop("🟢 Live prices from GoldAPI.","ok");return;
-      }
-    }
-    // Try Metals-API
-    if(k2){
-      const d=await tryFetch("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG",{});
-      if(d&&d.success&&d.rates){
-        const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null);
-        const s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);
-        if(g&&s){
-          manualTs.current=0;store.set("manualSpotTs",0);
-          setGSpot(parseFloat(Number(g).toFixed(2)));
-          setSSpot(parseFloat(Number(s).toFixed(2)));
-          setSpotStatus("live");setSpotSource("Metals-API");
-          pop("🟢 Live prices from Metals-API.","ok");return;
-        }
-      }
-    }
-    // Try Metals.Dev
-    if(k3){
-      const d=await tryFetch("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz",{});
-      if(d&&d.metals&&d.metals.gold&&d.metals.silver){
-        manualTs.current=0;store.set("manualSpotTs",0);
-        setGSpot(parseFloat(Number(d.metals.gold).toFixed(2)));
-        setSSpot(parseFloat(Number(d.metals.silver).toFixed(2)));
-        setSpotStatus("live");setSpotSource("Metals.Dev");
-        pop("🟢 Live prices from Metals.Dev.","ok");return;
-      }
-    }
-    // All APIs returned no data
-    pop("Could not reach any price API. Check your keys in Settings → Spot Feed.","warn");
+    const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok)return null;return await r.json();}catch(_){return null;}};
+    const applyLive=(g,s,src)=>{manualTs.current=0;store.set("manualSpotTs",0);setGSpot(parseFloat(Number(g).toFixed(2)));setSSpot(parseFloat(Number(s).toFixed(2)));setSpotStatus("live");setSpotSource(src);pop("🟢 Live prices from "+src+".","ok");};
+    if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applyLive(g,s,"GoldAPI");return;}}
+    if(k2){const d=await tF("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");if(d&&d.success&&d.rates){const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null),s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);if(g&&s){applyLive(g,s,"Metals-API");return;}}}
+    if(k3){const d=await tF("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");if(d&&d.metals&&d.metals.gold&&d.metals.silver){applyLive(d.metals.gold,d.metals.silver,"Metals.Dev");return;}}
+    pop("Could not reach any price API. Check keys in Settings → Spot Feed.","warn");
   };
 
   useEffect(()=>{
-    const k1=settings.goldApiKey;
-    const k2=settings.metalsApiKey;
-    const k3=settings.metalsDevKey;
+    const{goldApiKey:k1,metalsApiKey:k2,metalsDevKey:k3}=settings;
     if(!k1&&!k2&&!k3){setSpotStatus("off");return;}
-
-    const applySpot=(g,s,src)=>{
-      // Log spot price (keep last 90 entries)
-      setSpotLog(prev=>{const entry={t:nowISO(),g,s,src};return[entry,...prev].slice(0,90);});
-      if(isManualActive()) return; // manual override active — ignore API data
-      // Manual just expired — clear manual status so next fetch shows live
-      if(spotStatus==="manual") setSpotStatus("stale");
-      setGSpot(parseFloat(Number(g).toFixed(2)));
-      setSSpot(parseFloat(Number(s).toFixed(2)));
-      setSpotStatus("live");
-      setSpotSource(src);
-      const ga=settings.goldAlert;const sa=settings.silverAlert;
-      if(ga&&g>=parseFloat(ga)) pop("⬡ Gold hit your alert: "+fmtAUD(parseFloat(ga)),"ok");
-      if(sa&&s>=parseFloat(sa)) pop("◈ Silver hit your alert: "+fmtAUD(parseFloat(sa)),"ok");
-    };
-
-    const tryGoldAPI=async()=>{
-      if(!k1) return false;
-      try{
-        const [gR,sR]=await Promise.all([
-          fetch("https://www.goldapi.io/api/XAU/AUD",{headers:{"x-access-token":k1,"Content-Type":"application/json"}}),
-          fetch("https://www.goldapi.io/api/XAG/AUD",{headers:{"x-access-token":k1,"Content-Type":"application/json"}}),
-        ]);
-        if(!gR.ok||!sR.ok) return false;
-        const [gD,sD]=await Promise.all([gR.json(),sR.json()]);
-        const g=gD.price||gD.ask||gD.bid;
-        const s=sD.price||sD.ask||sD.bid;
-        if(!g||!s) return false;
-        applySpot(parseFloat(g),parseFloat(s),"GoldAPI");
-        return true;
-      }catch(e){return false;}
-    };
-
-    const tryMetalsAPI=async()=>{
-      if(!k2) return false;
-      try{
-        const r=await fetch("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");
-        if(!r.ok) return false;
-        const d=await r.json();
-        if(!d.success||!d.rates) return false;
-        // base=AUD: rates.XAU = how many oz of gold = 1 AUD, so price = 1/rates.XAU
-        const g=d.rates.AUDXAU||( d.rates.XAU ? 1/d.rates.XAU : null);
-        const s=d.rates.AUDXAG||( d.rates.XAG ? 1/d.rates.XAG : null);
-        if(!g||!s) return false;
-        applySpot(parseFloat(g),parseFloat(s),"Metals-API");
-        return true;
-      }catch(e){return false;}
-    };
-
-    const tryMetalsDev=async()=>{
-      if(!k3) return false;
-      try{
-        const r=await fetch("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");
-        if(!r.ok) return false;
-        const d=await r.json();
-        const g=d.metals&&d.metals.gold;
-        const s=d.metals&&d.metals.silver;
-        if(!g||!s) return false;
-        applySpot(parseFloat(g),parseFloat(s),"Metals.Dev");
-        return true;
-      }catch(e){return false;}
-    };
-
+    const applySpot=(g,s,src)=>{setSpotLog(p=>[{t:nowISO(),g,s,src},...p].slice(0,90));if(isManualActive())return;setGSpot(parseFloat(Number(g).toFixed(2)));setSSpot(parseFloat(Number(s).toFixed(2)));setSpotStatus("live");setSpotSource(src);if(settings.goldAlert&&g>=parseFloat(settings.goldAlert))pop("⬡ Gold alert: "+fmtAUD(parseFloat(settings.goldAlert)),"ok");if(settings.silverAlert&&s>=parseFloat(settings.silverAlert))pop("◈ Silver alert: "+fmtAUD(parseFloat(settings.silverAlert)),"ok");};
+    const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok)return null;return await r.json();}catch(_){return null;}};
     const fetchSpot=async()=>{
-      if(isManualActive()){setSpotStatus("manual");setSpotSource("manual");return;}
+      if(isManualActive()){setSpotStatus("manual");return;}setSpotStatus("stale");
+      if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applySpot(parseFloat(g),parseFloat(s),"GoldAPI");return;}}
+      if(k2){const d=await tF("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");if(d&&d.success&&d.rates){const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null),s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);if(g&&s){applySpot(g,s,"Metals-API");return;}}}
+      if(k3){const d=await tF("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");if(d&&d.metals&&d.metals.gold&&d.metals.silver){applySpot(d.metals.gold,d.metals.silver,"Metals.Dev");return;}}
       setSpotStatus("stale");
-      const ok=await tryGoldAPI() || await tryMetalsAPI() || await tryMetalsDev();
-      if(!ok) setSpotStatus("stale");
     };
-
-    fetchSpot();
-    const id=setInterval(fetchSpot,5*60*1000);
-    return()=>clearInterval(id);
+    fetchSpot();const id=setInterval(fetchSpot,5*60*1000);return()=>clearInterval(id);
   },[settings.goldApiKey,settings.metalsApiKey,settings.metalsDevKey]);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const pop=(msg,type="ok")=>{setNotify({msg,type});setTimeout(()=>setNotify(null),4000);};
-  const nowISO=()=>new Date().toISOString();
   const dlFile=(content,filename,mime)=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([content],{type:mime||"text/plain"}));a.download=filename;a.click();};
-  const isBlacklistedName=(name)=>name&&blacklist.some(b=>b.name.toLowerCase()===(name||"").toLowerCase());
-
-  // ── MELT VALUE ──────────────────────────────────────────────
-  const GOLD_P={"24ct":1,"23ct":0.9583,"22ct":0.9167,"21ct":0.875,"20ct":0.8333,"18ct":0.75,"14ct":0.5833,"10ct":0.4167,"9ct":0.375};
-  const SILV_P={".999":0.999,".925":0.925,".900":0.9,".835":0.835,".800":0.8,".500":0.5};
+  const isBlacklistedName=name=>name&&blacklist.some(b=>b.name.toLowerCase()===sS(name).toLowerCase());
   const spotForCalc=()=>frozenSnap?{g:frozenSnap.gSpot,s:frozenSnap.sSpot}:{g:gSpot,s:sSpot};
-  const calcMelt=(item)=>{
-    const{g,s}=spotForCalc();
-    const metal=(item.product&&item.product.cat)||item.metalCat||"";
-    const weight=parseFloat(item.weight_g||item.qty||0);
-    if(!weight) return null;
-    if(metal==="Gold"){
-      // Try purity key first, then numeric carat, then numeric purity
-      const purityKey=item.purity||(item.product&&item.product.purity)||"";
-      const caratNum=parseFloat(item.carat||(item.product&&item.product.carat)||0);
-      const purityNum=parseFloat(item.purity||(item.product&&item.product.purity)||0);
-      if(GOLD_P[purityKey]) return weight*(g/31.1035)*GOLD_P[purityKey];
-      if(caratNum>0) return weight*(g/31.1035)*(caratNum/24);
-      if(purityNum>0&&purityNum<=1) return weight*(g/31.1035)*purityNum;
-      return null;
-    }
-    if(metal==="Silver"){
-      const purityKey=item.purity||(item.product&&item.product.purity)||"";
-      const purityNum=parseFloat(item.purity||(item.product&&item.product.purity)||0);
-      if(SILV_P[purityKey]) return weight*(g/31.1035)*SILV_P[purityKey];
-      if(purityNum>0&&purityNum<=1) return weight*(g/31.1035)*purityNum;
-      return null;
-    }
-    return null;
-  };
-
-  // ── RECEIPT TEXT ────────────────────────────────────────────
-  const makeReceipt=(tx)=>{
-    const b=settings.businessName||"The Gold Shop";
-    const lines2=["========================================",
-      b.toUpperCase(),"ABN: "+(settings.abn||"—"),settings.address||"",
-      "========================================",
-      "CONTRACT:  "+tx.id,"DATE:      "+new Date(tx.date).toLocaleString("en-AU"),
-      "CLIENT:    "+((tx.client&&tx.client.fullName)||"—"),
-      "STAFF:     "+(tx.staffName||"—"),
-      "----------------------------------------"];
-    (tx.items||[]).forEach((it,i)=>{
-      lines2.push((i+1)+". "+(it.product&&it.product.label||it.description||"Item").slice(0,30));
-      lines2.push("   Mode:"+it.mode.toUpperCase()+" Price:"+fmtAUD(it.price));
-      if(it.note) lines2.push("   Note:"+it.note.slice(0,40));
-    });
-    lines2.push("----------------------------------------");
-    if(tx.buyTotal>0) lines2.push("BUY TOTAL:  "+fmtAUD(tx.buyTotal));
-    if(tx.sellTotal>0) lines2.push("SELL TOTAL: "+fmtAUD(tx.sellTotal));
-    lines2.push("NET:        "+fmtAUD(Math.abs(tx.net||0))+(tx.net>=0?" (client pays)":" (we pay)"));
-    lines2.push("PAYMENT:    "+(tx.payment||"").toUpperCase());
-    lines2.push("========================================");
-    lines2.push("Signature: _____________________________");
-    lines2.push("Date:      _____________________________");
-    lines2.push("========================================");
-    lines2.push("Second-hand dealer: "+b);
-    lines2.push("Licensed under the Second-Hand Dealers");
-    lines2.push("& Pawnbrokers Act 1989 (Vic)");
-    lines2.push("AUSTRAC reporting entity");
-    return lines2.join("\n");
-  };
-
-  // ── EOD SUMMARY ─────────────────────────────────────────────
-  const todayStr=()=>nowISO().slice(0,10);
-  const todayTxData=useMemo(()=>txList.filter(t=>t.date&&t.date.slice(0,10)===nowISO().slice(0,10)),[txList]);
+  const calcMelt=item=>calcMeltFn(item,frozenSnap,gSpot,sSpot);
+  const makeReceipt=tx=>makeReceiptFn(tx,settings);
+  const todayTxData=useMemo(()=>(txList||[]).filter(t=>t.date&&t.date.slice(0,10)===nowISO().slice(0,10)),[txList]);
   const todayTx=()=>todayTxData;
+  const compliance=useMemo(()=>checkCompliance(txItems,txPay,settings.ttrEnabled!==false),[txItems,txPay,settings.ttrEnabled]);
+  const buyTotal=(txItems||[]).filter(i=>i.mode==="buy").reduce((s,i)=>s+sN(i.price),0);
+  const sellTotal=(txItems||[]).filter(i=>i.mode==="sell").reduce((s,i)=>s+sN(i.price),0);
+  const net=sellTotal-buyTotal;
+  const addProd=(catalog||[]).find(p=>p.id===addId);
+  const addUnit=addProd?calcUnitPrice(addProd,gSpot,sSpot,addMode):null;
+  const addQtyN=sN(addQty)||0;
+  const addCalc=(addUnit!=null&&addQtyN)?addUnit*addQtyN:(sN(addCustom)||0);
+  const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
 
-  // ── ACCOUNTING EXPORT ───────────────────────────────────────
-  const dlAccounting=()=>{
-    const spot=spotForCalc();
-    const snapNote=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(spot.g)+"/oz Ag:"+fmtAUD(spot.s)+"/oz";
-    // Sheet 1 — Transaction Register
-    const s1=[["TRANSACTION REGISTER","","","","","","","","","",""],
-      ["Spot prices: "+snapNote,"","","","","","","","","",""],
-      ["Invoice","Date","Client","Item","Metal","Purity","Weight(g)","Bought($)","Sold($)","Margin($)","GST Treatment","GST Est($)","Status"]];
-    txList.forEach(tx=>{
-      (tx.items||[]).forEach(it=>{
-        const bought=it.mode==="buy"?it.price||0:0;
-        const sold=it.mode==="sell"?it.price||0:0;
-        const margin=sold-bought;
-        const gst=it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin Scheme":"Standard 10%";
-        const gstEst=it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,margin/11):(sold*0.1);
-        s1.push([tx.id,tx.date&&tx.date.slice(0,10),(tx.client&&tx.client.fullName)||"—",
-          (it.product&&it.product.label)||it.description||"—",
-          (it.product&&it.product.cat)||"—",(it.purity||it.product&&it.product.carat&&it.product.carat+"ct")||"—",
-          it.qty||"—",bought||"",sold||"",margin||"",gst,gstEst.toFixed(2),tx.voided?"VOIDED":"OK"]);
-      });
-    });
-    // Sheet 2 — Stock Valuation
-    const s2=[["STOCK VALUATION","","","","","","","",""],
-      ["Spot used: "+snapNote,"","","","","","","",""],
-      ["Item","Invoice #","Metal","Purity","Weight(g)","Bought($)","Melt Value($)","Unrealised P&L($)","GST","Days Held","Status"]];
-    (stock||[]).filter(s=>!s.sold).forEach(s=>{
-      const mv=calcMelt(s);
-      const bought=s.price||0;
-      const pl=mv!=null?mv-bought:null;
-      const days=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;
-      s2.push([(s.description||(s.product&&s.product.label)||"—"),s.txId||"—",
-        (s.product&&s.product.cat)||s.metalCat||"—",s.purity||"—",s.weight_g||"—",
-        bought.toFixed(2),mv!=null?mv.toFixed(2):"—",pl!=null?pl.toFixed(2):"—",
-        s.gstApplicable===false?"GST-Free":"Taxable",days,s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready"]);
-    });
-    // Sheet 3 — GST Summary
-    const period=frozenSnap?frozenSnap.frozenAt:todayStr();
-    let totSales=0,totPurch=0,totMarginGST=0,totStdGST=0;
-    txList.forEach(tx=>{(tx.items||[]).forEach(it=>{
-      if(it.mode==="sell"&&it.gstApplicable!==false){
-        totSales+=it.price||0;
-        if(it.gstScheme==="margin") totMarginGST+=Math.max(0,((it.price||0)-(it.boughtAt||0))/11);
-        else totStdGST+=(it.price||0)*0.1;
-      }
-      if(it.mode==="buy") totPurch+=it.price||0;
-    });});
-    const s3=[["GST SUMMARY",""],["Period to: "+period,""],
-      ["Total Sales (excl. GST-free)","$"+totSales.toFixed(2)],
-      ["Total Purchases","$"+totPurch.toFixed(2)],
-      ["Standard GST on sales (10%)","$"+totStdGST.toFixed(2)],
-      ["Margin Scheme GST (margin÷11)","$"+totMarginGST.toFixed(2)],
-      ["TOTAL GST PAYABLE (est)","$"+(totStdGST+totMarginGST).toFixed(2)],
-      ["",""],["DISCLAIMER: Estimate only. Confirm with registered tax agent.",""]];
-    // Sheet 4 — Compliance Log
-    const s4=[["COMPLIANCE LOG","","","","",""],
-      ["Invoice","Date","Client","TTR Status","SMR Flagged","KYC Done","Police Hold","Voided"]];
-    txList.forEach(tx=>s4.push([tx.id,tx.date&&tx.date.slice(0,10),(tx.client&&tx.client.fullName)||"—",
-      tx.ttrStatus||"N/A",tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",
-      tx.items&&tx.items.some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
-    // Build clean multi-sheet CSV for accountant
-    const DQ=String.fromCharCode(34);
-    const escCSV=v=>{
-      const s=String(v==null?"":v).replace(/[\r\n]+/g," ");
-      return DQ+s.split(DQ).join(DQ+DQ)+DQ;
-    };
-    const toCSV=rows=>rows.map(r=>r.map(escCSV).join(",")).join("\n");
-    const sep=(title)=>"\n\n"+title+"\n"+"-".repeat(title.length)+"\n";
-    const full=
-      "LOOT LEDGR — ACCOUNTING EXPORT\n"+
-      "Business: "+(settings.businessName||"")+"  ABN: "+(settings.abn||"")+"\n"+
-      "Exported: "+nowISO().slice(0,10)+"  Spot: "+snapNote+"\n"+
-      sep("1. TRANSACTION REGISTER")+toCSV(s1)+
-      sep("2. STOCK VALUATION")+toCSV(s2)+
-      sep("3. GST SUMMARY")+toCSV(s3)+
-      sep("4. COMPLIANCE LOG")+toCSV(s4);
-    dlFile(full,"lootledgr-accounting-"+todayStr()+".csv","text/csv");
-    pop("Accounting export downloaded.","ok");
-  };
-
-  // ── BACKUP / RESTORE ────────────────────────────────────────
-  const dlBackup=()=>{
-    const snap={version:APP_VERSION,exportedAt:nowISO(),
-      txList,stock,catalog,settings:{...settings,logoImg:null},
-      vendors,staffList,blacklist,frozenSnap,spotLog};
-    dlFile(JSON.stringify(snap,null,2),"lootledgr-backup-"+todayStr()+".json","application/json");
-    pop("Backup downloaded.","ok");
-  };
-  const restoreBackup=(file)=>{
-    const r=new FileReader();
-    r.onload=ev=>{
-      try{
-        const d=JSON.parse(ev.target.result);
-        if(!d.txList||!d.stock) {pop("Invalid backup file.","err");return;}
-        if(d.txList) setTxList(d.txList);
-        if(d.stock) setStock(d.stock);
-        if(d.catalog) setCatalog(d.catalog);
-        if(d.vendors) setVendors(d.vendors);
-        if(d.staffList) setStaffList(d.staffList);
-        if(d.blacklist) setBlacklist(d.blacklist);
-        if(d.frozenSnap) setFrozenSnap(d.frozenSnap);
-        pop("Backup restored successfully.","ok");
-      }catch(e){pop("Restore failed: "+e.message,"err");}
-    };
-    r.readAsText(file);
-  };
-
-  const compliance = useMemo(()=>checkCompliance(txItems,txPay,settings.ttrEnabled!==false),[txItems,txPay,settings.ttrEnabled]);
-  const complianceRef = useRef(compliance);
-  useEffect(()=>{complianceRef.current=compliance;},[compliance]);
-  const buyTotal  = txItems.filter(i=>i.mode==="buy").reduce((s,i)=>s+(i.price||0),0);
-  const sellTotal = txItems.filter(i=>i.mode==="sell").reduce((s,i)=>s+(i.price||0),0);
-  const net       = sellTotal - buyTotal;
-
-  const addProd = catalog.find(p=>p.id===addId);
-  const addUnit = addProd?calcUnitPrice(addProd,gSpot,sSpot,addMode):null;
-  const addQtyN = parseFloat(addQty)||0;
-  const addCalc = (addUnit!=null&&addQtyN)?addUnit*addQtyN:(parseFloat(addCustom)||0);
-
-  const handleAddItem=()=>{
-    if(!addProd||!addCalc){pop("Enter quantity or price.","warn");return;}
-    setTxItems(p=>[...p,{
-      id:uid(),mode:addMode,product:addProd,qty:addQtyN||1,
-      unitPrice:addUnit,price:addCalc,note:addNote,
-      holdUntil:addMode==="buy"?addHours(new Date().toISOString(),THRESH.HOLD_HOURS):null,
-      policeHold:false,
-    }]);
-    setAddQty("");setAddCustom("");setAddNote("");
-    pop("Added: "+addProd.label,"ok");
-  };
-
-  const handleToCompliance=()=>{
-    if(txItems.length===0){pop("Add at least one item.","warn");return;}
-    setTxStep(2);
-  };
-
-  const submitPin=()=>{
-    if(!settings.staffPin){pop("No manager PIN set. Set one in Settings → Business first.","warn");setPinModal(null);return;}
-    if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}
-    else{pop("Incorrect PIN.","err");setPinVal("");}
-  };
-
-  const handleToClient=()=>{
-    if(compliance.requiresKYC&&!kycDone){pop("KYC must be completed — AUSTRAC hard block.","err");return;}
-    const hasCashWarn=compliance.flags.some(f=>f.key==="cash_warn");
-    if(hasCashWarn){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}
-    else setTxStep(3);
-  };
+  const handleAddItem=()=>{if(!addProd||!addCalc){pop("Enter quantity or price.","warn");return;}setTxItems(p=>[...p,{id:uid(),mode:addMode,product:addProd,qty:addQtyN||1,unitPrice:addUnit,price:addCalc,note:addNote,holdUntil:addMode==="buy"?addHours(nowISO(),THRESH.HOLD_HOURS):null,policeHold:false}]);setAddQty("");setAddCustom("");setAddNote("");pop("Added: "+sS(addProd.label),"ok");};
+  const submitPin=()=>{if(!settings.staffPin){pop("No manager PIN set. Set one in Settings → Business.","warn");setPinModal(null);return;}if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}else{pop("Incorrect PIN.","err");setPinVal("");}};
+  const handleToCompliance=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
+  const handleToClient=()=>{if(compliance.requiresKYC&&!kycDone){pop("KYC must be completed — AUSTRAC hard block.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
 
   const finalize=()=>{
     if(!client.fullName||!client.dob||!client.address||!client.idType||!client.idNumber){pop("Client form incomplete.","err");return;}
     if(!idSighted){pop("Staff must confirm ID sighted.","err");return;}
     if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}
-    const now=nowISO();
-    const realInv=makeInv(); // consume the counter NOW — only at actual save
+    const now=nowISO(),realInv=makeInv();
     const phData={idPhoto:compliance.requiresKYC?photo:null,itemPhotos};
-    const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length>0);
+    const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length);
     const photoKey=hasPh?"photos_"+realInv:null;
     if(hasPh)store.set(photoKey,phData);
-    const tx={
-      id:realInv,date:now,items:txItems,payment:txPay,
-      buyTotal,sellTotal,net,client,staff,idSighted,
-      photo:phData.idPhoto||null,
-      itemPhotos:phData.itemPhotos||{},
-      hasPhotos:hasPh,photoKey,kycDone,
-      flags:compliance.flags.map(f=>f.key),
-      ttrRequired:compliance.flags.some(f=>f.key==="ttr"),
-      ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,
-      smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now),
-    };
-    const newStock=txItems.filter(i=>i.mode==="buy").map(i=>({
-      id:uid(),txId:realInv,date:now,
-      product:i.product,qty:i.qty,price:i.price,
-      description:i.note||i.product.label,
-      // Carry purity/carat/weight for melt value calculation
-      purity:i.purity||(i.product&&i.product.purity)||null,
-      carat:i.carat||(i.product&&i.product.carat)||null,
-      weight_g:i.weight_g||( i.product&&i.product.unit==="g" ? i.qty : null ),
-      holdUntil:i.holdUntil,
-      policeHold:!!(i.policeHold),
-      suspicious:!!(i.suspicious),
-      storageLocation:staff.storageLocation||"",
-      deleteAfter:sevenYrsFrom(now),
-    }));
-    setTxList(p=>[tx,...p].slice(0,500)); // cap in-memory list; full history in Supabase
-    setStock(p=>[...newStock,...p]);
-    setTxNo(peekInv()); // update display to next invoice preview
-    setTxStep(6);
-    // Push to all configured integrations (async, non-blocking)
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:compliance.flags.some(f=>f.key==="ttr"),ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
+    const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
+    setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
+    setTxNo(peekInv());setTxStep(6);
     pushIntegrations(tx).catch(()=>{});
   };
 
-  // ── SQUARE SELL: checkout link → customer pays online ─────
   const sendSquareSell=async()=>{
     if(!settings.squareToken||!settings.squareLoc){pop("Configure Square in Settings.","warn");return;}
-    const sells=txItems.filter(i=>i.mode==="sell");
-    if(!sells.length){pop("No sell items.","warn");return;}
-    try{
-      const r=await fetch("https://connect.squareup.com/v2/online-checkout/payment-links",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},
-        body:JSON.stringify({idempotency_key:uid(),
-          checkout_options:{redirect_url:settings.squareRedirect||window.location.href},
-          order:{location_id:settings.squareLoc,
-            line_items:sells.map(i=>({name:("[SALE] "+i.product.label).slice(0,500),quantity:"1",
-              base_price_money:{amount:Math.round((i.price||0)*100),currency:"AUD"}}))},
-        }),
-      });
-      const d=await r.json();
-      if(d.payment_link&&d.payment_link.url){window.open(d.payment_link.url,"_blank");pop("Square checkout opened.","ok");}
-      else pop("Square error: "+((d.errors&&d.errors[0]&&d.errors[0].detail)||"Unknown"),"err");
-    }catch(e){pop("Square sell failed: "+e.message,"err");}
+    const sells=(txItems||[]).filter(i=>i.mode==="sell");if(!sells.length){pop("No sell items.","warn");return;}
+    try{const r=await fetch("https://connect.squareup.com/v2/online-checkout/payment-links",{method:"POST",headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},body:JSON.stringify({idempotency_key:uid(),checkout_options:{redirect_url:settings.squareRedirect||window.location.href},order:{location_id:settings.squareLoc,line_items:sells.map(i=>({name:("[SALE] "+sS(i.product&&i.product.label)).slice(0,500),quantity:"1",base_price_money:{amount:Math.round(sN(i.price)*100),currency:"AUD"}}))}})});const d=await r.json();if(d.payment_link&&d.payment_link.url){window.open(d.payment_link.url,"_blank");pop("Square checkout opened.","ok");}else pop("Square error: "+sS(d.errors&&d.errors[0]&&d.errors[0].detail||"Unknown"),"err");}catch(e){pop("Square sell: "+e.message,"err");}
   };
-
-  // ── SQUARE BUY: vendor expense via Orders + Payments API ──
-  // Creates an Order tagged as vendor purchase, then records the payment.
-  // Appears in Square Dashboard > Reports as a completed expense transaction.
   const sendSquareBuy=async(invNo,buyItems,totalAmt,clientName,payMethod)=>{
-    if(!settings.squareToken||!settings.squareLoc) return{ok:false,msg:"Square not configured"};
+    if(!settings.squareToken||!settings.squareLoc)return{ok:false,msg:"Square not configured"};
     try{
-      const orderR=await fetch("https://connect.squareup.com/v2/orders",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},
-        body:JSON.stringify({idempotency_key:"buy-"+invNo,order:{
-          location_id:settings.squareLoc,
-          reference_id:"GF-BUY-"+invNo,
-          note:"VENDOR PURCHASE | Loot #"+invNo+" | Supplier: "+(clientName||"Walk-in"),
-          line_items:buyItems.map(i=>({
-            name:("[PURCHASE] "+i.product.label).slice(0,500),
-            quantity:"1",
-            note:i.note||"",
-            base_price_money:{amount:Math.round((i.price||0)*100),currency:"AUD"},
-          })),
-          metadata:{transaction_type:"vendor_purchase",invoice:invNo,supplier:clientName||""},
-        }}),
-      });
-      const od=await orderR.json();
-      if(!od.order) return{ok:false,msg:"Square order error: "+((od.errors&&od.errors[0]&&od.errors[0].detail)||JSON.stringify(od))};
+      const hdrs={"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken};
+      const _or=await fetch("https://connect.squareup.com/v2/orders",{method:"POST",headers:hdrs,body:JSON.stringify({idempotency_key:"buy-"+invNo,order:{location_id:settings.squareLoc,reference_id:"LL-BUY-"+invNo,note:"VENDOR PURCHASE | Loot #"+invNo+" | "+sS(clientName||"Walk-in"),line_items:(buyItems||[]).map(i=>({name:("[PURCHASE] "+sS(i.product&&i.product.label)).slice(0,500),quantity:"1",note:sS(i.note),base_price_money:{amount:Math.round(sN(i.price)*100),currency:"AUD"}})),metadata:{transaction_type:"vendor_purchase",invoice:invNo,supplier:sS(clientName)}}})});const od=await _or.json();
+      if(!od.order)return{ok:false,msg:"Square order error: "+sS(od.errors&&od.errors[0]&&od.errors[0].detail)};
       const srcId=payMethod==="cash"?"CASH":"EXTERNAL";
-      const payR=await fetch("https://connect.squareup.com/v2/payments",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},
-        body:JSON.stringify({idempotency_key:"pay-"+invNo,
-          source_id:srcId,order_id:od.order.id,location_id:settings.squareLoc,
-          amount_money:{amount:Math.round(totalAmt*100),currency:"AUD"},
-          note:"Vendor purchase #"+invNo,
-          external_details:srcId==="EXTERNAL"?{type:"OTHER",source:"Loot Ledgr"}:undefined,
-        }),
-      });
-      const pd=await payR.json();
-      if(pd.payment&&(pd.payment.status==="COMPLETED"||pd.payment.status==="APPROVED"))
-        return{ok:true,msg:"Square vendor expense recorded"};
-      return{ok:false,msg:"Square payment error: "+((pd.errors&&pd.errors[0]&&pd.errors[0].detail)||JSON.stringify(pd))};
-    }catch(e){return{ok:false,msg:"Square buy failed: "+e.message};}
+      const pd=await(await fetch("https://connect.squareup.com/v2/payments",{method:"POST",headers:hdrs,body:JSON.stringify({idempotency_key:"pay-"+invNo,source_id:srcId,order_id:od.order.id,location_id:settings.squareLoc,amount_money:{amount:Math.round(sN(totalAmt)*100),currency:"AUD"},note:"Vendor purchase #"+invNo,external_details:srcId==="EXTERNAL"?{type:"OTHER",source:"Loot Ledgr"}:undefined})})).json();
+      if(pd.payment&&(pd.payment.status==="COMPLETED"||pd.payment.status==="APPROVED"))return{ok:true,msg:"Square vendor expense recorded"};
+      return{ok:false,msg:"Square payment error: "+sS(pd.errors&&pd.errors[0]&&pd.errors[0].detail)};
+    }catch(e){return{ok:false,msg:"Square buy: "+e.message};}
   };
-
-  // ── DURESS ALERT — silent emergency notification ────────────────
-  // ── BLE SCALE ENGINE ─────────────────────────────────────────────────────
-  // Supports 3 protocols auto-detected in order:
-  //   1. Bluetooth SIG standard Weight Scale (service 0x181D, char 0x2A9D)
-  //   2. Nordic UART Service — NUS (most lab/precision balances send ASCII)
-  //   3. Custom UUID (user-configured in Settings)
-  //
-  // Weight output: parsed to grams regardless of scale unit, then converted
-  // to the unit set in Settings (g / oz / ozt).
-
-  // Standard BLE Weight Scale UUIDs (Bluetooth SIG)
-  const SCALE_STD_SVC  = "0000181d-0000-1000-8000-00805f9b34fb";
-  const SCALE_STD_CHAR = "00002a9d-0000-1000-8000-00805f9b34fb";
-  const SCALE_FEAT     = "00002a9e-0000-1000-8000-00805f9b34fb";
-
-  // Nordic UART Service UUIDs (common in Ohaus, Adam, A&D, Kern BLE adapters)
-  const NUS_SVC   = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-  const NUS_RX    = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-  const NUS_TX    = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-
-  // Parse a weight value from standard BLE binary format (little-endian uint16)
-  const parseStdWeight=(dataView)=>{
-    const flags=dataView.getUint8(0);
-    const raw=dataView.getUint16(1,true); // little-endian
-    const isImperial=(flags&0x01)!==0;
-    const isStable=(flags&0x04)===0; // bit 2 = time-stamp present; bit 1 = user ID present
-    if(isImperial){
-      const lbs=raw*0.01;
-      return{g:lbs*453.592,raw:lbs.toFixed(3)+" lb",stable:true};
-    } else {
-      const kg=raw*0.005;
-      return{g:kg*1000,raw:kg.toFixed(3)+" kg",stable:true};
-    }
+  const sendShopifySell=async(invNo,sellItems,clientName)=>{
+    if(!settings.shopifyDomain||!settings.shopifyToken)return{ok:false,msg:"Shopify not configured"};
+    try{const _sr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/orders.json",{method:"POST",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},body:JSON.stringify({order:{financial_status:"paid",tags:"loot-ledgr-sale",note:"Loot #"+invNo+(clientName?" | "+clientName:""),line_items:(sellItems||[]).map(i=>({title:sS(i.product&&i.product.label).slice(0,500),quantity:1,price:sN(i.price).toFixed(2)}))}})}); const d=await _sr.json();return d.order?{ok:true,msg:"Shopify sale "+sS(d.order.name)+" created"}:{ok:false,msg:"Shopify sell: "+JSON.stringify(d.errors||d)};}catch(e){return{ok:false,msg:"Shopify sell: "+e.message};}
   };
-
-  // Parse weight from ASCII string (Nordic UART output)
-  // Handles formats: "5.234 g", "5.23\r\n", "  5.234g", "+000.05 OZT", "ST,GS,+000005.000g"
-  const parseAsciiWeight=(str)=>{
-    const s=str.replace(/[\r\n]+/g,"").trim();
-    // Format: "ST,GS,+000005.000g" (Ohaus/Kern RS232-style over BLE)
-    const ohaus=/[A-Z]{2},[A-Z]{2},[+-]?(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);
-    if(ohaus){
-      const val=parseFloat(ohaus[1]);
-      const unit=(ohaus[2]||"g").toLowerCase();
-      return toGrams(val,unit);
-    }
-    // Format: "+000.05 OZT" or "5.234 g" or "5.23g"
-    const generic=/[+-]?\s*(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);
-    if(generic){
-      const val=parseFloat(generic[1]);
-      const unit=(generic[2]||"g").toLowerCase();
-      return toGrams(val,unit);
-    }
-    return null;
+  const sendShopifyBuy=async(invNo,buyItems,totalAmt,clientName,payMethod)=>{
+    if(!settings.shopifyDomain||!settings.shopifyToken)return{ok:false,msg:"Shopify not configured"};
+    try{const _dr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders.json",{method:"POST",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},body:JSON.stringify({draft_order:{tags:"vendor-purchase,loot-ledgr",note:"VENDOR PURCHASE | Loot #"+invNo+" | "+sS(clientName||"Walk-in"),note_attributes:[{name:"transaction_type",value:"vendor_purchase"},{name:"invoice",value:invNo},{name:"supplier",value:sS(clientName)}],line_items:(buyItems||[]).map(i=>({title:("[PURCHASE] "+sS(i.product&&i.product.label)).slice(0,500),price:sN(i.price).toFixed(2),quantity:1,requires_shipping:false}))}})}); const dd=await _dr.json();if(!dd.draft_order)return{ok:false,msg:"Shopify draft: "+JSON.stringify(dd.errors||dd)};await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders/"+dd.draft_order.id+"/complete.json",{method:"PUT",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken}});return{ok:true,msg:"Shopify vendor "+sS(dd.draft_order.name)};}catch(e){return{ok:false,msg:"Shopify buy: "+e.message};}
   };
-
-  const toGrams=(val,unit)=>{
-    if(!val||isNaN(val)) return null;
-    if(unit==="kg"||unit==="kgs") return{g:val*1000,raw:val.toFixed(3)+"kg",stable:true};
-    if(unit==="lb"||unit==="lbs") return{g:val*453.592,raw:val.toFixed(3)+"lb",stable:true};
-    if(unit==="oz"&&!unit.includes("t")) return{g:val*28.3495,raw:val.toFixed(3)+"oz",stable:true};
-    if(unit==="ozt"||unit==="toz"||unit==="t.oz") return{g:val*31.1035,raw:val.toFixed(3)+"ozt",stable:true};
-    if(unit==="ct"||unit==="cts") return{g:val*0.2,raw:val.toFixed(2)+"ct",stable:true};
-    return{g:val,raw:val.toFixed(3)+"g",stable:true}; // assume grams
-  };
-
-  const fmtScaleWeight=(reading)=>{
-    if(!reading) return "—";
-    const u=settings.scaleUnit||"g";
-    if(u==="ozt") return (reading.g/31.1035).toFixed(4)+" ozt";
-    if(u==="oz")  return (reading.g/28.3495).toFixed(3)+" oz";
-    return (reading.g).toFixed(3)+" g";
+  const sendEftpos=async(amountAUD)=>{
+    const provider=settings.eftposProvider||"none";
+    if(provider==="square"){if(!settings.squareToken||!settings.squareTerminalId)return{ok:false,msg:"Square terminal not configured."};try{const r=await(await fetch("https://connect.squareup.com/v2/terminals/checkouts",{method:"POST",headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},body:JSON.stringify({idempotency_key:uid(),checkout:{amount_money:{amount:Math.round(sN(amountAUD)*100),currency:"AUD"},device_options:{device_id:settings.squareTerminalId,skip_receipt_screen:false},payment_options:{autocomplete:true}}})})).json();if(r.checkout&&r.checkout.id){pop("Payment sent to terminal…","ok");await new Promise(res=>setTimeout(res,8000));const sd=await(await fetch("https://connect.squareup.com/v2/terminals/checkouts/"+r.checkout.id,{headers:{"Authorization":"Bearer "+settings.squareToken,"Square-Version":"2024-11-20"}})).json();if(sd.checkout&&sd.checkout.status==="COMPLETED")return{ok:true,msg:"EFTPOS approved"};if(sd.checkout&&sd.checkout.status==="CANCELED")return{ok:false,msg:"Payment cancelled on terminal"};return{ok:false,msg:"Terminal status: "+sS(sd.checkout&&sd.checkout.status)};}return{ok:false,msg:"Square terminal error: "+sS(r.errors&&r.errors[0]&&r.errors[0].detail)};}catch(e){return{ok:false,msg:"Square terminal: "+e.message};}}
+    if(provider==="linkly"){const base=settings.linklyBaseUrl||"http://localhost:4242";try{const r=await(await fetch(base+"/api/v1/transaction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({TxnType:"P",AmtPurchase:Math.round(sN(amountAUD)*100),AmtCash:0,TxnRef:uid().slice(0,16),CurrencyCode:"AUD",CutReceipt:"0",PurchaseAnalysisData:{}})})).json();const rp=r.Response||r;if(rp.Success||rp.ResponseCode==="00")return{ok:true,msg:"EFTPOS approved. Auth: "+sS(rp.AuthCode||"—")};return{ok:false,msg:"EFTPOS declined: "+sS(rp.ResponseText||rp.ResponseCode)};}catch(e){return{ok:false,msg:e.message&&e.message.includes("fetch")?"Cannot reach Linkly. Is PC-EFTPOS running?":"Linkly: "+e.message};}}
+    return{ok:false,msg:"No EFTPOS provider configured in Settings → Integrations."};
   };
 
   const connectScale=async()=>{
-    if(!navigator.bluetooth){
-      pop("Web Bluetooth not supported in this browser. Use Chrome or Edge on Android.","err");
-      return;
-    }
+    if(!navigator.bluetooth){pop("Web Bluetooth not supported. Use Chrome or Edge on Android.","err");return;}
     try{
-      setScaleStatus("connecting");
-      pop("Opening Bluetooth scanner…","ok");
-
-      const proto=settings.scaleProtocol||"auto";
-      const filters=[];
-      const optServices=[];
-
-      if(proto==="auto"||proto==="standard"){
-        optServices.push(SCALE_STD_SVC);
-      }
-      if(proto==="auto"||proto==="nordic_uart"){
-        optServices.push(NUS_SVC);
-      }
-      if(proto==="custom"&&settings.scaleCustomServiceUUID){
-        optServices.push(settings.scaleCustomServiceUUID.toLowerCase());
-      }
-
-      // Request device — browser shows a picker with nearby BLE devices
-      const device=await navigator.bluetooth.requestDevice({
-        acceptAllDevices:true,
-        optionalServices:optServices.length?optServices:[SCALE_STD_SVC,NUS_SVC],
-      });
-
-      device.addEventListener("gattserverdisconnected",()=>{
-        setScaleStatus("off");
-        setScaleDevice(null);
-        setScaleLive(null);
-        pop("Scale disconnected.","warn");
-      });
-
-      const server=await device.gatt.connect();
-      setScaleDevice(device);
-      let connected=false;
-
-      // ── Try standard Weight Scale service ──
-      if((proto==="auto"||proto==="standard")&&!connected){
-        try{
-          const svc=await server.getPrimaryService(SCALE_STD_SVC);
-          const char=await svc.getCharacteristic(SCALE_STD_CHAR);
-          await char.startNotifications();
-          char.addEventListener("characteristicvaluechanged",e=>{
-            const r=parseStdWeight(e.target.value);
-            if(r) setScaleLive(r);
-          });
-          connected=true;
-          pop("Scale connected (Standard BLE Weight Profile).","ok");
-        }catch(e){}
-      }
-
-      // ── Try Nordic UART Service ──
-      if((proto==="auto"||proto==="nordic_uart")&&!connected){
-        try{
-          const svc=await server.getPrimaryService(NUS_SVC);
-          const tx=await svc.getCharacteristic(NUS_TX);
-          await tx.startNotifications();
-          let buf="";
-          tx.addEventListener("characteristicvaluechanged",e=>{
-            const chunk=new TextDecoder().decode(e.target.value);
-            buf+=chunk;
-            if(buf.includes("\n")||buf.includes("\r")||buf.length>30){
-              const r=parseAsciiWeight(buf);
-              if(r) setScaleLive(r);
-              buf="";
-            }
-          });
-          connected=true;
-          pop("Scale connected (Nordic UART / ASCII protocol).","ok");
-        }catch(e){}
-      }
-
-      // ── Try custom UUID ──
-      if((proto==="custom"||proto==="auto")&&!connected&&settings.scaleCustomServiceUUID){
-        try{
-          const svc=await server.getPrimaryService(settings.scaleCustomServiceUUID.toLowerCase());
-          const char=await svc.getCharacteristic(settings.scaleCustomCharUUID.toLowerCase());
-          await char.startNotifications();
-          char.addEventListener("characteristicvaluechanged",e=>{
-            const txt=new TextDecoder().decode(e.target.value);
-            const r=parseAsciiWeight(txt)||parseStdWeight(e.target.value);
-            if(r) setScaleLive(r);
-          });
-          connected=true;
-          pop("Scale connected (custom UUID).","ok");
-        }catch(e){}
-      }
-
-      if(connected){
-        setScaleStatus("connected");
-      } else {
-        setScaleStatus("error");
-        pop("Connected to device but no recognised scale service found. Try setting Protocol in Settings.","warn");
-      }
-    }catch(e){
-      setScaleStatus("off");
-      if(e.name!=="NotFoundError") pop("Scale: "+e.message,"err");
-      else pop("No device selected.","warn");
-    }
+      setScaleStatus("connecting");pop("Opening Bluetooth scanner…","ok");
+      const proto=settings.scaleProtocol||"auto",optServices=[];
+      if(proto==="auto"||proto==="standard")optServices.push(SCALE_STD_SVC);
+      if(proto==="auto"||proto==="nordic_uart")optServices.push(NUS_SVC);
+      if(proto==="custom"&&settings.scaleCustomServiceUUID)optServices.push(settings.scaleCustomServiceUUID.toLowerCase());
+      const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:optServices});
+      setScaleDevice(device);const server=await device.gatt.connect();let connected=false;
+      if(proto==="auto"||proto==="standard"){try{const svc=await server.getPrimaryService(SCALE_STD_SVC);const ch=await svc.getCharacteristic(SCALE_STD_CHAR);await ch.startNotifications();ch.addEventListener("characteristicvaluechanged",e=>{const r=parseStdWeight(e.target.value);if(r)setScaleLive(r);});connected=true;setScaleStatus("connected");pop("Scale connected (Standard BLE).","ok");}catch(_){}}
+      if((proto==="auto"||proto==="nordic_uart")&&!connected){try{const svc=await server.getPrimaryService(NUS_SVC);const tx=await svc.getCharacteristic(NUS_TX);await tx.startNotifications();let buf="";tx.addEventListener("characteristicvaluechanged",e=>{buf+=new TextDecoder().decode(e.target.value);if(buf.length>30){const r=parseAsciiWeight(buf);if(r)setScaleLive(r);buf="";}});connected=true;setScaleStatus("connected");pop("Scale connected (Nordic UART).","ok");}catch(_){}}
+      if(!connected){setScaleStatus("error");pop("Connected but no scale service found. Try a different Protocol in Settings.","warn");}
+      device.addEventListener("gattserverdisconnected",()=>{setScaleStatus("off");setScaleLive(null);setScaleDevice(null);});
+    }catch(e){setScaleStatus("off");if(e.name!=="NotFoundError")pop("Scale: "+e.message,"err");}
   };
+  const disconnectScale=()=>{if(scaleDevice&&scaleDevice.gatt&&scaleDevice.gatt.connected){try{scaleDevice.gatt.disconnect();}catch(_){}}setScaleStatus("off");setScaleDevice(null);setScaleLive(null);};
 
-  const disconnectScale=()=>{
-    if(scaleDevice&&scaleDevice.gatt&&scaleDevice.gatt.connected){
-      scaleDevice.gatt.disconnect();
-    }
-    setScaleStatus("off");
-    setScaleDevice(null);
-    setScaleLive(null);
-  };
-
-  // ── SEND SMS via configured provider ─────────────────────────────────────
-  // Works over WiFi — no SIM required on the tablet when using Twilio/Vonage/Textbelt.
-  // sms_uri: opens the SMS app on devices that have a SIM (fallback).
   const sendDuressSMS=async(contact,msg)=>{
     const p=settings.smsProvider||"sms_uri";
-
-    // TEXTBELT — direct browser call, CORS allowed, works from WiFi tablets
-    if(p==="textbelt"){
-      try{
-        const r=await fetch("https://textbelt.com/text",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({phone:contact,message:msg,key:settings.textbeltKey||"textbelt"}),
-        });
-        const d=await r.json();
-        return d.success?{ok:true,msg:"Sent via Textbelt"}:{ok:false,msg:"Textbelt: "+(d.error||"quota exceeded — buy credits at textbelt.com")};
-      }catch(e){return{ok:false,msg:"Textbelt error: "+e.message};}
-    }
-
-    // WEBHOOK — Zapier/Make/n8n → Twilio/Vonage. Works from browser, no CORS issue.
-    if(p==="webhook"){
-      if(!settings.duressWebhookUrl) return{ok:false,msg:"Webhook URL not configured"};
-      try{
-        const r=await fetch(settings.duressWebhookUrl,{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({type:"DURESS_ALERT",message:msg,contact,
-            contacts:[contact],address:settings.address||"",
-            business:settings.businessName||"",timestamp:new Date().toISOString()}),
-        });
-        return r.ok||r.status===0?{ok:true,msg:"Sent via webhook"}:{ok:false,msg:"Webhook error: "+r.status};
-      }catch(e){return{ok:false,msg:"Webhook error: "+e.message};}
-    }
-
-    // TWILIO FUNCTION — user-deployed proxy URL, bypasses CORS restriction
-    if(p==="twilio_fn"){
-      if(!settings.twilioFnUrl) return{ok:false,msg:"Twilio Function URL not configured"};
-      try{
-        const r=await fetch(settings.twilioFnUrl,{
-          method:"POST",
-          headers:{"Content-Type":"application/x-www-form-urlencoded"},
-          body:"contact="+encodeURIComponent(contact)+"&message="+encodeURIComponent(msg)+"&contacts="+encodeURIComponent(contact),
-        });
-        const d=await r.json().catch(()=>({}));
-        return d.sent||r.ok?{ok:true,msg:"Sent via Twilio Function"}:{ok:false,msg:"Twilio Function error: "+r.status};
-      }catch(e){return{ok:false,msg:"Twilio Function error: "+e.message};}
-    }
-
-    // SMS APP — opens device SMS app pre-filled (requires SIM or linked phone)
-    const encoded=encodeURIComponent(msg);
-    window.open("sms:"+contact+"?body="+encoded);
-    return{ok:true,msg:"SMS app opened for "+contact};
+    const jP=(url,b)=>fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+    if(p==="textbelt"){try{const d=await(await jP("https://textbelt.com/text",{phone:contact,message:msg,key:settings.textbeltKey||"textbelt"})).json();return d.success?{ok:true,msg:"Sent via Textbelt"}:{ok:false,msg:"Textbelt: "+sS(d.error||"quota exceeded")};}catch(e){return{ok:false,msg:"Textbelt: "+e.message};}}
+    if(p==="webhook"){if(!settings.duressWebhookUrl)return{ok:false,msg:"Webhook URL not configured"};try{const r=await jP(settings.duressWebhookUrl,{type:"DURESS_ALERT",message:msg,contact,contacts:[contact],address:sS(settings.address),business:sS(settings.businessName),timestamp:nowISO()});return r.ok?{ok:true,msg:"Sent via webhook"}:{ok:false,msg:"Webhook error: "+r.status};}catch(e){return{ok:false,msg:"Webhook: "+e.message};}}
+    if(p==="twilio_fn"){if(!settings.twilioFnUrl)return{ok:false,msg:"Twilio Function URL not configured"};try{const r=await fetch(settings.twilioFnUrl,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"contact="+encodeURIComponent(contact)+"&message="+encodeURIComponent(msg)});const d=await r.json().catch(()=>({}));return d.sent||r.ok?{ok:true,msg:"Sent via Twilio"}:{ok:false,msg:"Twilio error"};}catch(e){return{ok:false,msg:"Twilio: "+e.message};}}
+    window.open("sms:"+contact+"?body="+encodeURIComponent(msg));return{ok:true,msg:"SMS app opened for "+contact};
   };
-
   const triggerDuress=async()=>{
     setDuressActive(true);
-    // Step 1: Get location — GPS → IP → business address
-    let locStr=settings.address||settings.businessName||"Address not set in app";
-    try{
-      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:5000}));
-      const lat=pos.coords.latitude.toFixed(5),lng=pos.coords.longitude.toFixed(5);
-      locStr=(settings.address||"Our address")+" (GPS "+lat+","+lng+" maps.google.com/?q="+lat+","+lng+")";
-    }catch(e){
-      try{
-        const r=await fetch("https://ipapi.co/json/");
-        const d=await r.json();
-        if(d.city) locStr=(settings.address||"Our address")+" (approx "+d.city+", "+d.region+")";
-      }catch(e2){}
-    }
-    // Step 2: Build message
-    const msg="URGENT — There is a robbery/aggression happening at our shop right now. "+
-      "Please call 000 immediately. Our address is: "+locStr;
-    // Step 3: Send to all configured contacts
-    const contacts=[
-      settings.duressContact1,settings.duressContact2,settings.duressContact3,
-      settings.duressContact4,settings.duressContact5,settings.duressContact6,
-      settings.duressContact7,settings.duressContact8,settings.duressContact9,
-      settings.duressContact10,
-    ].map(s=>(s||"").trim()).filter(Boolean);
-    let sent=0;
-    for(const contact of contacts){
-      const r=await sendDuressSMS(contact,msg);
-      if(r.ok) sent++;
-    }
-    const provider=(settings.smsProvider||"sms_uri")==="sms_uri"?"SMS app":settings.smsProvider;
-    pop("🚨 DURESS — "+sent+"/"+contacts.length+" contacts alerted via "+provider+". Call 000 NOW if not done.","err");
+    let loc=sS(settings.address||settings.businessName||"Address not set");
+    try{const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:5000}));const la=pos.coords.latitude.toFixed(5),lo=pos.coords.longitude.toFixed(5);loc=sS(settings.address||"Our address")+" (GPS "+la+","+lo+")";}
+    catch(_){try{const d=await(await fetch("https://ipapi.co/json/")).json();if(d.city)loc=sS(settings.address||"Our address")+" (approx "+d.city+", "+d.region+")";}catch(_){}}
+    const msg="URGENT — Robbery/aggression at our shop. Call 000 immediately. Address: "+loc;
+    const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);
+    let sent=0;for(const contact of contacts){const r=await sendDuressSMS(contact,msg);if(r.ok)sent++;}
+    pop("🚨 DURESS — "+sent+"/"+contacts.length+" contacts alerted. Call 000 NOW.","warn");
     setTimeout(()=>setDuressActive(false),5*60*1000);
   };
 
-    // ── POLICE REPORT GENERATOR — Multi-state compliant ─────────────────────
-  // All 8 states/territories covered. Core 10 fields identical across all states.
-  // State differences: hold periods, submission method, contact email, governing act.
-  const STATE_INFO={
-    VIC:{name:"Victoria",act:"Second-Hand Dealers and Pawnbrokers Act 1989 (Vic)",
-      hold:"7 days",freq:"Weekly (within 3 working days)",
-      defaultEmail:settings.policeEmail||"",
-      note:"Submit to your local Victoria Police station by email. No central portal."},
-    NSW:{name:"New South Wales",act:"Pawnbrokers and Second-hand Dealers Act 1996 (NSW)",
-      hold:"14 days",freq:"Within 3 working days of each transaction",
-      defaultEmail:"#PBU@police.nsw.gov.au",
-      note:"Submit via NSW Police Weblink portal using your dealer licence number, OR email #PBU@police.nsw.gov.au"},
-    QLD:{name:"Queensland",act:"Second-hand Dealers and Pawnbrokers Act 2003 (Qld)",
-      hold:"Check local conditions",freq:"Regular forwarding to SPIRS database",
-      defaultEmail:"SPIRS.Admin@police.qld.gov.au",
-      note:"Forward CSV to SPIRS (Stolen Property ID & Recovery System). Police cross-match against stolen property database."},
-    SA:{name:"South Australia",act:"Second-hand Dealers and Pawnbrokers Act 1996 (SA)",
-      hold:"10 days (3 days if full buyer details recorded)",freq:"Keep on premises — available for inspection at any time",
-      defaultEmail:"sapol.leb@police.sa.gov.au",
-      note:"SA requires registration (not licensing). Keep records on premises. Email SAPOL Licensing Enforcement Branch for stolen goods reports."},
-    WA:{name:"Western Australia",act:"Second-hand Dealers and Pawnbrokers Act 1994 (WA)",
-      hold:"3 days minimum",freq:"Available for inspection; submit electronically on request",
-      defaultEmail:settings.policeEmail||"",
-      note:"Keep records on premises. Submit to local WA Police station on request or by standing arrangement."},
-    NT:{name:"Northern Territory",act:"Second-hand Dealers Act (NT)",
-      hold:"14 days",freq:"Available for police inspection at any time",
-      defaultEmail:settings.policeEmail||"",
-      note:"Keep records on premises. Contact local NT Police station. Notify immediately if stolen goods suspected."},
-    ACT:{name:"Australian Capital Territory",act:"Second-Hand Dealers Act 1995 (ACT)",
-      hold:"7 days",freq:"Available for ACT Policing inspection",
-      defaultEmail:settings.policeEmail||"",
-      note:"Keep records on premises and available for ACT Policing inspection."},
-    TAS:{name:"Tasmania",act:"Second-Hand Dealers Act 1994 (Tas)",
-      hold:"7 days",freq:"Available for Tasmania Police inspection",
-      defaultEmail:settings.policeEmail||"",
-      note:"Keep records on premises. Contact your local Tasmania Police station."},
+  const dlAccounting=()=>{
+    const sp=spotForCalc();
+    const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
+    const esc=v=>{const str=sS(v).replace(/[\r\n]+/g," ");const Q='"';return Q+str.split(Q).join(Q+Q)+Q;};
+    const csv=rows=>rows.map(r=>r.map(esc).join(",")).join("\n");
+    const s1=[["TRANSACTION REGISTER"],["Spot: "+sn],["Invoice","Date","Client","Item","Metal","Purity","Wt(g)","Bought($)","Sold($)","Margin($)","GST","GST Est($)","Status"]];
+    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{const b=it.mode==="buy"?sN(it.price):0,sv=it.mode==="sell"?sN(it.price):0,m=sv-b;const gst=it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin":"Standard 10%";const ge=it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,m/11):sv*0.1;s1.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS((it.product&&it.product.label)||it.description||"—"),sS((it.product&&it.product.cat)||"—"),sS(it.purity||((it.product&&it.product.carat)&&it.product.carat+"ct")||"—"),sS(it.qty||"—"),b||"",sv||"",m||"",gst,ge.toFixed(2),tx.voided?"VOIDED":"OK"]);}));
+    const s2=[["STOCK VALUATION"],["Spot: "+sn],["Item","Invoice","Metal","Purity","Wt(g)","Bought($)","Melt($)","P&L($)","GST","Days","Status"]];
+    (stock||[]).filter(x=>!x.sold).forEach(s=>{const mv=calcMeltFn(s,frozenSnap,sp.g,sp.s),b=sN(s.price),d=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;s2.push([sS(s.description||((s.product&&s.product.label))||"—"),sS(s.txId||"—"),sS((s.product&&s.product.cat)||"—"),sS(s.purity||"—"),sS(s.weight_g||"—"),b.toFixed(2),mv!=null?mv.toFixed(2):"—",mv!=null?(mv-b).toFixed(2):"—",s.gstApplicable===false?"GST-Free":"Taxable",d,s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready"]);});
+    let tS=0,tP=0,tMG=0,tSG=0;
+    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{if(it.mode==="sell"&&it.gstApplicable!==false){tS+=sN(it.price);if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);else tSG+=sN(it.price)*0.1;}if(it.mode==="buy")tP+=sN(it.price);}));
+    const s3=[["GST SUMMARY"],["Period: "+(frozenSnap?frozenSnap.frozenAt:todayStr())],["Total Sales","$"+tS.toFixed(2)],["Total Purchases","$"+tP.toFixed(2)],["Standard GST (10%)","$"+tSG.toFixed(2)],["Margin Scheme GST","$"+tMG.toFixed(2)],["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],["",""],["Estimate only — confirm with registered tax agent",""]];
+    const s4=[["COMPLIANCE LOG"],["Invoice","Date","Client","TTR Status","SMR","KYC","Police Hold","Voided"]];
+    (txList||[]).forEach(tx=>s4.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS(tx.ttrStatus||"N/A"),tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",(tx.items||[]).some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
+    dlFile("LOOT LEDGR — ACCOUNTING EXPORT\nBusiness: "+sS(settings.businessName)+"  ABN: "+sS(settings.abn)+"\nExported: "+todayStr()+"  Spot: "+sn+"\n\n1. TRANSACTION REGISTER\n"+csv(s1)+"\n\n2. STOCK VALUATION\n"+csv(s2)+"\n\n3. GST SUMMARY\n"+csv(s3)+"\n\n4. COMPLIANCE LOG\n"+csv(s4),"lootledgr-accounting-"+todayStr()+".csv","text/csv");
+    pop("Accounting export downloaded.","ok");
   };
 
-  const genPoliceReport=(dateFrom,dateTo,suspicious,stateCode)=>{
-    const sc=stateCode||settings.state||"VIC";
-    const st=STATE_INFO[sc]||STATE_INFO.VIC;
-    const txs=txList.filter(t=>{
-      if(!t.date) return false;
-      if(suspicious) return t.smrFlagged;
-      const d=new Date(t.date);
-      return d>=dateFrom&&d<=dateTo;
-    });
-    const dealer=settings.businessName||"[Business Name]";
-    const licence=settings.dealerLicenceNo||"[Licence/Registration No]";
-    const rows=[
-      [st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],
-      ["Governing Act",st.act],
-      ["Dealer Name",dealer],
-      ["ABN",settings.abn||""],
-      ["Dealer Licence / Registration No",licence],
-      ["Business Address",settings.address||""],
-      ["Phone",settings.phone||""],
-      suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],
-      ["Period",suspicious?"All SMR-flagged transactions":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],
-      ["Mandatory Hold Period",st.hold],
-      ["Submission Instructions",st.note],
-      ["Generated",new Date().toLocaleString("en-AU")],
-      [],
-      ["Contract No","Date","Item Description","Serial / ID Marks",
-       "Weight / Qty","Price Paid (AUD)",
-       "Client Full Name","Client DOB","Client Address",
-       "ID Type","ID Number",
-       "KYC Verified","TTR Required","SMR Flagged","Staff Notes"],
-    ];
-    txs.forEach(tx=>{
-      const cl=tx.client||{};
-      (tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{
-        const prod=it.product||{};
-        rows.push([
-          tx.id,
-          new Date(tx.date).toLocaleDateString("en-AU"),
-          prod.label||(it.note?"Unlisted: "+it.note:"Item"),
-          prod.serial||"—",
-          it.qty||"1",
-          (it.price||0).toFixed(2),
-          cl.fullName||"",
-          cl.dob||"",
-          cl.address||"",
-          cl.idType||"",
-          cl.idNumber||"",
-          tx.kycDone?"YES":"NO",
-          tx.ttrRequired?"YES":"NO",
-          tx.smrFlagged?"YES":"NO",
-          it.note||"",
-        ]);
-      });
-    });
-    if(rows.length<=14) rows.push(["(No qualifying buy transactions in this period)"]);
-    return rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(",")).join("\n");
-  };
-
-
-  // ── EFTPOS: push payment to physical terminal ────────────────
-  // Supports: Square Terminal API + Linkly (PC-EFTPOS) for AU bank terminals
-  const sendEftpos=async(amountAUD)=>{
-    const provider=settings.eftposProvider||"none";
-
-    // ── Square Terminal API ──────────────────────────────────────
-    if(provider==="square"){
-      if(!settings.squareToken||!settings.squareTerminalId)
-        return{ok:false,msg:"Square terminal not configured. Add Access Token and Terminal Device ID in Settings."};
-      try{
-        const r=await fetch("https://connect.squareup.com/v2/terminals/checkouts",{
-          method:"POST",
-          headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},
-          body:JSON.stringify({
-            idempotency_key:"eftpos-"+txNo+"-"+Date.now(),
-            checkout:{
-              amount_money:{amount:Math.round(amountAUD*100),currency:"AUD"},
-              device_options:{device_id:settings.squareTerminalId,skip_receipt_screen:false},
-              note:"Loot Ledgr #"+txNo,
-              payment_options:{autocomplete:true},
-            },
-          }),
-        });
-        const d=await r.json();
-        if(d.checkout&&d.checkout.id){
-          // Poll for completion (up to 90s)
-          const checkId=d.checkout.id;
-          pop("Payment sent to terminal — waiting for customer to tap/insert…","ok");
-          for(let attempt=0;attempt<18;attempt++){
-            await new Promise(res=>setTimeout(res,5000));
-            const poll=await fetch("https://connect.squareup.com/v2/terminals/checkouts/"+checkId,{
-              headers:{"Authorization":"Bearer "+settings.squareToken,"Square-Version":"2024-11-20"},
-            });
-            const pd=await poll.json();
-            const status=pd.checkout&&pd.checkout.status;
-            if(status==="COMPLETED") return{ok:true,msg:"EFTPOS payment approved."};
-            if(status==="CANCELED"||status==="CANCEL_REQUESTED") return{ok:false,msg:"Payment cancelled at terminal."};
-          }
-          return{ok:false,msg:"Terminal timeout — check terminal screen."};
-        }
-        return{ok:false,msg:"Square terminal error: "+((d.errors&&d.errors[0]&&d.errors[0].detail)||"Unknown")};
-      }catch(e){return{ok:false,msg:"Square terminal error: "+e.message};}
-    }
-
-    // ── Linkly / PC-EFTPOS (AU bank terminals) ───────────────────
-    if(provider==="linkly"){
-      const base=settings.linklyBaseUrl||"http://localhost:4242";
-      try{
-        // Linkly REST API v1 — sends purchase request to terminal
-        const r=await fetch(base+"/api/v1/transaction/purchase",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            PurchaseAnalysisData:{},
-            Request:{
-              TxnType:"P",               // Purchase
-              AmtPurchase:Math.round(amountAUD*100),
-              AmtCash:0,
-              TxnRef:txNo,
-              CurrencyCode:"AUD",
-              CutReceipt:"0",
-              EnableTip:false,
-            },
-          }),
-        });
-        const d=await r.json();
-        if(d&&d.Response){
-          const resp=d.Response;
-          if(resp.Success===true||resp.RespCode==="00")
-            return{ok:true,msg:"EFTPOS approved. Auth: "+(resp.AuthCode||"—")};
-          return{ok:false,msg:"EFTPOS declined: "+(resp.ResponseText||resp.RespCode||"Unknown")};
-        }
-        return{ok:false,msg:"Linkly: unexpected response"};
-      }catch(e){
-        if(e.message&&e.message.includes("fetch")){
-          return{ok:false,msg:"Cannot reach Linkly. Is PC-EFTPOS running on this device? (localhost:4242)"};
-        }
-        return{ok:false,msg:"Linkly error: "+e.message};
-      }
-    }
-
-    return{ok:false,msg:"No EFTPOS provider configured. Set it up in Settings → Integrations."};
-  };
-
-  // ── SHOPIFY SELL: create completed order ───────────────────
-  const sendShopifySell=async(invNo,sellItems,clientName)=>{
-    if(!settings.shopifyDomain||!settings.shopifyToken) return{ok:false,msg:"Shopify not configured"};
-    try{
-      const r=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/orders.json",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},
-        body:JSON.stringify({order:{
-          financial_status:"paid",tags:"loot,sale",
-          note:"Sale — Loot #"+invNo+(clientName?" | "+clientName:""),
-          line_items:sellItems.map(i=>({title:i.product.label,quantity:1,price:(i.price||0).toFixed(2)})),
-        }}),
-      });
-      const d=await r.json();
-      if(d.order&&d.order.id) return{ok:true,msg:"Shopify sale recorded ("+d.order.name+")"};
-      return{ok:false,msg:"Shopify sell error: "+JSON.stringify(d.errors||d)};
-    }catch(e){return{ok:false,msg:"Shopify sell failed: "+e.message};}
-  };
-
-  // ── SHOPIFY BUY: draft order as vendor/supplier purchase ──
-  // Creates a Draft Order with tag "vendor-purchase" + completes it.
-  // Visible in Shopify admin > Orders > Drafts with vendor purchase label.
-  // Your accountant can filter by tag "vendor-purchase" for expense reporting.
-  const sendShopifyBuy=async(invNo,buyItems,totalAmt,clientName,payMethod)=>{
-    if(!settings.shopifyDomain||!settings.shopifyToken) return{ok:false,msg:"Shopify not configured"};
-    try{
-      const dr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders.json",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},
-        body:JSON.stringify({draft_order:{
-          tags:"vendor-purchase,loot,buy-from-client",
-          note:"VENDOR PURCHASE — Loot #"+invNo+" | Supplier: "+(clientName||"Walk-in")+" | "+payMethod,
-          note_attributes:[
-            {name:"transaction_type",value:"vendor_purchase"},
-            {name:"invoice_no",value:invNo},
-            {name:"supplier",value:clientName||""},
-            {name:"payment_method",value:payMethod||""},
-          ],
-          line_items:buyItems.map(i=>({title:"[PURCHASE] "+i.product.label,quantity:1,price:(i.price||0).toFixed(2),requires_shipping:false})),
-        }}),
-      });
-      const dd=await dr.json();
-      if(!dd.draft_order) return{ok:false,msg:"Shopify draft error: "+JSON.stringify(dd.errors||dd)};
-      const cr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders/"+dd.draft_order.id+"/complete.json?payment_pending=false",{
-        method:"PUT",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},
-      });
-      const cd=await cr.json();
-      const status=cd.draft_order&&cd.draft_order.status;
-      return{ok:true,msg:status==="completed"?"Shopify vendor purchase recorded ("+dd.draft_order.name+")":"Shopify draft created ("+dd.draft_order.name+") — review in admin"};
-    }catch(e){return{ok:false,msg:"Shopify buy failed: "+e.message};}
-  };
-
-  // ── AUTO-PUSH TO INTEGRATIONS ON FINALIZE ─────────────────
+  const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledgr-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
+  const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
   const pushIntegrations=async(tx)=>{
-    const msgs=[];
-    const buys=tx.items.filter(i=>i.mode==="buy"),sells=tx.items.filter(i=>i.mode==="sell");
-    // Square
-    if(settings.squareToken&&settings.squareLoc){
-      if(buys.length&&tx.buyTotal>0){
-        const r=await sendSquareBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);
-        msgs.push("Square: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));
-      }
-    }
-    // Shopify
-    if(settings.shopifyDomain&&settings.shopifyToken){
-      if(buys.length&&tx.buyTotal>0){
-        const r=await sendShopifyBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);
-        msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));
-      }
-      if(sells.length&&tx.sellTotal>0){
-        const r=await sendShopifySell(tx.id,sells,tx.client&&tx.client.fullName);
-        msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));
-      }
-    }
-    // Webhook
-    if(settings.webhookUrl){
-      try{
-        await fetch(settings.webhookUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({event:"transaction",invoice:tx.id,date:tx.date,
-            buy:{items:buys.map(i=>({label:i.product.label,price:i.price})),total:tx.buyTotal},
-            sell:{items:sells.map(i=>({label:i.product.label,price:i.price})),total:tx.sellTotal},
-            payment:tx.payment,net:tx.net})});
-        msgs.push("Webhook: ✓ pushed");
-      }catch(e){msgs.push("Webhook: ✗ "+e.message);}
-    }
-    if(msgs.length) pop(msgs.join(" | ").slice(0,200),"ok");
+    const msgs=[],buys=(tx.items||[]).filter(i=>i.mode==="buy"),sells=(tx.items||[]).filter(i=>i.mode==="sell");
+    if(settings.squareToken&&settings.squareLoc&&buys.length&&tx.buyTotal>0){const r=await sendSquareBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);msgs.push("Square: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}
+    if(settings.shopifyDomain&&settings.shopifyToken){if(buys.length&&tx.buyTotal>0){const r=await sendShopifyBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}if(sells.length&&tx.sellTotal>0){const r=await sendShopifySell(tx.id,sells,tx.client&&tx.client.fullName);msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}}
+    if(settings.webhookUrl){try{await fetch(settings.webhookUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({event:"transaction",invoice:tx.id,date:tx.date,buy:{items:buys.map(i=>({label:sS(i.product&&i.product.label),price:i.price})),total:tx.buyTotal},sell:{items:sells.map(i=>({label:sS(i.product&&i.product.label),price:i.price})),total:tx.sellTotal},payment:tx.payment,net:tx.net})});msgs.push("Webhook: ✓ pushed");}catch(e){msgs.push("Webhook: ✗ "+e.message);}}
+    if(msgs.length)pop(msgs.join(" | ").slice(0,200),"ok");
   };
 
-  // Legacy alias
-  const sendSquare=sendSquareSell;
-
-
-
-  const unlockApp=()=>{
-    if(appPinInput===settings.staffPin){
-      setAppUnlocked(true);
-      store.set("sessionActive",true);
-      store.set("sessionLast",Date.now());
-      setAppPinInput("");
-    } else pop("Incorrect PIN","err");
-  };
-
-  const resetTx=()=>{
-    setTxItems([]);setTxStep(1);setTxPay("cash");
-    setClient({});setStaff({});setKycDone(false);setPrivAck(false);
-    setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());
-    setAddQty("");setAddCustom("");setAddNote("");
-  };
-
+  const unlockApp=()=>{if(appPinInput===settings.staffPin){setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}else pop("Incorrect PIN","err");};
+  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
   const togglePoliceHold=(id,val)=>setStock(p=>p.map(s=>s.id===id?{...s,policeHold:val}:s));
+  const purge=()=>{const ex=(txList||[]).filter(t=>isExpired7yr(t.deleteAfter)),es=(stock||[]).filter(s=>isExpired7yr(s.deleteAfter));ex.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));pop(ex.length+es.length>0?"Purged "+ex.length+" tx + "+es.length+" stock items.":"Nothing to purge yet.","ok");};
+  const dlTx=tx=>{const u=URL.createObjectURL(new Blob([makeTxt(tx)],{type:"text/plain"})),a=document.createElement("a");a.href=u;a.download=tx.id+"_"+sS(tx.client&&tx.client.fullName||"client").replace(/[^a-zA-Z0-9]/g,"_")+".txt";a.click();URL.revokeObjectURL(u);const ph=tx.photoKey?store.get(tx.photoKey,{}):{idPhoto:tx.idPhoto,itemPhotos:tx.itemPhotos};if(ph.idPhoto)setTimeout(()=>{const a2=document.createElement("a");a2.href=ph.idPhoto;a2.download=tx.id+"_id.jpg";a2.click();},300);if(ph.itemPhotos)Object.values(ph.itemPhotos).filter(Boolean).forEach((d,i)=>setTimeout(()=>{const a3=document.createElement("a");a3.href=d;a3.download=tx.id+"_item"+i+".jpg";a3.click();},(i+2)*300));};
+  const dlBatch=()=>{const fr=cliFrom?new Date(cliFrom):new Date(0),to=cliTo?new Date(cliTo):new Date();to.setHours(23,59,59);const f=(txList||[]).filter(t=>{const d=new Date(t.date);return d>=fr&&d<=to;});if(!f.length){pop("No transactions in range.","warn");return;}f.forEach(dlTx);pop("Downloading "+f.length+" file(s).","ok");};
+  const saveProd=()=>{if(!newProd.label){pop("Product label required.","warn");return;}const prod={...newProd,id:(editProd&&editProd.id)||uid(),purity:newProd.purity!==""?parseFloat(newProd.purity):null,carat:newProd.carat!==""?parseFloat(newProd.carat):null,buyMult:newProd.buyMult!==""?parseFloat(newProd.buyMult):null,sellMult:newProd.sellMult!==""?parseFloat(newProd.sellMult):null,weightG:newProd.weightG!==""?parseFloat(newProd.weightG):null,buyMode:newProd.carat?"carat":null,active:true};if(editProd)setCatalog(prev=>prev.map(x=>x.id===editProd.id?prod:x));else setCatalog(prev=>[...prev,prod]);setEditProd(null);setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});pop("Product saved.","ok");};
+  const deleteProd=(id,label)=>{setCatalog(prev=>prev.filter(x=>x.id!==id));pop(sS(label)+" deleted.","ok");};
+  const exportPayload=()=>({exported:nowISO(),spots:{goldAUD_oz:gSpot,silverAUD_oz:sSpot},prices:{goldPerGram:fmt2(gSpot/TROY_OZ),goldBuy999PerG:fmt2(gSpot/TROY_OZ*0.9),alluvialBuyPerG:fmt2(gSpot/TROY_OZ*0.9),silverPerGram:fmt2(sSpot/TROY_OZ)},recentTransactions:(txList||[]).slice(0,5).map(t=>({contractNo:t.id,date:t.date,buy:t.buyTotal,sell:t.sellTotal,net:t.net}))});
 
-  const purge=()=>{
-    const expiredTx=txList.filter(t=>isExpired7yr(t.deleteAfter));
-    const expiredStock=(stock||[]).filter(s=>isExpired7yr(s.deleteAfter));
-    expiredTx.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});
-    setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));
-    setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));
-    if(expiredTx.length===0&&expiredStock.length===0){
-      pop("Nothing to purge — no records have passed their 7-year retention date yet.","ok");
-    } else {
-      pop("Purged "+expiredTx.length+" transaction(s) and "+expiredStock.length+" stock item(s) past 7-year retention.","ok");
-    }
-  };
+  const locked=settings.requirePin&&!appUnlocked;
+  const NAV=[{id:"dashboard",icon:"⬡",label:"Dashboard"},{id:"newTx",icon:"＋",label:"New Tx"},{id:"stock",icon:"◈",label:"Stock"},{id:"history",icon:"☰",label:"History"},{id:"prices",icon:"⚖",label:"Prices"},{id:"clients",icon:"👤",label:"Clients"}];
+  const ABTN={width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"};
 
-  const makeTxt=tx=>{
-    const cl=tx.client||{},st=tx.staff||{},its=tx.items||[];
-    return["LOOT — TRANSACTION RECORD","Invoice: "+tx.id,"Date: "+fmtDate(tx.date),"Payment: "+(tx.payment||"").toUpperCase(),"",
-      "── CLIENT ──────────────────","Name: "+(cl.fullName||""),"DOB: "+(cl.dob||""),"Phone: "+(cl.phone||""),"Address: "+(cl.address||""),"",
-      "── ID ──────────────────────","Type: "+(cl.idType||""),"Number: "+(cl.idNumber||""),"Sighted: "+(tx.idSighted?"Yes":"No"),"",
-      "── ITEMS ───────────────────",
-      ...its.filter(i=>i.mode==="buy").map((it,n)=>"  "+(n+1)+". [BUY] "+((it.product&&it.product.label)||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
-      ...its.filter(i=>i.mode==="sell").map((it,n)=>"  "+(n+1)+". [SELL] "+((it.product&&it.product.label)||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
-      "","Buy Total: "+fmtAUD(tx.buyTotal),"Sell Total: "+fmtAUD(tx.sellTotal),"",
-      "── COMPLIANCE ──────────────","KYC: "+(tx.kycDone?"Completed":"N/A"),"TTR: "+(tx.ttrStatus||"N/A"),"SMR: "+(tx.smrFlagged?"YES":"No"),
-      "Staff: "+(st.staffName||""),"Storage: "+(st.storageLocation||""),"",
-      "Delete After: "+fmtDate(tx.deleteAfter)
-    ].join("\n");
-  };
-  const dlTx=tx=>{
-    const u=URL.createObjectURL(new Blob([makeTxt(tx)],{type:"text/plain"})),a=document.createElement("a");
-    a.href=u;a.download=tx.id+"_"+((tx.client&&tx.client.fullName)||"client").replace(/[^a-zA-Z0-9]/g,"_")+".txt";
-    a.click();URL.revokeObjectURL(u);
-    const ph=tx.photoKey?store.get(tx.photoKey,{}):{idPhoto:tx.idPhoto,itemPhotos:tx.itemPhotos};
-    if(ph.idPhoto)setTimeout(()=>{const a2=document.createElement("a");a2.href=ph.idPhoto;a2.download=tx.id+"_id.jpg";a2.click();},300);
-    if(ph.itemPhotos)Object.values(ph.itemPhotos).filter(Boolean).forEach((d,i)=>setTimeout(()=>{const a3=document.createElement("a");a3.href=d;a3.download=tx.id+"_item"+i+".jpg";a3.click();},(i+2)*300));
-  };
-  const dlBatch=()=>{
-    const fr=cliFrom?new Date(cliFrom):new Date(0),to=cliTo?new Date(cliTo):new Date();to.setHours(23,59,59);
-    const f=txList.filter(t=>{const d=new Date(t.date);return d>=fr&&d<=to;});
-    if(!f.length){pop("No transactions in range.","warn");return;}
-    f.forEach(dlTx);pop("Downloading "+f.length+" file(s).","ok");
-  };
+  const basketTable = txItems.length > 0 ? (
+                <div style={c.card({padding:0,overflow:"hidden",marginBottom:14})}>
+                  <div style={c.shead(true)}>Basket — {txItems.length} item(s)</div>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr>{["Mode","Item","Price","📷","Hold","Flags",""].map(h=><th key={h} style={c.th}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {txItems.map((it,i)=>(
+                        <tr key={it.id} style={{background:i%2?"#ffffff04":"transparent"}}>
+                          <td style={c.td()}><span style={c.badge(it.mode==="buy"?T.green:T.gold)}>{it.mode.toUpperCase()}</span>{it.isQuick&&<span style={{...c.badge(T.blue,T.blueBg),marginLeft:4,fontSize:9}}>Q</span>}</td>
+                          <td style={c.td({color:T.white})}>{it.product&&it.product.label}{it.note&&<div style={{fontSize:10,color:T.muted}}>{it.note}</div>}</td>
+                          <td style={c.td()}>
+                            <div style={{fontWeight:"bold",color:it.mode==="buy"?T.green:T.gold}}>{fmtAUD(it.price)}</div>
+                            {adjId===it.id ?
+                              <div style={{display:"flex",gap:4,marginTop:3,alignItems:"center"}}>
+                                <input style={c.inp({width:68,padding:"3px 7px",fontSize:11})} type="number" value={adjVal} onChange={e=>setAdjVal(e.target.value)} autoFocus/>
+                                <button style={c.bsm(T.greenBg,T.green)} onClick={()=>{const v=Math.max(0,sN(adjVal));if(!v){pop("Enter valid price.","warn");return;}setTxItems(p=>p.map(x=>x.id===adjId?{...x,price:v,negotiated:true}:x));setAdjId(null);setAdjVal("");}}>✓</button>
+                                <button style={c.bsm()} onClick={()=>setAdjId(null)}>✕</button>
+                              </div> :
+                              <button style={{background:"transparent",border:"none",color:T.muted,cursor:"pointer",fontSize:9,padding:"2px 4px"}} onClick={()=>{setAdjId(it.id);setAdjVal(String(it.price));}}>✎</button>}
+                          </td>
+                          <td style={c.td()}>
+                            {itemPhotos[it.id] ?
+                              <button style={c.bsm(T.redBg,T.red)} onClick={()=>setItemPhotos(p=>{const n={...p};delete n[it.id];return n;})}>🗑</button> :
+                              <label style={{...c.bsm(T.border,T.muted),display:"inline-block",cursor:"pointer",padding:"5px 9px",fontSize:11}}>📷<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const iid=it.id;const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>setItemPhotos(p=>({...p,[iid]:d})));r.readAsDataURL(f);e.target.value="";}}/></label>}
+                          </td>
+                          <td style={c.td()}>{it.holdUntil?<HoldTimer holdUntil={it.holdUntil} policeHold={false}/>:<span style={{color:T.muted}}>—</span>}</td>
+                          <td style={c.td()}>
+                            <div style={{display:"flex",gap:4}}>
+                              <button title="Suspicious" style={c.bsm(it.suspicious?T.orangeBg:T.border,it.suspicious?T.orange:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,suspicious:!x.suspicious}:x))}>🚩</button>
+                              {it.mode==="buy"&&<button title="Police hold" style={c.bsm(it.policeHold?T.redBg:T.border,it.policeHold?T.red:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,policeHold:!x.policeHold}:x))}>🚔</button>}
+                            </div>
+                          </td>
+                          <td style={c.td()}><button style={c.bsm(T.redBg,T.red)} onClick={()=>setTxItems(p=>p.filter(x=>x.id!==it.id))}>✕</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{padding:"10px 14px",background:T.surface,display:"flex",justifyContent:"flex-end",gap:16,flexWrap:"wrap"}}>
+                    {buyTotal>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(buyTotal)}</strong></span>}
+                    {sellTotal>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(sellTotal)}</strong></span>}
+                    <span>Net: <strong style={{color:net>=0?T.gold:T.green}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</strong></span>
+                  </div>
+                </div>
 
-  const handlePhoto=e=>{
-    const f=e.target.files&&e.target.files[0];if(!f)return;
-    const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>setPhoto(d));r.readAsDataURL(f);
-  };
-  const handleItemPhoto=e=>{
-    const f=e.target.files&&e.target.files[0];if(!f)return;
-    const id=pendingPhotoId.current;
-    if(!id){pop("Photo error, retry.","warn");return;}
-    const r=new FileReader();
-    r.onload=ev=>checkPhotoSize(ev.target.result,d=>{setItemPhotos(p=>({...p,[id]:d}));pendingPhotoId.current=null;});
-    r.onerror=()=>{pop("Could not read photo.","warn");pendingPhotoId.current=null;};
-    r.readAsDataURL(f);e.target.value="";
-  };
-  const captureItemPhoto=()=>{}; // replaced by label+input per item
-  const handleStockPhoto=e=>{
-    const f=e.target.files&&e.target.files[0];if(!f||!selStockItem)return;
-    const r=new FileReader();
-    r.onload=ev=>checkPhotoSize(ev.target.result,d=>{
-      store.set("stockph_"+selStockItem.id,d);
-      setStock(p=>p.map(s=>s.id===selStockItem.id?{...s,hasPhoto:true}:s));
-      setSelStockItem(null);pop("Photo saved to item.","ok");
-    });
-    r.onerror=()=>pop("Could not read photo.","warn");
-    r.readAsDataURL(f);e.target.value="";
-  };
+  ) : null;
 
-  const saveProd=()=>{
-    if(!newProd.label){pop("Product label is required.","warn");return;}
-    const prod={...newProd,id:(editProd&&editProd.id)||uid(),
-      purity:newProd.purity!==""?parseFloat(newProd.purity):null,
-      carat:newProd.carat!==""?parseFloat(newProd.carat):null,
-      buyMult:newProd.buyMult!==""?parseFloat(newProd.buyMult):null,
-      sellMult:newProd.sellMult!==""?parseFloat(newProd.sellMult):null,
-      weightG:newProd.weightG!==""?parseFloat(newProd.weightG):null,
-      buyMode:newProd.carat?"carat":null,active:true,
-    };
-    if(editProd) setCatalog(prev=>prev.map(x=>x.id===editProd.id?prod:x));
-    else setCatalog(prev=>[...prev,prod]);
-    setEditProd(null);
-    setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});
-    pop("Product saved.","ok");
-  };
-
-  const deleteProd=(id,label)=>{
-    setCatalog(prev=>prev.filter(x=>x.id!==id));
-    pop(label+" deleted.","ok");
-  };
-
-  const exportPayload=()=>({
-    exported:nowISO(),
-    spots:{goldAUD_oz:gSpot,silverAUD_oz:sSpot},
-    prices:{
-      goldPerGram:fmt2(gSpot/TROY_OZ),
-      goldBuy999PerG:fmt2(gSpot/TROY_OZ*0.9),
-      alluvialBuyPerG:fmt2(gSpot/TROY_OZ*0.9),
-      silverPerGram:fmt2(sSpot/TROY_OZ),
-      silverPerGram:fmt2(sSpot/TROY_OZ),
-    },
-    recentTransactions:txList.slice(0,5).map(t=>({contractNo:t.id,date:t.date,buy:t.buyTotal,sell:t.sellTotal,net:t.net})),
-  });
-
-  const NAV=[
-    {id:"dashboard",icon:"⬡",label:"Dashboard"},
-    {id:"newTx",    icon:"＋",label:"New Tx"},
-    {id:"stock",    icon:"◈",label:"Stock"},
-    {id:"history",  icon:"☰",label:"History"},
-    {id:"prices",   icon:"⚖",label:"Prices"},
-    {id:"clients",  icon:"👤",label:"Clients"},
-  ];
-
-  // ── RENDER ────────────────────────────────────────────────────────────────
-  // Optional PIN lock screen (disabled by default — enable in Settings > Security)
-  if(settings.requirePin&&!appUnlocked){
-    return(
-      <div style={{...c.app,display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
-        <div style={c.card({padding:32,maxWidth:320,width:"100%",textAlign:"center"})}>
-          <div style={{fontSize:32,marginBottom:12}}>🔒</div>
-          <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
-          <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
-          <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}}
-            type="password" maxLength={8} value={appPinInput}
-            onChange={e=>setAppPinInput(e.target.value)}
-            onKeyDown={e=>{if(e.key==="Enter")unlockApp();}}
-            placeholder="••••" autoFocus/>
-          <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── AI AGENT BUS (v1 — read/command socket) ──────────────────────────────
-  // window.LOOTLEDGER_AI — stable API surface for any AI agent.
-  // Level 1: read-only observation + event stream (training mode)
-  // Level 2: command execution (autonomous — PIN gated, locked until v2.0)
-  //
-  // PRIVACY HARD RULES — enforced here, not negotiable:
-  //   logoLib, logoImg, SEED_LOGO   → never exposed, never emitted, never a command
-  //   item/ID photos (base64)       → stripped from ALL outgoing data
-  //   staffPin                      → never exposed
-  //   wallet addresses, API tokens  → never exposed
-  //   client PII (idNumber, dob)    → stripped, Level 1 gets name only
-  useEffect(()=>{
-    const stripPhoto=(o)=>{if(!o)return o;const{idPhoto,photo,hasPhoto,itemPhotos,...s}=o;return s;};
-    const safeItem=(it)=>({
-      id:it.id,mode:it.mode,price:it.price,qty:it.qty,note:it.note,
-      description:it.description||"",
-      suspicious:it.suspicious,policeHold:it.policeHold,
-      product:it.product?{id:it.product.id,label:it.product.label,cat:it.product.cat,type:it.product.type}:null,
-    });
-    const safeTx=(tx)=>({
-      id:tx.id,date:tx.date,payment:tx.payment,voided:tx.voided,staffName:tx.staffName,
-      buyTotal:tx.buyTotal,sellTotal:tx.sellTotal,net:tx.net,
-      kycDone:tx.kycDone,ttrStatus:tx.ttrStatus,smrFlagged:tx.smrFlagged,
-      clientName:(tx.client&&tx.client.fullName)||null,
-      items:(tx.items||[]).map(safeItem),
-    });
-    const safeStock=(s)=>({
-      id:s.id,txId:s.txId,date:s.date,description:s.description,price:s.price,
-      weight_g:s.weight_g,purity:s.purity,storageLocation:s.storageLocation,
-      holdUntil:s.holdUntil,policeHold:s.policeHold,sold:s.sold,gstApplicable:s.gstApplicable,
-      product:s.product?{id:s.product.id,label:s.product.label,cat:s.product.cat}:null,
-    });
-    const bus={
-      version:"1.0",
-      appName:"Loot Ledgr",
-      getState:()=>({
-        screen,txStep,txPay,txNo,
-        gSpot,sSpot,
-        stockCount:(stock||[]).filter(s=>!s.sold).length,
-        txCount:txList.length,
-        todayTxCount:txList.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).length,
-        activeStaff:(staffList.find(s=>s.id===activeStaff)||{}).name||null,
-        compliance:(()=>{const c=complianceRef.current;return{
-          requiresKYC:c?c.requiresKYC:false,
-          flagCount:c?c.flags.length:0,
-          hasTTR:c?c.flags.some(f=>f.key==="ttr"):false,
-        };})(),
-        settings:{
-          businessName:settings.businessName,abn:settings.abn,
-          ttrEnabled:settings.ttrEnabled!==false,
-          cryptoEnabled:!!settings.cryptoEnabled,
-        },
-        txItems:txItems.map(safeItem),
-      }),
-      getCatalog:()=>(catalog||[]).filter(p=>p.active).map(p=>({id:p.id,label:p.label,cat:p.cat,type:p.type,purity:p.purity,carat:p.carat,unit:p.unit})),
-      getStock:()=>(stock||[]).filter(s=>!s.sold).map(safeStock),
-      getTodayTransactions:()=>txList.filter(t=>t.date&&t.date.slice(0,10)===new Date().toISOString().slice(0,10)).map(safeTx),
-      getTransaction:(id)=>{const tx=txList.find(t=>t.id===id);return tx?safeTx(tx):null;},
-      getSpotPrices:()=>({gold:gSpot,silver:sSpot,unit:"AUD/troy_oz",frozen:!!frozenSnap}),
-      getComplianceFlags:()=>{const c=complianceRef.current;return c?c.flags:[];},
-      getBlacklist:()=>blacklist.map(b=>({name:b.name})),
-      getStaff:()=>(staffList||[]).map(s=>({id:s.id,name:s.name,role:s.role,active:s.id===activeStaff})),
-      getScreens:()=>["dashboard","newTx","stock","history","prices","clients"],
-      getPaymentMethods:()=>["cash","card","bank",...(settings.cryptoEnabled?["crypto"]:[])],
-      _commands:{
-        navigateTo:          {desc:"Navigate to screen",           params:["screen"],                            locked:true},
-        startTransaction:    {desc:"Begin new transaction",        params:[],                                    locked:true},
-        addItem:             {desc:"Add catalog item to basket",   params:["catalogId","mode","qty","price"],    locked:true},
-        addQuickItem:        {desc:"Add unlisted item to basket",  params:["label","cat","mode","price","note"], locked:true},
-        removeItem:          {desc:"Remove item from basket",      params:["itemId"],                            locked:true},
-        setPayment:          {desc:"Set payment method",           params:["method"],                            locked:true},
-        setClientField:      {desc:"Set client form field",        params:["field","value"],                     locked:true},
-        setStaffField:       {desc:"Set staff form field",         params:["field","value"],                     locked:true},
-        finalizeTransaction: {desc:"Finalize transaction",         params:[],                                    locked:true},
-        voidTransaction:     {desc:"Void transaction by ID",       params:["txId"],                              locked:true},
-        openModal:           {desc:"Open named modal",             params:["modal"],                             locked:true},
-        searchClient:        {desc:"Set client search query",      params:["query"],                             locked:true},
-        setHistFilter:       {desc:"Set history filter",           params:["filter"],                            locked:true},
-        // PERMANENTLY FORBIDDEN — will never be unlocked regardless of level:
-        // accessLogoFolder · readLogoData · writeLogoData
-        // readStaffPin · readWalletAddress · readApiToken · readClientPII
-      },
-      executeCommand:(cmd,params,pin)=>{
-        if(!settings.aiAgentEnabled||settings.aiAgentLevel<2) return{ok:false,reason:"Level 2 not active"};
-        if(pin!==settings.staffPin) return{ok:false,reason:"PIN required"};
-        const def=bus._commands[cmd];
-        if(!def) return{ok:false,reason:"Unknown command: "+cmd};
-        if(def.locked) return{ok:false,reason:"Locked until v2.0"};
-        return{ok:false,reason:"Not implemented"};
-      },
-      _listeners:[],
-      on:(event,cb)=>{bus._listeners.push({event,cb});return()=>{bus._listeners=bus._listeners.filter(l=>l.cb!==cb);};},
-      emit:(event,data)=>{bus._listeners.filter(l=>l.event===event||l.event==="*").forEach(l=>{try{l.cb(data);}catch(e){}});},
-    };
-    window.LOOTLEDGER_AI=bus;
-    window.dispatchEvent(new CustomEvent("lootledgr:ready",{detail:{version:bus.version}}));
-    return()=>{delete window.LOOTLEDGER_AI;};
-  },[]);
-  useEffect(()=>{if(window.LOOTLEDGER_AI)window.LOOTLEDGER_AI.emit("screenChange",{screen});},[screen]);
-  useEffect(()=>{if(window.LOOTLEDGER_AI&&txList.length>0){const t=txList[0];window.LOOTLEDGER_AI.emit("transactionSaved",{id:t.id,date:t.date,buyTotal:t.buyTotal,sellTotal:t.sellTotal,payment:t.payment});}},[ txList.length]);
-  useEffect(()=>{if(window.LOOTLEDGER_AI)window.LOOTLEDGER_AI.emit("spotUpdated",{gold:gSpot,silver:sSpot});},[gSpot,sSpot]);
-  useEffect(()=>{if(window.LOOTLEDGER_AI)window.LOOTLEDGER_AI.emit("complianceChanged",{flagCount:compliance?compliance.flags.length:0,hasTTR:compliance?compliance.flags.some(f=>f.key==="ttr"):false,requiresKYC:compliance?compliance.requiresKYC:false});},[compliance]);
-  // ── END AI BUS ────────────────────────────────────────────────────────────
   return (
-    <div style={{...c.app,
-    fontSize:simp?16:13,
-    lineHeight:simp?"1.6":"1.4",
-    position:"relative",
-    ...(zoom!==100?{
-      transform:"scale("+zoom/100+")",
-      transformOrigin:"top left",
-      width:(10000/zoom)+"%",   // compensate so content fills screen at any zoom
-      minWidth:"unset",
-    }:{}),
-    WebkitFontSmoothing:"antialiased",
-    MozOsxFontSmoothing:"grayscale",
-    textRendering:"optimizeLegibility",
-    imageRendering:"high-quality",
-    backfaceVisibility:"hidden",
-    WebkitBackfaceVisibility:"hidden",
-  }}>
-
-      {/* TOP BAR */}
-      <div style={{background:T.surface,borderBottom:"1px solid "+T.border,
-        padding:"0 8px",display:"flex",alignItems:"center",justifyContent:"space-between",
-        minHeight:50,position:"sticky",top:0,zIndex:100,flexWrap:"nowrap"}}>
-
-        {/* LEFT: logo + name — click logo to open logo manager */}
-        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,flexGrow:0,width:"auto",maxWidth:160}}>
-          <img src={settings.logoImg||SEED_LOGO} alt="logo"
-            onClick={()=>{
-              const pin=window.prompt("");
-              if(!pin||pin!==settings.staffPin) return;
-              setShowLogoLib(true);
-            }}
-            style={{width:34,height:34,borderRadius:"50%",objectFit:"contain",
-              border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
-          <div style={{overflow:"hidden"}}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.gold,letterSpacing:"0.03em",
-              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledger</div>
-            <div style={{fontSize:7.5,color:T.muted,letterSpacing:"0.08em",textTransform:"uppercase",
-              whiteSpace:"nowrap",marginTop:1}}>Compliance POS</div>
+    <div style={{fontFamily:T.ff,background:T.bg,minHeight:"100vh",color:T.text,paddingBottom:60,boxSizing:"border-box",fontSize:S?16:13,lineHeight:S?"1.6":"1.4"}}>
+      {locked?(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
+          <div style={c.card({padding:32,maxWidth:320,width:"100%",textAlign:"center"})}>
+            <div style={{fontSize:32,marginBottom:12}}>🔒</div>
+            <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
+            <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
+            <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={8} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
+            <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
+          </div>
+        </div>
+      ):(
+      <div>
+        <div style={{background:T.surface,borderBottom:"1px solid "+T.border,padding:"0 8px",display:"flex",alignItems:"center",justifyContent:"space-between",minHeight:50,position:"sticky",top:0,zIndex:100}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,maxWidth:160}} onClick={()=>{setLogoPinMode(true);setLogoPinVal("");}}>
+            <img src={settings.logoImg||SEED_LOGO} alt="logo" style={{width:34,height:34,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
+            <div style={{overflow:"hidden"}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledger</div>
+              <div style={{fontSize:7.5,color:T.muted,letterSpacing:"0.08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Compliance POS</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+            {[[T.goldBg,T.goldDim,T.gold,"Au",52,gSpot,setGSpotManual],[T.silverBg,T.silverDim,T.silver,"Ag",42,sSpot,setSSpotManual]].map(([bg,dim,col,lbl,w,val,setter])=>(
+              <div key={lbl} style={{display:"flex",alignItems:"center",gap:2,background:bg,border:"1px solid "+dim+"44",borderRadius:5,padding:"2px 5px"}}>
+                <span style={{fontSize:8,color:T.muted,flexShrink:0}}>{lbl}</span>
+                <input style={{background:"transparent",border:"none",color:col,fontFamily:T.ff,fontSize:11,fontWeight:"bold",width:w,outline:"none",textAlign:"right"}} type="number" value={val} onChange={e=>setter(parseFloat(e.target.value)||0)}/>
+              </div>
+            ))}
+            <span title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override":"No API"} style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
+            <button style={{...c.bsm(T.border),padding:"4px 8px",fontSize:11}} onClick={()=>setShowSet(true)}>⚙</button>
+            <button style={{...c.bsm(T.border),padding:"4px 8px",fontSize:11}} onClick={()=>setShowApi(true)}>⇄</button>
           </div>
         </div>
 
-        {/* RIGHT: spots + controls */}
-        <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:2,background:T.goldBg,
-            border:"1px solid "+T.goldDim+"44",borderRadius:5,padding:"2px 5px"}}>
-            <span style={{fontSize:8,color:T.muted,flexShrink:0}}>Au</span>
-            <input style={{background:"transparent",border:"none",color:T.gold,fontFamily:T.ff,
-              fontSize:11,fontWeight:"bold",width:52,outline:"none",textAlign:"right"}}
-              type="number" value={gSpot} onChange={e=>setGSpotManual(parseFloat(e.target.value)||0)}/>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:2,background:T.silverBg,
-            border:"1px solid "+T.silverDim+"44",borderRadius:5,padding:"2px 5px"}}>
-            <span style={{fontSize:8,color:T.muted,flexShrink:0}}>Ag</span>
-            <input style={{background:"transparent",border:"none",color:T.silver,fontFamily:T.ff,
-              fontSize:11,fontWeight:"bold",width:42,outline:"none",textAlign:"right"}}
-              type="number" value={sSpot} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
-          </div>
-          <span
-            title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual — tap ↺ to resume":"No API"}
-            style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",
-              background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
-          <button style={{...c.bsm(T.border),flexShrink:0,padding:"4px 8px",fontSize:11}} onClick={()=>setShowSet(true)}>⚙</button>
-          <button style={{...c.bsm(T.border),flexShrink:0,padding:"4px 8px",fontSize:11}} onClick={()=>setShowApi(true)}>⇄</button>
-        </div>
-      </div>
+        <div style={{padding:"18px 16px",paddingBottom:72}}>
 
-      {/* MAIN CONTENT */}
-      <div style={{padding:"18px 16px",paddingBottom:72,overflowY:"auto"}}>
-
-          {/* ═══ DASHBOARD ═══ */}
           {screen==="dashboard"&&(
             <div>
-              <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:18,display:"flex",alignItems:"center"}}>
-                {settings.businessName} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}
-              </div>
+              <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:18}}>{settings.businessName||"Loot Ledgr"} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}</div>
               <div style={c.g2(10)}>
-                <div style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>
-                  <div style={c.lbl}>⬡ Gold (AUD/oz)</div>
-                  <div style={{fontSize:"clamp(18px,3vw,32px)",fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtAUD(gSpot)}</div>
-                  <div style={{fontSize:"clamp(10px,1.2vw,14px)",color:T.muted,marginTop:4}}>/ g <span style={{color:T.goldLight,fontWeight:"bold"}}>{fmtAUD(gSpot/TROY_OZ)}</span></div>
-                </div>
-                <div style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>
-                  <div style={c.lbl}>◈ Silver (AUD/oz)</div>
-                  <div style={{fontSize:"clamp(18px,3vw,32px)",fontWeight:"bold",color:T.silver,whiteSpace:"nowrap",marginTop:3,letterSpacing:"-0.02em",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtAUD(sSpot)}</div>
-                  <div style={{fontSize:"clamp(10px,1.2vw,14px)",color:T.muted,marginTop:4}}>/ g <span style={{color:T.silver,fontWeight:"bold"}}>{fmtAUD(sSpot/TROY_OZ)}</span></div>
-                </div>
+                {[[T.gold,T.goldLight,"⬡ Gold (AUD/oz)",gSpot],[T.silver,T.silver,"◈ Silver (AUD/oz)",sSpot]].map(([col,sub,lbl,spot])=>(
+                  <div key={lbl} style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>
+                    <div style={c.lbl}>{lbl}</div>
+                    <div style={{fontSize:"clamp(18px,3vw,32px)",fontWeight:"bold",color:col,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtAUD(spot)}</div>
+                    <div style={{fontSize:12,color:T.muted,marginTop:4}}>/ g <span style={{color:sub,fontWeight:"bold"}}>{fmtAUD(spot/TROY_OZ)}</span></div>
+                  </div>
+                ))}
               </div>
-              {/* Scale live widget — shown when connected */}
               {scaleStatus==="connected"&&(
-                <div style={{...c.card({padding:"10px 16px"}),marginBottom:4,display:"flex",alignItems:"center",gap:12,boxShadow:"4px 4px 14px rgba(0,0,0,0.22), 1px 1px 0 rgba(255,255,255,0.05)"}}>
+                <div style={{...c.card({padding:"10px 16px"}),marginBottom:4,display:"flex",alignItems:"center",gap:12}}>
                   <span style={{fontSize:20}}>⚖</span>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:9,color:T.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>Scale — {scaleDevice&&scaleDevice.name||"Connected"}</div>
-                    <div style={{fontSize:"clamp(18px,3vw,28px)",fontWeight:"bold",color:T.gold,letterSpacing:"-0.02em",lineHeight:1.1}}>
-                      {scaleLive?fmtScaleWeight(scaleLive):"Place item on scale…"}
-                    </div>
+                    <div style={{fontSize:"clamp(18px,3vw,28px)",fontWeight:"bold",color:T.gold}}>{scaleLive?fmtSW(scaleLive):"Place item on scale…"}</div>
                   </div>
-                  <div style={{fontSize:9,color:scaleLive?T.gold:T.muted,whiteSpace:"nowrap"}}>
-                    {scaleLive?"● LIVE":"○ waiting"}
-                  </div>
+                  <div style={{fontSize:9,color:scaleLive?T.gold:T.muted}}>{scaleLive?"● LIVE":"○ waiting"}</div>
                 </div>
               )}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,margin:"12px 0"}}>
-                {[
-                  {l:"Txn 24h",v:(()=>{const now=new Date();const midnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();return txList.filter(t=>t.date&&new Date(t.date).getTime()>=midnight).length;})()},
-                  {l:"In Hold",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},
-                  {l:"For Sale",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},
-                  {l:"🚔 Hold",v:(stock||[]).filter(s=>s.policeHold).length,col:T.red},
-                ].map(st=>(
+              <div style={c.g4(10)}>
+                {[{l:"Txn 24h",v:(()=>{const mn=new Date();mn.setHours(0,0,0,0);return(txList||[]).filter(t=>t.date&&new Date(t.date)>=mn).length;})()},{l:"In Hold",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)>0).length,col:T.orange},{l:"For Sale",v:(stock||[]).filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0&&!s.sold).length,col:T.gold},{l:"🚔 Hold",v:(stock||[]).filter(s=>s.policeHold).length,col:T.red}].map(st=>(
                   <div key={st.l} style={{...c.card({padding:15}),minWidth:0,overflow:"hidden"}}>
-                    <div style={{...c.lbl,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{st.l}</div>
-                    <div style={{fontSize:23,fontWeight:"bold",color:st.col||T.text,letterSpacing:"-0.02em"}}>{st.v}</div>
+                    <div style={{fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{st.l}</div>
+                    <div style={{fontSize:23,fontWeight:"bold",color:st.col||T.text}}>{st.v}</div>
                   </div>
                 ))}
               </div>
@@ -2194,29 +698,18 @@ export default function Loot() {
                   <div style={c.shead(true)}>⬡ Quick Reference Prices</div>
                   <div style={{padding:"10px 14px"}}>
                     {(catalog||[]).filter(p=>p.active).slice(0,6).map(p=>(
-                      <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid "+T.border+"33"}}>
-                        <span style={{fontSize:12,color:T.text}}>{p.label}</span>
-                        <span style={{fontSize:12,fontWeight:"bold",color:T.green}}>{calcUnitPrice(p,gSpot,sSpot,"buy")?fmtAUD(calcUnitPrice(p,gSpot,sSpot,"buy"))+"  buy":"—"}</span>
+                      <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid "+T.border+"22"}}>
+                        <span style={{fontSize:12}}>{p.label}</span>
+                        <span style={{fontSize:12,fontWeight:"bold",color:T.green}}>{fmtAUD(calcUnitPrice(p,gSpot,sSpot,"buy"))}/g</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              {(catalog||[]).filter(p=>p.active).length===0&&(
-                <div style={{...c.card({padding:20}),textAlign:"center",color:T.muted,fontSize:12}}>
-                  No products yet. Go to <strong style={{color:T.gold}}>Prices → Edit Catalog</strong>
-                </div>
-              )}
-              {txList.some(t=>t.ttrStatus==="PENDING")&&(
-                <div style={c.bnr("block")}>
-                  🔴 AUSTRAC TTR PENDING — {txList.filter(t=>t.ttrStatus==="PENDING").length} transaction(s) require a Threshold Transaction Report. File via AUSTRAC Online within 10 business days.
-                </div>
-              )}
-              <div style={{...c.row(10),marginTop:14,flexWrap:"wrap"}}>
-                <button style={c.btn(T.gold,T.bg,{flex:2,minWidth:160,padding:"13px 0",fontSize:13})}
-                  onClick={()=>{resetTx();setScreen("newTx");}}>＋ New Transaction</button>
-                <button style={c.btn(T.border,T.text,{flex:1,minWidth:100,padding:"13px 0",fontSize:12})}
-                  onClick={()=>setShowEOD(true)}>📋 EOD</button>
+              {(txList||[]).some(t=>t.ttrStatus==="PENDING")&&<div style={c.bnr("block")}>🔴 AUSTRAC TTR PENDING — {(txList||[]).filter(t=>t.ttrStatus==="PENDING").length} transaction(s) require filing at austrac.gov.au/online</div>}
+              <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+                <button style={c.btn(T.gold,T.bg,{flex:2,minWidth:160,padding:"13px 0",fontSize:12})} onClick={()=>{resetTx();setScreen("newTx");}}>＋ New Transaction</button>
+                <button style={c.btn(T.border,T.text,{flex:1,minWidth:100,padding:"13px 0",fontSize:12})} onClick={()=>setShowEOD(true)}>📋 EOD</button>
               </div>
               <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:8,flexWrap:"wrap"}}>
                 <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowVendors(true)}>🏪 Suppliers</button>
@@ -2227,792 +720,320 @@ export default function Loot() {
               <div style={{display:"flex",justifyContent:"center",marginTop:8}}>
                 <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowPolice(true)}>🚔 Police Report</button>
               </div>
-              {/* DURESS BUTTON — centred, same height as bsm, width of ~2 buttons */}
               <div style={{display:"flex",justifyContent:"center",marginTop:10}}>
-                <button
-                  style={{
-                    padding:"10px 18px",minWidth:200,maxWidth:280,
-                    background:duressActive?"#cc0000":"#111",
-                    color:"#fff",
-                    border:duressActive?"2px solid #ff4444":"2px solid #333",
-                    borderRadius:8,fontSize:13,fontWeight:"bold",
-                    letterSpacing:"0.08em",cursor:"pointer",
-                    textTransform:"uppercase",whiteSpace:"nowrap",
-                    boxShadow:duressActive
-                      ?"0 0 20px rgba(255,0,0,0.6), 4px 4px 14px rgba(0,0,0,0.5)"
-                      :"4px 4px 14px rgba(0,0,0,0.5), 1px 1px 0 rgba(255,255,255,0.05)",
-                  }}
-                  onClick={()=>{if(!duressActive) triggerDuress();}}>
+                <button style={{padding:"10px 18px",minWidth:200,maxWidth:280,background:duressActive?"#cc0000":"#111",color:"#fff",border:duressActive?"2px solid #ff4444":"2px solid #333",borderRadius:8,fontSize:13,fontWeight:"bold",letterSpacing:"0.08em",cursor:"pointer",textTransform:"uppercase",whiteSpace:"nowrap",boxShadow:duressActive?"0 0 20px rgba(255,0,0,0.6),4px 4px 14px rgba(0,0,0,0.5)":"4px 4px 14px rgba(0,0,0,0.5)"}} onClick={()=>{if(!duressActive)triggerDuress();}}>
                   {duressActive?"🚨 DURESS ACTIVE":"🆘 POLICE HELP"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* ═══ NEW TRANSACTION ═══ */}
           {screen==="newTx"&&(
             <div>
-              {/* STEP INDICATOR */}
-              <div style={{...c.row(0),flexWrap:"wrap",gap:4,marginBottom:18}}>
-                {["Basket","Compliance","Client","Staff","Payment","Done"].map((s,i)=>(
-                  <div key={s} style={{...c.row(0)}}>
-                    <div style={{padding:"5px 12px",borderRadius:4,fontSize:10,fontWeight:"bold",
-                      background:txStep===i+1?T.gold:txStep>i+1?T.greenBg:T.surface,
-                      color:txStep===i+1?T.bg:txStep>i+1?T.green:T.muted,
-                      border:"1px solid "+txStep===i+1?T.gold:txStep>i+1?T.green:T.border,
-                      letterSpacing:"0.08em"}}>
-                      {txStep>i+1?"✓ ":""}{s}
-                    </div>
-                    {i<4&&<div style={{width:16,height:1,background:T.border}}/>}
-                  </div>
-                ))}
+              <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:4,marginBottom:18}}>
+                {["Basket","Compliance","Client","Staff","Payment","Done"].map((s,i)=>{const done=txStep>i+1,active=txStep===i+1;return <div key={s} style={{display:"flex",alignItems:"center"}}><div style={{padding:"5px 12px",borderRadius:4,fontSize:10,fontWeight:"bold",letterSpacing:"0.08em",background:active?T.gold:done?T.greenBg:T.surface,color:active?T.bg:done?T.green:T.muted,border:"1px solid "+(active?T.gold:done?T.green:T.border)}}>{done?"✓ ":""}{s}</div>{i<5&&<div style={{width:12,height:1,background:T.border}}/>}</div>;})}
               </div>
+              {scaleStatus==="connected"&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:7,background:T.surface,border:"1px solid "+(scaleLive?T.gold:T.border),marginBottom:12}}><span style={{fontSize:16}}>⚖</span><span style={{fontSize:10,color:T.muted,flex:1}}>Scale</span><span style={{fontSize:16,fontWeight:"bold",color:scaleLive?T.gold:T.muted}}>{scaleLive?fmtSW(scaleLive):"Place item on scale…"}</span>{scaleLive&&<span style={{fontSize:9,color:T.gold}}>● LIVE</span>}</div>}
 
-              {/* Scale reading bar — visible on all transaction steps when connected */}
-              {scaleStatus==="connected"&&(
-                <div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:7,background:T.surface,border:"1px solid "+(scaleLive?T.gold:T.border),marginBottom:12,boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}}>
-                  <span style={{fontSize:16}}>⚖</span>
-                  <span style={{fontSize:10,color:T.muted,flex:1}}>Scale</span>
-                  <span style={{fontSize:16,fontWeight:"bold",color:scaleLive?T.gold:T.muted}}>
-                    {scaleLive?fmtScaleWeight(scaleLive):"Place item on scale…"}
-                  </span>
-                  {scaleLive&&<span style={{fontSize:9,color:T.gold}}>● LIVE</span>}
-                </div>
-              )}
-
-              {/* ─── STEP 1: BASKET ─── */}
               {txStep===1&&(
                 <div>
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Invoice #<span style={{color:T.gold}}>{txNo}</span></div>
-                  </div>
-                  {/* ADD ITEM */}
+                  <div style={{marginBottom:14}}><div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Invoice #<span style={{color:T.gold}}>{txNo}</span></div></div>
                   <div style={c.card({padding:16,marginBottom:14})}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
                       <div style={{fontSize:11,fontWeight:"bold",color:T.white,letterSpacing:"0.08em"}}>ADD ITEM TO BASKET</div>
-                      <div style={c.row(6)}>
+                      <div style={{display:"flex",gap:6}}>
                         <button style={c.bsm(!quickMode?T.gold:T.border,!quickMode?T.bg:T.text)} onClick={()=>setQuickMode(false)}>Catalog</button>
                         <button style={c.bsm(quickMode?T.blue:T.border,quickMode?T.bg:T.text)} onClick={()=>setQuickMode(true)}>⚡ Quick</button>
                         {!quickMode&&<button style={c.bsm(T.border,T.muted)} onClick={()=>setShowCat(true)}>✎ Edit</button>}
                       </div>
                     </div>
-                    <div style={c.g2(10)}>
-                      <div>
-                        <label style={c.lbl}>Mode</label>
-                        <div style={c.row(8)}>
-                          {["buy","sell"].map(m=>(
-                            <button key={m} style={c.btn(addMode===m?(m==="buy"?T.green:T.gold):T.border,addMode===m?T.bg:T.text,{padding:"6px 16px",fontSize:11})}
-                              onClick={()=>setAddMode(m)}>{m.toUpperCase()}</button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <label style={c.lbl}>Product</label>
-                        {(catalog||[]).filter(p=>p.active).length===0
-                          ?<div style={{background:T.orangeBg,border:"1px solid "+T.orange+"44",borderRadius:6,padding:"10px 12px",fontSize:11,color:T.orange}}>
-                            No products yet. Go to <strong>Prices → Edit Catalog</strong> to add products first.
-                          </div>
-                          :<select style={{...c.sel(),width:"100%"}} value={addId} onChange={e=>setAddId(e.target.value)}>
-                            <option value="">— Select a product —</option>
-                            {["Gold","Silver","Other"].map(cat=>(
-                              <optgroup key={cat} label={"── "+cat+" ──"}>
-                                {(catalog||[]).filter(p=>p.cat===cat&&p.active).map(p=>(
-                                  <option key={p.id} value={p.id}>{p.label}</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        }
-                      </div>
-                      <div>
-                        <label style={c.lbl}>{addProd&&addProd.unit==="pc"?"Quantity":addProd&&addProd.unit==="oz"?"Weight (oz)":"Weight (g)"}{scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4,fontWeight:"bold"}}>⚖ LIVE</span>}</label>
-                        <div style={c.row(6)}>
-                        <input style={{...c.inp(),flex:1}} type="number" placeholder="0" value={addQty} onChange={e=>setAddQty(e.target.value)}/>
-                        {scaleStatus==="connected"&&scaleLive&&addProd&&(
-                          <button style={{...c.bsm(T.goldBg,T.gold),whiteSpace:"nowrap"}}
-                            onClick={()=>{
-                              const grams=scaleLive.g;
-                              if(addProd.unit==="oz") setAddQty((grams/28.3495).toFixed(3));
-                              else setAddQty(grams.toFixed(3));
-                            }}>⚖ {fmtScaleWeight(scaleLive)}</button>
-                        )}
-                        </div>
-                        {addProd&&addQtyN>0&&addUnit!=null&&(
-                          <div style={{fontSize:12,color:addMode==="buy"?T.green:T.gold,marginTop:4,fontWeight:"bold"}}>
-                            {fmtAUD(addUnit)}/{addProd.unit} → <strong style={{fontSize:14}}>{fmtAUD(addCalc)}</strong>
-                          </div>
-                        )}
-                        {addProd&&addQtyN>0&&addUnit==null&&(
-                          <div style={{fontSize:11,color:T.orange,marginTop:4}}>
-                            ⚠ Set purity or carat on this product to auto-calculate price
-                          </div>
-                        )}
-                      </div>
-                      {addUnit==null&&(
+                    {!quickMode&&(
+                      <div style={c.g2(10)}>
                         <div>
+                          <label style={c.lbl}>Mode</label>
+                          <div style={{display:"flex",gap:8}}>{["buy","sell"].map(m=><button key={m} style={c.btn(addMode===m?(m==="buy"?T.green:T.gold):T.border,addMode===m?T.bg:T.text,{padding:"6px 16px",fontSize:11})} onClick={()=>setAddMode(m)}>{m.toUpperCase()}</button>)}</div>
+                        </div>
+                        <div>
+                          <label style={c.lbl}>Product</label>
+                          {(catalog||[]).filter(p=>p.active).length===0 && <div style={c.bnr("warn")}>No products yet. Go to Prices then Edit Catalog.</div>}
+                          {(catalog||[]).filter(p=>p.active).length>0 && <select style={{...c.sel(),width:"100%"}} value={addId} onChange={e=>setAddId(e.target.value)}>
+                              <option value="">— Select a product —</option>
+                              {["Gold","Silver","Other"].map(cat=><optgroup key={cat} label={"── "+cat+" ──"}>{(catalog||[]).filter(p=>p.cat===cat&&p.active).map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>)}
+                            </select>}
+                        </div>
+                        <div>
+                          <label style={c.lbl}>{addProd&&addProd.unit==="pc"?"Quantity":addProd&&addProd.unit==="oz"?"Weight (oz)":"Weight (g)"}{scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4}}>⚖ LIVE</span>}</label>
+                          <div style={{display:"flex",gap:6}}>
+                            <input style={{...c.inp(),flex:1}} type="number" placeholder="0" value={addQty} onChange={e=>setAddQty(e.target.value)}/>
+                            {scaleStatus==="connected"&&scaleLive&&addProd&&<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{const g=scaleLive.g;setAddQty(addProd.unit==="oz"?(g/28.3495).toFixed(3):g.toFixed(3));}}>⚖ {fmtSW(scaleLive)}</button>}
+                          </div>
+                          {addProd&&addQtyN>0&&addUnit!=null&&<div style={{fontSize:12,color:addMode==="buy"?T.green:T.gold,marginTop:4,fontWeight:"bold"}}>{fmtAUD(addUnit)}/{addProd.unit} → <strong style={{fontSize:14}}>{fmtAUD(addCalc)}</strong></div>}
+                        </div>
+                        {addUnit==null&&<div>
                           <label style={c.lbl}>Custom Price ($)</label>
                           <input style={c.inp()} type="number" placeholder="Enter price" value={addCustom} onChange={e=>setAddCustom(e.target.value)}/>
-                          {addCustom&&<div style={{fontSize:12,color:T.gold,marginTop:4,fontWeight:"bold"}}>Total: <strong>{fmtAUD(parseFloat(addCustom)||0)}</strong></div>}
-                        </div>
-                      )}
-                      <div>
-                        <label style={c.lbl}>Note / Description</label>
-                        <input style={c.inp()} type="text" placeholder="Markings, condition, source…" value={addNote} onChange={e=>setAddNote(e.target.value)}/>
-                      </div>
-                    </div>
-                    {(catalog||[]).filter(p=>p.active).length>0&&!quickMode&&<button style={c.btn(addMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={handleAddItem}>+ Add to Basket</button>}
-                  </div>
-                  {quickMode&&<div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{...c.bnr("info"),marginBottom:10}}>⚡ <strong>Quick Item</strong> — for unlisted items. Enter details manually.</div>
-                    <div style={c.g2(10)}>
-                      <div><label style={c.lbl}>Mode</label><div style={c.row(8)}>{["buy","sell"].map(m=><button key={m} style={c.btn(qmMode===m?(m==="buy"?T.green:T.gold):T.border,qmMode===m?T.bg:T.text,{padding:"7px 14px"})} onClick={()=>setQMMode(m)}>{m.toUpperCase()}</button>)}</div></div>
-                      <div><label style={c.lbl}>Description *</label><input style={c.inp()} type="text" placeholder="e.g. Unusual gold bracelet" value={qf.label} onChange={e=>setQF(p=>({...p,label:e.target.value}))}/></div>
-                      <div><label style={c.lbl}>Metal</label><select style={{...c.sel(),width:"100%"}} value={qf.cat} onChange={e=>setQF(p=>({...p,cat:e.target.value}))}><option value="Gold">Gold</option><option value="Silver">Silver</option><option value="Other">Other</option></select></div>
-                      <div><label style={c.lbl}>Compliance Type</label><select style={{...c.sel(),width:"100%"}} value={qf.type} onChange={e=>setQF(p=>({...p,type:e.target.value}))}><option value="scrap">Scrap / Jewellery ($10k)</option><option value="bullion">Bullion ($5k)</option></select></div>
-                      <div><label style={c.lbl}>Unit</label><select style={{...c.sel(),width:"100%"}} value={qf.unit} onChange={e=>setQF(p=>({...p,unit:e.target.value}))}><option value="g">Grams</option><option value="oz">Troy oz</option><option value="pc">Piece</option></select></div>
-                      {qf.cat==="Gold"&&<div><label style={c.lbl}>Carat (e.g. 9, 14, 18, 22, 24)</label><input style={c.inp()} type="number" placeholder="e.g. 18" value={qf.carat} onChange={e=>setQF(p=>({...p,carat:e.target.value,purity:""}))}/></div>}
-                      {qf.cat==="Silver"&&<div><label style={c.lbl}>Purity (0–1, e.g. 0.925)</label><input style={c.inp()} type="number" step="0.001" placeholder="e.g. 0.925" value={qf.purity} onChange={e=>setQF(p=>({...p,purity:e.target.value,carat:""}))}/></div>}
-                      <div>
-                        <label style={c.lbl}>Weight / Qty {scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4}}>⚖ LIVE</span>}</label>
-                        <div style={c.row(6)}>
-                          <input style={{...c.inp(),flex:1}} type="number" placeholder="0.00" value={qf.qty} onChange={e=>setQF(p=>({...p,qty:e.target.value}))}/>
-                          {scaleStatus==="connected"&&scaleLive&&(
-                            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setQF(p=>({...p,qty:scaleLive.g.toFixed(3)}))}>⚖ Use {fmtScaleWeight(scaleLive)}</button>
-                          )}
+                        </div>}
+                        <div>
+                          <label style={c.lbl}>Note / Description</label>
+                          <input style={c.inp()} type="text" placeholder="Markings, condition, hallmarks…" value={addNote} onChange={e=>setAddNote(e.target.value)}/>
                         </div>
                       </div>
-                      <div><label style={c.lbl}>Price ($) *</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.price} onChange={e=>setQF(p=>({...p,price:e.target.value}))}/></div>
-                      <div><label style={c.lbl}>Note</label><input style={c.inp()} type="text" placeholder="Condition, markings…" value={qf.note} onChange={e=>setQF(p=>({...p,note:e.target.value}))}/></div>
+                    )}
+                    {quickMode&&(
                       <div>
-                        <label style={c.lbl}>Photo (optional)</label>
-                        {qf.photo
-                          ?<div style={{display:"flex",alignItems:"center",gap:10,marginTop:4}}>
-                            <img src={qf.photo} alt="preview" style={{width:72,height:72,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/>
-                            <button style={c.bsm(T.redBg,T.red)} onClick={()=>setQF(p=>({...p,photo:null}))}>🗑 Remove</button>
+                        <div style={{...c.bnr("info"),marginBottom:10}}>⚡ <strong>Quick Item</strong> — for unlisted items. Enter details manually.</div>
+                        <div style={c.g2(10)}>
+                          <div><label style={c.lbl}>Mode</label><div style={{display:"flex",gap:8}}>{["buy","sell"].map(m=><button key={m} style={c.btn(qmMode===m?(m==="buy"?T.green:T.gold):T.border,qmMode===m?T.bg:T.text,{padding:"7px 14px"})} onClick={()=>setQMMode(m)}>{m.toUpperCase()}</button>)}</div></div>
+                          <div><label style={c.lbl}>Description *</label><input style={c.inp()} type="text" placeholder="e.g. Gold bracelet" value={qf.label} onChange={e=>setQF(p=>({...p,label:e.target.value}))}/></div>
+                          <div><label style={c.lbl}>Metal</label><select style={{...c.sel(),width:"100%"}} value={qf.cat} onChange={e=>setQF(p=>({...p,cat:e.target.value}))}><option value="Gold">Gold</option><option value="Silver">Silver</option><option value="Other">Other</option></select></div>
+                          <div><label style={c.lbl}>Type</label><select style={{...c.sel(),width:"100%"}} value={qf.type} onChange={e=>setQF(p=>({...p,type:e.target.value}))}><option value="scrap">Scrap / Jewellery ($10k)</option><option value="bullion">Bullion ($5k)</option></select></div>
+                          <div><label style={c.lbl}>Unit</label><select style={{...c.sel(),width:"100%"}} value={qf.unit} onChange={e=>setQF(p=>({...p,unit:e.target.value}))}><option value="g">Grams</option><option value="oz">Troy oz</option><option value="pc">Piece</option></select></div>
+                          {qf.cat==="Gold"&&<div><label style={c.lbl}>Carat</label><input style={c.inp()} type="number" placeholder="e.g. 18" value={qf.carat} onChange={e=>setQF(p=>({...p,carat:e.target.value,purity:""}))}/></div>}
+                          {qf.cat==="Silver"&&<div><label style={c.lbl}>Purity (0–1)</label><input style={c.inp()} type="number" step="0.001" placeholder="e.g. 0.925" value={qf.purity} onChange={e=>setQF(p=>({...p,purity:e.target.value,carat:""}))}/></div>}
+                          <div>
+                            <label style={c.lbl}>Weight / Qty {scaleStatus==="connected"&&scaleLive&&<span style={{color:T.gold,fontSize:9,marginLeft:4}}>⚖ LIVE</span>}</label>
+                            <div style={{display:"flex",gap:6}}>
+                              <input style={{...c.inp(),flex:1}} type="number" placeholder="0.00" value={qf.qty} onChange={e=>setQF(p=>({...p,qty:e.target.value}))}/>
+                              {scaleStatus==="connected"&&scaleLive&&<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setQF(p=>({...p,qty:scaleLive.g.toFixed(3)}))}>⚖ {fmtSW(scaleLive)}</button>}
+                            </div>
                           </div>
-                          :<label style={{...c.bsm(T.border,T.muted),display:"inline-block",cursor:"pointer",padding:"8px 14px",borderRadius:4,fontSize:12}}>
-                            📷 Upload Photo
-                            <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-                              const f=e.target.files&&e.target.files[0];if(!f)return;
-                              const r=new FileReader();
-                              r.onload=ev=>checkPhotoSize(ev.target.result,d=>setQF(p=>({...p,photo:d})));
-                              r.readAsDataURL(f);e.target.value="";
-                            }}/>
-                          </label>
-                        }
+                          <div><label style={c.lbl}>Price ($) *</label><input style={c.inp()} type="number" placeholder="0.00" value={qf.price} onChange={e=>setQF(p=>({...p,price:e.target.value}))}/></div>
+                          <div><label style={c.lbl}>Note</label><input style={c.inp()} type="text" placeholder="Condition, markings…" value={qf.note} onChange={e=>setQF(p=>({...p,note:e.target.value}))}/></div>
+                        </div>
+                        <button style={c.btn(qmMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={()=>{if(!qf.label){pop("Description required.","warn");return;}const price=Math.max(0,sN(qf.price));if(!price){pop("Enter a valid price.","warn");return;}setTxItems(p=>[...p,{id:uid(),mode:qmMode,product:{isQuick:true,label:qf.label,cat:qf.cat,type:qf.type,unit:qf.unit,purity:qf.purity?parseFloat(qf.purity):null,carat:qf.carat?parseFloat(qf.carat):null},qty:sN(qf.qty)||1,price,purity:qf.purity||null,carat:qf.carat||null,weight_g:qf.unit==="g"?sN(qf.qty)||null:null,note:qf.note,isQuick:true,holdUntil:qmMode==="buy"?addHours(nowISO(),THRESH.HOLD_HOURS):null,policeHold:false,suspicious:false}]);setQuickMode(false);setQF({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:""});pop("Quick item added.","ok");}}>⚡ Add Quick Item</button>
                       </div>
-                    </div>
-                    <button style={c.btn(qmMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={()=>{
-                      if(!qf.label){pop("Description required.","warn");return;}
-                      const price=Math.max(0,parseFloat(qf.price)||0);
-                      if(!price){pop("Enter a valid price.","warn");return;}
-                      const qPurity=qf.cat==="Gold"&&qf.carat?{caratKey:String(qf.carat)+"ct"}:qf.purity?{purityKey:String(qf.purity)}:{};
-                      setTxItems(p=>[...p,{id:uid(),mode:qmMode,
-                        product:{isQuick:true,label:qf.label,cat:qf.cat,type:qf.type,unit:qf.unit,
-                          purity:qf.purity?parseFloat(qf.purity):null,
-                          carat:qf.carat?parseFloat(qf.carat):null},
-                        qty:parseFloat(qf.qty)||1,price,calculatedPrice:price,
-                        purity:qf.purity||null,carat:qf.carat||null,
-                        weight_g:qf.unit==="g"?parseFloat(qf.qty)||null:null,
-                        note:qf.note,isQuick:true,
-                        holdUntil:qmMode==="buy"?addHours(new Date().toISOString(),THRESH.HOLD_HOURS):null,
-                        policeHold:false,suspicious:false}]);
-                      setQuickMode(false);setQF({label:"",cat:"Gold",type:"scrap",unit:"g",price:"",qty:"",note:"",purity:"",carat:"",photo:null});
-                      pop("Quick item added.","ok");
-                    }}>⚡ Add Quick Item</button>
-                  </div>}
-                  {/* BASKET TABLE */}
-                  {txItems.length>0&&(
-                    <div style={c.card({padding:0,overflow:"hidden",marginBottom:14})}>
-                      <div style={c.shead(true)}>Basket — {txItems.length} item(s)</div>
-                      <table style={{width:"100%",borderCollapse:"collapse"}}>
-                        <thead><tr>{["Mode","Item","Price","📷","Hold","Flags",""].map(h=><th key={h} style={c.th}>{h}</th>)}</tr></thead>
-                        <tbody>
-                          {txItems.map((it,i)=>(
-                            <tr key={it.id} style={{background:i%2?"#ffffff04":"transparent"}}>
-                              <td style={c.td()}><span style={c.badge(it.mode==="buy"?T.green:T.gold)}>{it.mode.toUpperCase()}</span>{it.isQuick&&<span style={{...c.badge(T.blue,T.blueBg),marginLeft:4,fontSize:9}}>Q</span>}</td>
-                              <td style={c.td({color:T.white})}>{it.product&&it.product.label}{it.note&&<div style={{fontSize:10,color:T.muted}}>{it.note}</div>}</td>
-                              <td style={c.td()}>
-                                <div style={{fontWeight:"bold",color:it.mode==="buy"?T.green:T.gold}}>{fmtAUD(it.price)}</div>
-                                {it.negotiated&&<div style={{fontSize:9,color:T.muted}}>adj</div>}
-                                {adjId===it.id
-                                  ?<div style={{display:"flex",gap:4,marginTop:3,alignItems:"center"}}>
-                                    <input style={c.inp({width:68,padding:"3px 7px",fontSize:11})} type="number" value={adjVal} onChange={e=>setAdjVal(e.target.value)} autoFocus/>
-                                    <button style={c.bsm(T.greenBg,T.green)} onClick={()=>{const v=Math.max(0,parseFloat(adjVal)||0);if(!v){pop("Enter valid price.","warn");return;}setTxItems(prev=>prev.map(x=>x.id===adjId?{...x,price:v,negotiated:true}:x));setAdjId(null);setAdjVal("");pop("Price adjusted.","ok");}}>✓</button>
-                                    <button style={c.bsm()} onClick={()=>setAdjId(null)}>✕</button>
-                                  </div>
-                                  :<button style={{background:"transparent",border:"none",color:T.muted,cursor:"pointer",fontSize:9,padding:"2px 4px",display:"block"}} onClick={()=>{setAdjId(it.id);setAdjVal(String(it.price));}}>✎</button>
-                                }
-                              </td>
-                              <td style={c.td()}>
-                                {itemPhotos[it.id]
-                                  ?<button style={c.bsm(T.redBg,T.red)} onClick={()=>setItemPhotos(p=>{const n={...p};delete n[it.id];return n;})}>🗑</button>
-                                  :<label style={{...c.bsm(T.border,T.muted),display:"inline-block",cursor:"pointer",padding:"5px 9px",borderRadius:4,fontSize:11,whiteSpace:"nowrap"}}>
-                                    📷 Add
-                                    <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-                                      const f=e.target.files&&e.target.files[0];if(!f)return;
-                                      const iid=it.id;
-                                      const r=new FileReader();
-                                      r.onload=ev=>checkPhotoSize(ev.target.result,d=>setItemPhotos(p=>({...p,[iid]:d})));
-                                      r.readAsDataURL(f);e.target.value="";
-                                    }}/>
-                                  </label>
-                                }
-                              </td>
-                              <td style={c.td()}>{it.holdUntil?<HoldTimer holdUntil={it.holdUntil} policeHold={false}/>:<span style={{color:T.muted}}>—</span>}</td>
-                              <td style={c.td()}>
-                                <div style={{display:"flex",gap:4}}>
-                                  <button title="Suspicious (internal)" style={c.bsm(it.suspicious?T.orangeBg:T.border,it.suspicious?T.orange:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,suspicious:!x.suspicious}:x))}>🚩</button>
-                                  {it.mode==="buy"&&<button title="Police hold" style={c.bsm(it.policeHold?T.redBg:T.border,it.policeHold?T.red:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,policeHold:!x.policeHold}:x))}>🚔</button>}
-                                </div>
-                              </td>
-                              <td style={c.td()}><button style={c.bsm(T.redBg,T.red)} onClick={()=>setTxItems(p=>p.filter(x=>x.id!==it.id))}>✕</button></td>
-                            </tr>
-                          ))}
-                          </tbody>
-                      </table>
-                      <div style={{padding:"10px 14px",background:T.surface,display:"flex",justifyContent:"flex-end",gap:16,flexWrap:"wrap"}}>
-                        {buyTotal>0&&<span style={{fontSize:13}}>Buy: <strong style={{color:T.green}}>{fmtAUD(buyTotal)}</strong></span>}
-                        {sellTotal>0&&<span style={{fontSize:13}}>Sell: <strong style={{color:T.gold}}>{fmtAUD(sellTotal)}</strong></span>}
-                        <span style={{fontSize:13,fontWeight:"bold"}}>Net: <strong style={{color:net>=0?T.gold:T.green}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</strong></span>
-                      </div>
-                    </div>
-                  )}
-                  <div style={c.row(10)}>
+                    )}
+                    {(catalog||[]).filter(p=>p.active).length>0&&!quickMode&&<button style={c.btn(addMode==="buy"?T.green:T.gold,T.bg,{marginTop:10})} onClick={handleAddItem}>＋ Add to Basket</button>}
+                  </div>
+                  {basketTable}
+                  <div style={{display:"flex",gap:10}}>
                     <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Compliance →</button>
                     <button style={c.bsm()} onClick={resetTx}>Reset</button>
                   </div>
                 </div>
               )}
 
-              {/* ─── STEP 2: COMPLIANCE ─── */}
               {txStep===2&&(
                 <div>
                   <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
                   {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
-
-                  {/* KYC BLOCK */}
                   {compliance.requiresKYC&&!kycDone&&(
                     <div style={c.card({padding:18,marginTop:14,borderColor:T.red+"55"})}>
                       <div style={{fontSize:12,fontWeight:"bold",color:T.red,marginBottom:14}}>🔴 AUSTRAC KYC/CDD — All fields mandatory</div>
                       <div style={c.g2(10)}>
-                        <div>
                         <F label="Full Legal Name" required value={client.fullName} onChange={v=>setClient(p=>({...p,fullName:v}))}/>
-                        {client.fullName&&client.fullName.length>2&&txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).length>0&&(
-                          <div style={{...c.bnr(txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged||t.items&&t.items.some(i=>i.suspicious))?"warn":"info"),fontSize:11,marginTop:-8}}>
-                            {txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged||t.items&&t.items.some(i=>i.suspicious))?"⚠️":"ℹ️"} Returning client — {txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).length} previous transaction(s).{txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged)?" Previously SMR flagged.":""}
-                          </div>
-                        )}
-                      </div>
                         <F label="Date of Birth" required type="date" value={client.dob} onChange={v=>setClient(p=>({...p,dob:v}))}/>
                         <F label="Residential Address" required value={client.address} onChange={v=>setClient(p=>({...p,address:v}))}/>
                         <F label="Phone" value={client.phone} onChange={v=>setClient(p=>({...p,phone:v}))}/>
-                        <SF label="ID Type" required value={client.idType} onChange={v=>setClient(p=>({...p,idType:v}))} options={[
-                          {value:"",label:"— Select —"},{value:"dl",label:"Driver's Licence"},
-                          {value:"pp",label:"Passport"},{value:"lp",label:"Learner Permit"},
-                          {value:"fl",label:"Firearms Licence"},{value:"op",label:"Other Photo ID"},
-                          {value:"2doc",label:"Two Non-Photo Documents"},
-                        ]}/>
+                        <SF label="ID Type" required value={client.idType} onChange={v=>setClient(p=>({...p,idType:v}))} options={ID_OPTIONS}/>
                         <F label="ID Number" required value={client.idNumber} onChange={v=>setClient(p=>({...p,idNumber:v}))}/>
                         <F label="Issuing State" value={client.idState} onChange={v=>setClient(p=>({...p,idState:v}))}/>
                         <F label="ID Expiry" type="date" value={client.idExpiry} onChange={v=>setClient(p=>({...p,idExpiry:v}))}/>
                       </div>
-                      {compliance.flags.some(f=>f.key==="ttr")&&(
-                        <F label="Source of Funds — How did seller acquire these goods?" required value={client.sourceOfFunds} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))}/>
-                      )}
+                      {compliance.flags.some(f=>f.key==="ttr")&&<F label="Source of Funds" required value={client.sourceOfFunds} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))}/>}
                       <div style={{...c.g2(12),marginTop:8}}>
-                        <label style={{...c.row(8),cursor:"pointer",fontSize:12}}>
-                          <input type="checkbox" checked={!!staff.pepCheck} onChange={e=>setStaff(p=>({...p,pepCheck:e.target.checked}))}/>
-                          PEP Check — Seller is NOT a PEP
-                        </label>
-                        <label style={{...c.row(8),cursor:"pointer",fontSize:12}}>
-                          <input type="checkbox" checked={!!staff.tfsCheck} onChange={e=>setStaff(p=>({...p,tfsCheck:e.target.checked}))}/>
-                          TFS Check — NOT on Sanctions List (dfat.gov.au)
-                        </label>
+                        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.pepCheck} onChange={e=>setStaff(p=>({...p,pepCheck:e.target.checked}))}/>PEP Check — Seller is NOT a PEP</label>
+                        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.tfsCheck} onChange={e=>setStaff(p=>({...p,tfsCheck:e.target.checked}))}/>TFS Check — NOT on Sanctions List (dfat.gov.au)</label>
                       </div>
                       <div style={{marginTop:10}}>
                         <label style={c.lbl}>Risk Rating</label>
-                        <select style={c.sel()} value={staff.riskRating||""} onChange={e=>setStaff(p=>({...p,riskRating:e.target.value}))}>
-                          <option value="">— Select —</option>
-                          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-                        </select>
+                        <select style={c.sel()} value={staff.riskRating||""} onChange={e=>setStaff(p=>({...p,riskRating:e.target.value}))}><option value="">— Select —</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
                       </div>
-                      <button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{
-                        if(!client.fullName||!client.dob||!client.idType||!client.idNumber){pop("Fill all required KYC fields.","err");return;}
-                        if(!staff.pepCheck||!staff.tfsCheck){pop("Complete PEP and TFS checks.","err");return;}
-                        if(!staff.riskRating){pop("Assign risk rating.","err");return;}
-                        setKycDone(true);pop("KYC completed.","ok");
-                      }}>✓ Mark KYC Complete</button>
+                      <button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{if(!client.fullName||!client.dob||!client.idType||!client.idNumber){pop("Fill all required KYC fields.","err");return;}if(!staff.pepCheck||!staff.tfsCheck){pop("Complete PEP and TFS checks.","err");return;}if(!staff.riskRating){pop("Assign risk rating.","err");return;}setKycDone(true);pop("KYC completed.","ok");}}>✓ Mark KYC Complete</button>
                     </div>
                   )}
-                  {(kycDone||!compliance.requiresKYC)&&(
-                    <div style={{...c.bnr("info"),marginTop:8}}>✓ Compliance check passed. Proceed to client form.</div>
-                  )}
-                  <div style={{...c.row(10),marginTop:10}}>
+                  {(kycDone||!compliance.requiresKYC)&&<div style={{...c.bnr("info"),marginTop:8}}>✓ Compliance check passed.</div>}
+                  <div style={{display:"flex",gap:10,marginTop:10}}>
                     <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag SMR (internal)</button>
                     <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
                   </div>
-                  <div style={{...c.row(10),marginTop:16}}>
+                  <div style={{display:"flex",gap:10,marginTop:16}}>
                     <button style={c.btn(T.gold)} onClick={handleToClient}>Next: Client Form →</button>
                     <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
                   </div>
                 </div>
               )}
 
-              {/* ─── STEP 3: CLIENT FORM ─── */}
               {txStep===3&&(
                 <div>
-                  <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:4}}>Client Section — BUY TRANSACTION RECORD</div>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #: {txNo} · {new Date().toLocaleDateString("en-AU")}</div>
-
-                  {/* Privacy Notice */}
-                  <div style={c.card({padding:14,marginBottom:14,borderColor:T.blue+"44"})}>
+                  <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client Declaration Form</div>
+                  <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
+                  <div style={c.card({padding:14,marginBottom:14})}>
                     <div style={{fontSize:11,color:T.blue,fontWeight:"bold",marginBottom:8}}>PRIVACY NOTICE</div>
-                    <pre style={{fontSize:10,color:T.muted,whiteSpace:"pre-wrap",lineHeight:1.6,margin:0,maxHeight:180,overflowY:"auto"}}>
-                      {PRIVACY_NOTICE(settings.businessName,settings.abn)}
-                    </pre>
-                    <label style={{...c.row(8),marginTop:10,cursor:"pointer",fontSize:12}}>
-                      <input type="checkbox" checked={privAck} onChange={e=>setPrivAck(e.target.checked)}/>
-                      <strong>I HAVE READ AND UNDERSTOOD THIS NOTICE — PROCEED</strong>
-                    </label>
+                    <pre style={{fontSize:10,color:T.muted,whiteSpace:"pre-wrap",fontFamily:T.ff,margin:0}}>{PRIVACY_NOTICE(settings.businessName,settings.abn)}</pre>
+                    <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={privAck} onChange={e=>setPrivAck(e.target.checked)}/><strong>I HAVE READ AND UNDERSTOOD THIS NOTICE — PROCEED</strong></label>
                   </div>
-
-                  {/* Section 1 — Transaction */}
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 1 — TRANSACTION DETAILS</div>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 1 — TRANSACTION</div>
                     <div style={c.g2(10)}>
                       <F label="Date" value={new Date().toLocaleDateString("en-AU")} readOnly/>
                       <F label="Contract No" value={txNo} readOnly/>
                     </div>
                     <div style={{marginBottom:12}}>
                       <label style={c.lbl}>I am selling</label>
-                      <div style={c.row(8)}>
-                        {["Bullion (bars / coins)","Scrap / Jewellery","Mixed"].map(opt=>(
-                          <button key={opt} style={c.btn(client.selling===opt?T.gold:T.border,client.selling===opt?T.bg:T.text,{padding:"6px 12px",fontSize:11})}
-                            onClick={()=>setClient(p=>({...p,selling:opt}))}>{opt}</button>
-                        ))}
-                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["Bullion (bars/coins)","Scrap / Jewellery","Mixed"].map(opt=><button key={opt} style={c.btn(client.selling===opt?T.gold:T.border,client.selling===opt?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setClient(p=>({...p,selling:opt}))}>{opt}</button>)}</div>
                     </div>
-                    <div style={{marginBottom:10}}>
+                    <div>
                       <label style={c.lbl}>I wish to be paid by</label>
-                      <div style={c.row(8)}>
-                        {[
-                          {v:"cash",l:"Cash (under $2,000 only)"},
-                          {v:"card",l:"Card (purchases/sell only)"},
-                          {v:"bank",l:"Bank Transfer"},
-                          ...(settings.cryptoEnabled?[{v:"crypto",l:"Cryptocurrency"}]:[]),
-                        ].map(opt=>(
-                          <button key={opt.v} style={c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"6px 12px",fontSize:11})}
-                            onClick={()=>setTxPay(opt.v)}>{opt.l}</button>
-                        ))}
-                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:8}}>{[{v:"cash",l:"Cash (under $2,000)"},{v:"card",l:"Card"},{v:"bank",l:"Bank Transfer"},...(settings.cryptoEnabled?[{v:"crypto",l:"Cryptocurrency"}]:[])].map(opt=><button key={opt.v} style={c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setTxPay(opt.v)}>{opt.l}</button>)}</div>
                     </div>
                   </div>
-
-                  {/* Section 2 — Items */}
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 2 — ITEMS I AM SELLING</div>
-                    {txItems.filter(i=>i.mode==="buy").map((it,i)=>(
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 2 — ITEMS I AM SELLING</div>
+                    {(txItems||[]).filter(i=>i.mode==="buy").map((it,i)=>(
                       <div key={it.id} style={{borderBottom:"1px solid "+T.border+"44",paddingBottom:8,marginBottom:8}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                          <div>
-                            <span style={{fontSize:11,color:T.muted,marginRight:6}}>#{i+1}</span>
-                            <span style={{color:T.white,fontWeight:"bold"}}>{it.product.label}</span>
-                          </div>
-                          <span style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(it.price)}</span>
-                        </div>
-                        <div style={{fontSize:11,color:T.muted,marginTop:2}}>
-                          {it.product.cat} · {it.product.carat?it.product.carat+"ct":it.product.purity?(it.product.purity*100).toFixed(1)+"%":"—"} · {it.qty} {it.product.unit}
-                          {it.note&&" · "+it.note}
-                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:T.white,fontWeight:"bold"}}>{sS(it.product&&it.product.label)}</span><span style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(it.price)}</span></div>
+                        <div style={{fontSize:11,color:T.muted,marginTop:2}}>{it.product&&it.product.cat} · {it.product&&it.product.carat?it.product.carat+"ct":it.product&&it.product.purity?(sN(it.product.purity)*100).toFixed(1)+"%":"—"}{it.note&&" · "+it.note}</div>
                       </div>
                     ))}
-                    <div style={{display:"flex",justifyContent:"space-between",paddingTop:4}}>
-                      <span style={{fontSize:12,fontWeight:"bold",color:T.white}}>TOTAL</span>
-                      <span style={{fontSize:14,fontWeight:"bold",color:T.green}}>{fmtAUD(buyTotal)}</span>
-                    </div>
-                    <F label="Notes (condition, markings, how acquired)" value={client.itemNotes} onChange={v=>setClient(p=>({...p,itemNotes:v}))} as="textarea"/>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0"}}><span style={{fontSize:12,fontWeight:"bold"}}>TOTAL</span><span style={{fontSize:14,fontWeight:"bold",color:T.green}}>{fmtAUD(buyTotal)}</span></div>
+                    <F label="Notes (condition, markings, how acquired)" value={client.itemNotes} onChange={v=>setClient(p=>({...p,itemNotes:v}))}/>
                   </div>
-
-                  {/* Section 3 — Identity */}
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 3 — MY IDENTITY</div>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 3 — MY DETAILS</div>
                     <div style={c.g2(10)}>
-                      <div>
-                        <F label="Full Legal Name" required value={client.fullName} onChange={v=>setClient(p=>({...p,fullName:v}))}/>
-                        {client.fullName&&client.fullName.length>2&&txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).length>0&&(
-                          <div style={{...c.bnr(txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged)?"warn":"info"),fontSize:11,marginTop:-8}}>
-                            {txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged)?"⚠️":"ℹ️"} Returning client — {txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).length} previous transaction(s).{txList.filter(t=>t.client&&(t.client.fullName||"").toLowerCase()===client.fullName.toLowerCase()).some(t=>t.smrFlagged)?" Previously SMR flagged.":""}
-                          </div>
-                        )}
-                      </div>
+                      <F label="Full Legal Name" required value={client.fullName} onChange={v=>setClient(p=>({...p,fullName:v}))}/>
                       <F label="Date of Birth" required type="date" value={client.dob} onChange={v=>setClient(p=>({...p,dob:v}))}/>
                       <F label="Phone Number" value={client.phone} onChange={v=>setClient(p=>({...p,phone:v}))}/>
                       <F label="Residential Address" required value={client.address} onChange={v=>setClient(p=>({...p,address:v}))}/>
                     </div>
                   </div>
-
-                  {/* Section 4 — ID */}
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 4 — IDENTIFICATION DOCUMENT</div>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 4 — IDENTIFICATION</div>
                     <div style={c.g2(10)}>
-                      <SF label="ID Type" required value={client.idType} onChange={v=>setClient(p=>({...p,idType:v}))} options={[
-                        {value:"",label:"— Select —"},{value:"dl",label:"Driver's Licence"},
-                        {value:"pp",label:"Passport"},{value:"lp",label:"Learner Permit"},
-                        {value:"fl",label:"Firearms Licence"},{value:"op",label:"Other Photo ID"},
-                        {value:"2doc",label:"Two Non-Photo Documents"},
-                      ]}/>
+                      <SF label="ID Type" required value={client.idType} onChange={v=>setClient(p=>({...p,idType:v}))} options={ID_OPTIONS}/>
                       <F label="ID Number" required value={client.idNumber} onChange={v=>setClient(p=>({...p,idNumber:v}))}/>
                       <F label="Issuing State / Country" value={client.idState} onChange={v=>setClient(p=>({...p,idState:v}))}/>
                       <F label="Expiry Date" type="date" value={client.idExpiry} onChange={v=>setClient(p=>({...p,idExpiry:v}))}/>
                     </div>
                     <div style={{marginTop:8}}>
                       <label style={c.lbl}>ID Document Photo</label>
-                      <div style={c.row(10)}>
-                        <button style={c.btn(T.border,T.text,{padding:"8px 14px"})} onClick={()=>fileRef.current&&fileRef.current.click()}>
-                          📷 Capture / Upload ID
-                        </button>
-                        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/>
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <button style={c.btn(T.border,T.text,{padding:"8px 14px",fontSize:12})} onClick={()=>fileRef.current&&fileRef.current.click()}>📷 Capture / Upload ID</button>
+                        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>setPhoto(d));r.readAsDataURL(f);e.target.value="";}}/>
                         {photo&&<span style={c.badge(T.green)}>✓ Photo captured</span>}
                       </div>
-                      {photo&&<img src={photo} alt="ID" style={{marginTop:8,maxWidth:180,borderRadius:6,border:"1px solid "+T.border}}/>}
+                      {photo&&<img src={photo} alt="ID" style={{marginTop:8,maxWidth:200,borderRadius:6,border:"1px solid "+T.border}}/>}
                     </div>
                   </div>
-
-                  {/* Declaration */}
-                  <div style={c.card({padding:14,marginBottom:14,borderColor:T.blue+"44"})}>
-                    <div style={{fontSize:11,color:T.text,lineHeight:1.7,marginBottom:10}}>
-                      <strong>DECLARATION:</strong> I declare that all information I have provided is true and correct, and the goods I am selling are my property and I have the right to sell them.
-                    </div>
-                    <F label="Client Signature (type full name)" required value={client.signature} onChange={v=>setClient(p=>({...p,signature:v}))} placeholder="Type full name to sign…"/>
+                  <div style={c.card({padding:14,marginBottom:14})}>
+                    <div style={{fontSize:11,color:T.text,lineHeight:1.7,marginBottom:10}}><strong>DECLARATION:</strong> I declare that all information provided is true and correct, that I am the lawful owner of the items being sold, and that I am not selling on behalf of anyone else.</div>
+                    <F label="Client Signature (type full name)" required value={client.signature} onChange={v=>setClient(p=>({...p,signature:v}))}/>
                     <F label="Date" type="date" required value={client.signatureDate||nowISO().slice(0,10)} onChange={v=>setClient(p=>({...p,signatureDate:v}))}/>
                   </div>
-
-                  <div style={c.row(10)}>
-                    <button style={c.btn(T.gold)} onClick={()=>{
-                      if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}
-                      if(!client.signature){pop("Client signature required.","err");return;}
-                      setTxStep(4);
-                    }}>Next: Staff Section →</button>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Staff Section →</button>
                     <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
                   </div>
                 </div>
               )}
 
-              {/* ─── STEP 4: STAFF SECTION ─── */}
               {txStep===4&&(
                 <div>
-                  <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:4}}>Staff Section — COMPLIANCE RECORD</div>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Staff section only. Retain 7 years per AUSTRAC/Privacy Act.</div>
-
-                  {/* S5 — ID Verification */}
+                  <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Staff Compliance Section</div>
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 5 — IDENTITY VERIFICATION BY STAFF</div>
-                    <div style={{fontSize:12,color:T.text,lineHeight:1.7,marginBottom:10}}>
-                      "I have physically sighted the document presented and confirm the photo matches the person in front of me."
-                    </div>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 5 — ID VERIFICATION</div>
                     <div style={c.g2(10)}>
                       <F label="Staff Member Name" required value={staff.staffName} onChange={v=>setStaff(p=>({...p,staffName:v}))}/>
                       <F label="Date / Time" value={new Date().toLocaleString("en-AU")} readOnly/>
                     </div>
-                    <label style={{...c.row(8),cursor:"pointer",fontSize:12}}>
+                    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginTop:8}}>
                       <input type="checkbox" checked={idSighted} onChange={e=>setIdSighted(e.target.checked)}/>
-                      <strong style={{color:T.orange}}>✓ I confirm I have physically sighted the ID and the photo matches the person in front of me</strong>
+                      <strong style={{color:T.orange}}>✓ I confirm I have physically sighted the identification document presented</strong>
                     </label>
                   </div>
-
-                  {/* S6 — KYC */}
-                  <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>
-                      SECTION 6 — KYC CHECKS{compliance.requiresKYC&&<span style={{...c.badge(T.red),marginLeft:8}}>MANDATORY</span>}
+                  {compliance.requiresKYC&&(
+                    <div style={c.card({padding:16,marginBottom:14})}>
+                      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 6 — KYC CHECKS <span style={{color:T.red}}>★ REQUIRED</span></div>
+                      {kycDone&&<div style={c.bnr("info")}>✓ KYC completed in Compliance step.</div>}
+                      <SF label="PEP Check" required value={staff.pepResult} onChange={v=>setStaff(p=>({...p,pepResult:v}))} options={[{value:"",label:"— Select —"},{value:"no",label:"No — Not a PEP"},{value:"yes",label:"PEP — refer to compliance officer"}]}/>
+                      <SF label="TFS Check — dfat.gov.au/sanctions" required value={staff.tfsResult} onChange={v=>setStaff(p=>({...p,tfsResult:v}))} options={[{value:"",label:"— Select —"},{value:"clear",label:"Clear — not on list"},{value:"match",label:"MATCH — escalate immediately"}]}/>
+                      <SF label="Risk Rating" required value={staff.riskRating} onChange={v=>setStaff(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>
                     </div>
-                    {!compliance.requiresKYC
-                      ?<div style={c.bnr("info")}>N/A — Transaction below all AUSTRAC thresholds. Victorian ID law still applies (Step 5).</div>
-                      :(
-                        <div>
-                          {kycDone&&<div style={c.bnr("info")}>✓ KYC completed in Step 2.</div>}
-                          <div style={c.g2(10)}>
-                            <SF label="PEP Check" required value={staff.pepResult||""} onChange={v=>setStaff(p=>({...p,pepResult:v}))} options={[
-                              {value:"",label:"— Select —"},{value:"no",label:"Not a PEP"},
-                              {value:"yes",label:"PEP — refer to compliance officer"},{value:"unable",label:"Unable to determine"},
-                            ]}/>
-                            <SF label="TFS Check — dfat.gov.au/sanctions" required value={staff.tfsResult||""} onChange={v=>setStaff(p=>({...p,tfsResult:v}))} options={[
-                              {value:"",label:"— Select —"},{value:"clear",label:"Seller NOT listed"},{value:"listed",label:"LISTED — DO NOT PROCEED"},
-                            ]}/>
-                          </div>
-                          <SF label="Risk Rating" required value={staff.riskRating||""} onChange={v=>setStaff(p=>({...p,riskRating:v}))} options={[
-                            {value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"},
-                          ]}/>
-                        </div>
-                      )}
-                  </div>
-
-                  {/* S7 — Flags */}
+                  )}
                   <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 7 — COMPLIANCE FLAGS</div>
-                    {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
-                    {compliance.flags.some(f=>f.key==="ttr")&&(
-                      <div style={{marginTop:8}}>
-                        <div style={{fontSize:12,color:T.red,fontWeight:"bold"}}>
-                          TTR Deadline: File by {new Date(Date.now()+10*24*3600000).toLocaleDateString("en-AU")} via AUSTRAC Online
-                        </div>
-                        <F label="Compliance Officer Notified" value={staff.complianceOfficer} onChange={v=>setStaff(p=>({...p,complianceOfficer:v}))}/>
-                      </div>
-                    )}
-                    <div style={{marginTop:8}}>
-                      <label style={c.lbl}>Suspicious Matter</label>
-                      <div style={c.row(8)}>
-                        <button style={c.bsm(T.greenBg,T.green)} onClick={()=>setStaff(p=>({...p,smr:"none"}))}>No Suspicion</button>
-                        <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag for SMR</button>
-                      </div>
-                      <div style={{fontSize:10,color:T.muted,marginTop:4}}>⚠️ NEVER tell the seller a report has been or may be filed — tipping off is a criminal offence (AML/CTF Act s.123).</div>
-                    </div>
-                  </div>
-
-                  {/* S8 — Hold */}
-                  <div style={c.card({padding:16,marginBottom:14})}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.1em"}}>SECTION 8 — SAFETY HOLD — Vic Act s.21 (168 hours)</div>
-                    <div style={c.bnr("warn")}>Automatic 168-hour Safety Hold applies. No item may be sold, altered, melted, or sent to refinery until Hold has fully expired.</div>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 7 — 168-HOUR SAFETY HOLD</div>
+                    <div style={c.bnr("warn")}>Automatic 168-hour Safety Hold applies to all bought items.</div>
                     <div style={c.g2(10)}>
-                      <div><div style={c.lbl}>Hold Start</div><div style={{fontSize:12,color:T.orange}}>{new Date().toLocaleString("en-AU")}</div></div>
-                      <div><div style={c.lbl}>Hold Expiry (+168 hrs)</div><div style={{fontSize:12,color:T.orange}}>{new Date(Date.now()+THRESH.HOLD_HOURS*3600000).toLocaleString("en-AU")}</div></div>
+                      <div><div style={c.lbl}>Hold Start</div><div style={{fontSize:12,color:T.white}}>{new Date().toLocaleString("en-AU")}</div></div>
+                      <div><div style={c.lbl}>Hold Expiry (+168 hrs)</div><div style={{fontSize:12,color:T.orange}}>{new Date(Date.now()+168*3600000).toLocaleString("en-AU")}</div></div>
                     </div>
-                    <F label="Storage Location (bay / safe / tray — required by Vic Act s.21A)" required value={staff.storageLocation} onChange={v=>setStaff(p=>({...p,storageLocation:v}))}/>
+                    <F label="Storage Location (bay / safe / tray)" required value={staff.storageLocation} onChange={v=>setStaff(p=>({...p,storageLocation:v}))} placeholder="e.g. Safe A, Tray 3"/>
                   </div>
-
-                  <div style={c.row(10)}>
-                    <button style={c.btn(T.green,T.bg)} onClick={finalize}>✓ Finalise Transaction</button>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={c.btn(T.green,T.bg)} onClick={()=>setTxStep(5)}>Next: Payment →</button>
                     <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
                   </div>
                 </div>
               )}
 
-              {/* ─── STEP 5: PAYMENT + INTEGRATIONS ─── */}
               {txStep===5&&(
                 <div>
-                  <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>💳 Payment</div>
-
-                  {/* Payment method selector */}
-                  <div style={{...c.card({padding:16}),marginBottom:14}}>
+                  <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>Payment</div>
+                  <div style={c.card({padding:16,marginBottom:14})}>
                     <label style={c.lbl}>Payment Method</label>
                     <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
-                      {[
-                        {v:"cash",   icon:"💵", label:"Cash",        note:"Buy ≤ $2,000"},
-                        {v:"eftpos", icon:"🖥",  label:"EFTPOS",      note:"Terminal"},
-                        {v:"card",   icon:"💳",  label:"Card Online", note:"Link"},
-                        {v:"bank",   icon:"🏦",  label:"Bank EFT",    note:"Transfer"},
-                        ...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto",note:"BTC/ETH"}]:[]),
-                      ].map(opt=>(
-                        <button key={opt.v} onClick={()=>setTxPay(opt.v)}
-                          style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,
-                            {padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",
-                             alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
-                          <span style={{fontSize:28}}>{opt.icon}</span>
-                          <span style={{fontWeight:"bold"}}>{opt.label}</span>
-                          <span style={{fontSize:9,opacity:0.65,fontWeight:"normal"}}>{opt.note}</span>
+                      {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[])].map(opt=>(
+                        <button key={opt.v} onClick={()=>setTxPay(opt.v)} style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
+                          <span style={{fontSize:24}}>{opt.icon}</span><span style={{fontWeight:"bold"}}>{opt.label}</span>
                         </button>
                       ))}
                     </div>
                   </div>
-
-                  {/* Net amount display */}
                   <div style={{...c.card({padding:14}),marginBottom:14,textAlign:"center"}}>
-                    <div style={{fontSize:11,color:T.muted,marginBottom:4}}>
-                      {net>=0?"Amount to collect from client":"Amount to pay client"}
-                    </div>
-                    <div style={{fontSize:28,fontWeight:"bold",color:net>=0?T.gold:T.green}}>
-                      {fmtAUD(Math.abs(net))}
-                    </div>
-                    {buyTotal>0&&sellTotal>0&&<div style={{fontSize:11,color:T.muted,marginTop:4}}>
-                      Buy: {fmtAUD(buyTotal)} · Sell: {fmtAUD(sellTotal)}
-                    </div>}
+                    <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{net>=0?"Amount to collect from client":"Amount to pay client"}</div>
+                    <div style={{fontSize:28,fontWeight:"bold",color:net>=0?T.gold:T.green}}>{fmtAUD(Math.abs(net))}</div>
                   </div>
-
-                  {/* EFTPOS terminal button */}
-                  {txPay==="eftpos"&&net>0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
-                      <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
-                      {settings.eftposProvider==="none"||!settings.eftposProvider
-                        ?<div style={{fontSize:11,color:T.muted,marginBottom:10}}>No terminal configured — confirm manually below, or set up in Settings → Integrations.</div>
-                        :<div style={{fontSize:11,color:T.muted,marginBottom:10}}>
-                          Provider: <strong>{settings.eftposProvider==="square"?"Square Terminal":"Linkly / PC-EFTPOS"}</strong>
-                          {settings.eftposProvider==="linkly"&&<span> · {settings.linklyBaseUrl||"localhost:4242"}</span>}
-                        </div>
-                      }
-                      <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:14,padding:"14px"}}
-                        onClick={async()=>{
-                          pop("Sending "+fmtAUD(net)+" to terminal…","ok");
-                          const r=await sendEftpos(net);
-                          pop(r.msg,r.ok?"ok":"err");
-                        }}>
-                        🖥 Send {fmtAUD(net)} to Terminal
-                      </button>
-                      <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}}
-                        onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>
-                        ✓ Confirm Manually (terminal not connected)
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Cash */}
-                  {txPay==="cash"&&net>=0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
-                      <div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div>
-                      <button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button>
-                    </div>
-                  )}
-
-                  {/* Card online */}
-                  {txPay==="card"&&net>=0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.gold}}>
-                      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        <button style={{...c.btn(T.gold,T.bg),flex:1}}
-                          onClick={async()=>{
-                            if(!settings.squareToken){pop("Square not configured in Settings.","warn");return;}
-                            pop("Opening Square checkout…","ok");
-                            try{await sendSquareSell();}catch(e){pop("Square: "+e.message,"err");}
-                          }}>⬡ Square Checkout</button>
-                        <button style={{...c.btn(T.border,T.text),flex:1}}
-                          onClick={async()=>{
-                            if(!settings.shopifyDomain){pop("Shopify not configured in Settings.","warn");return;}
-                            pop("Creating Shopify order…","ok");
-                            try{const r=await sendShopifySell(txNo,txItems.filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}
-                            catch(e){pop("Shopify: "+e.message,"err");}
-                          }}>🛍 Shopify Order</button>
-                      </div>
-                      <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
-                    </div>
-                  )}
-
-                  {/* Bank transfer */}
-                  {txPay==="bank"&&net>=0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.blue}}>
-                      <div style={c.bnr("info")}>🏦 Client transfers {fmtAUD(net)} to your account.</div>
-                      <button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Bank transfer noted.","ok")}>✓ Transfer Noted</button>
-                    </div>
-                  )}
-
-                  {/* Crypto */}
-                  {txPay==="crypto"&&net>=0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.orange}}>
-                      <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto</div>
-                      {(()=>{
-                        const COINS=[
-                          {k:"BTC",l:"Bitcoin",w:settings.walletBTC},
-                          {k:"ETH",l:"Ethereum",w:settings.walletETH},
-                          {k:"BNB",l:"Binance BEP-2",w:settings.walletBNB},
-                          {k:"XRP",l:"Ripple",w:settings.walletXRP},
-                          {k:"SOL",l:"Solana",w:settings.walletSOL},
-                        ].filter(x=>x.w);
-                        if(!COINS.length) return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;
-                        return COINS.map(coin=>(
-                          <div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}>
-                            <div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div>
-                            <div style={{fontFamily:"monospace",fontSize:10,color:T.white,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div>
-                            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button>
-                          </div>
-                        ));
-                      })()}
-                      <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
-                    </div>
-                  )}
-
-                  {/* We owe client */}
-                  {net<0&&(
-                    <div style={{...c.card({padding:16}),marginBottom:10,borderLeft:"4px solid "+T.green}}>
-                      <div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {(txPay||"cash").toUpperCase()}.</div>
-                      {txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(-net);pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}
-                      <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button>
-                    </div>
-                  )}
-
-                  {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}
-
-                  {/* Integrations row */}
-                  <div style={{...c.card({padding:12}),marginBottom:14}}>
-                    <div style={{fontSize:10,color:T.muted,marginBottom:8,letterSpacing:"0.08em"}}>RECORD IN</div>
+                  {txPay==="eftpos"&&net>0&&<div style={c.card({padding:16,marginBottom:10})}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
+                    <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{pop("Sending "+fmtAUD(net)+" to terminal…","ok");const r=await sendEftpos(net);pop(r.msg,r.ok?"ok":"err");}}>🖥 Send {fmtAUD(net)} to Terminal</button>
+                    <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>✓ Confirm Manually</button>
+                  </div>}
+                  {txPay==="cash"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button></div>}
+                  {txPay==="card"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button style={c.bsm(settings.squareToken?T.goldBg:T.surface,settings.squareToken?T.gold:T.muted)}
-                        onClick={async()=>{
-                          if(!settings.squareToken){pop("Square not configured.","warn");return;}
-                          const buys=txItems.filter(i=>i.mode==="buy");
-                          const sells=txItems.filter(i=>i.mode==="sell");
-                          if(buys.length) try{const r=await sendSquareBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Square: "+e.message,"err");}
-                          if(sells.length) try{await sendSquareSell();}catch(e){pop("Square sell: "+e.message,"err");}
-                        }}>⬡ Square</button>
-                      <button style={c.bsm(settings.shopifyDomain?T.goldBg:T.surface,settings.shopifyDomain?T.gold:T.muted)}
-                        onClick={async()=>{
-                          if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}
-                          const buys=txItems.filter(i=>i.mode==="buy");
-                          const sells=txItems.filter(i=>i.mode==="sell");
-                          if(buys.length) try{const r=await sendShopifyBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}
-                          if(sells.length) try{const r=await sendShopifySell(txNo,sells,client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}
-                        }}>🛍 Shopify</button>
-                      <button style={c.bsm(settings.xeroToken?T.goldBg:T.surface,settings.xeroToken?T.gold:T.muted)}
-                        onClick={async()=>{
-                          if(!settings.xeroToken){pop("Xero not configured.","warn");return;}
-                          pop("Xero sync requires webhook setup — configure in Settings.","warn");
-                        }}>📒 Xero</button>
+                      <button style={{...c.btn(T.gold,T.bg),flex:1}} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}try{await sendSquareSell();}catch(e){pop("Square: "+e.message,"err");}}}>⬡ Square Checkout</button>
+                      <button style={{...c.btn(T.border,T.text),flex:1}} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}try{const r=await sendShopifySell(txNo,(txItems||[]).filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify Order</button>
                     </div>
-                    <div style={{fontSize:9,color:T.muted,marginTop:6}}>Greyed = not configured. Tap to see instructions.</div>
+                    <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
+                  </div>}
+                  {txPay==="bank"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>🏦 Client transfers {fmtAUD(net)} to your account.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Bank transfer noted.","ok")}>✓ Transfer Noted</button></div>}
+                  {txPay==="crypto"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
+                    <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto Payment</div>
+                    {(()=>{const COINS=[{k:"BTC",l:"Bitcoin",w:settings.walletBTC},{k:"ETH",l:"Ethereum",w:settings.walletETH},{k:"BNB",l:"Binance",w:settings.walletBNB},{k:"XRP",l:"Ripple",w:settings.walletXRP},{k:"SOL",l:"Solana",w:settings.walletSOL}].filter(x=>x.w);if(!COINS.length)return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;return COINS.map(coin=><div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}><div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div><div style={{fontFamily:"monospace",fontSize:10,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div><button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button></div>);})()}
+                    <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
+                  </div>}
+                  {net<0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {sS(txPay).toUpperCase()}.</div>{txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(-net);pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button></div>}
+                  {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}
+                  <div style={c.card({padding:12,marginBottom:14})}>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:8}}>RECORD IN</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button style={c.bsm(settings.squareToken?T.goldBg:T.surface,settings.squareToken?T.gold:T.muted)} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendSquareBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Square: "+e.message,"err");}if(sells.length)try{await sendSquareSell();}catch(e){pop("Square sell: "+e.message,"err");}}}>⬡ Square</button>
+                      <button style={c.bsm(settings.shopifyDomain?T.goldBg:T.surface,settings.shopifyDomain?T.gold:T.muted)} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendShopifyBuy(txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}if(sells.length)try{const r=await sendShopifySell(txNo,sells,client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify</button>
+                      <button style={c.bsm(settings.xeroToken?T.goldBg:T.surface,settings.xeroToken?T.gold:T.muted)} onClick={()=>pop("Xero: configure webhook in Settings.","warn")}>📒 Xero</button>
+                    </div>
                   </div>
-
-                  <button style={{...c.btn(T.gold,T.bg),width:"100%",marginTop:4}} onClick={()=>setTxStep(6)}>
-                    Next: Finalise →
-                  </button>
+                  <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={()=>setTxStep(6)}>Next: Finalise →</button>
                 </div>
               )}
 
               {txStep===6&&(
                 <div>
-                  {/* Transaction summary */}
-                  <div style={{...c.card({padding:16}),marginBottom:14,borderLeft:"4px solid "+T.gold}}>
-                    <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:12,letterSpacing:"0.08em"}}>📋 TRANSACTION SUMMARY</div>
+                  <div style={c.card({padding:16,marginBottom:14,borderLeft:"4px solid "+T.gold})}>
+                    <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:12}}>📋 TRANSACTION SUMMARY</div>
                     <div style={c.g2(10)}>
                       <div><div style={c.lbl}>Invoice #</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
                       <div><div style={c.lbl}>Client</div><div style={{color:T.white}}>{client.fullName}</div></div>
-                      <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase",color:T.white}}>{txPay}</div></div>
-                      {activeStaff&&staffList.find(s=>s.id===activeStaff)&&(
-                        <div><div style={c.lbl}>Staff</div><div style={{color:T.white}}>{(staffList.find(s=>s.id===activeStaff)||{}).name}</div></div>
-                      )}
+                      <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase"}}>{txPay}</div></div>
                       {buyTotal>0&&<div><div style={c.lbl}>Buy Total</div><div style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(buyTotal)}</div></div>}
                       {sellTotal>0&&<div><div style={c.lbl}>Sell Total</div><div style={{color:T.gold,fontWeight:"bold"}}>{fmtAUD(sellTotal)}</div></div>}
                       <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:16}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
                     </div>
-                    {compliance.flags.some(f=>f.key==="ttr")&&(
-                      <div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR required — file with AUSTRAC Online within 10 business days.</div>
-                    )}
-                    {compliance.flags.some(f=>f.key==="smr")&&(
-                      <div style={{...c.bnr("warn"),marginTop:8}}>⚠ Suspicious — consider filing an SMR with AUSTRAC.</div>
-                    )}
+                    {compliance.flags.some(f=>f.key==="ttr")&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR required — file with AUSTRAC Online within 10 business days.</div>}
                   </div>
-
-                  {/* Items recap */}
-                  {txItems.length>0&&(
-                    <div style={{...c.card({padding:14}),marginBottom:14}}>
-                      <div style={{fontSize:11,color:T.muted,marginBottom:8,letterSpacing:"0.08em"}}>ITEMS ({txItems.length})</div>
-                      {txItems.map((it,i)=>(
-                        <div key={it.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<txItems.length-1?"1px solid "+T.border+"44":"none"}}>
-                          <div>
-                            <span style={{...c.badge(it.mode==="buy"?T.green:T.gold),marginRight:6}}>{it.mode.toUpperCase()}</span>
-                            <span style={{fontSize:12,color:T.white}}>{it.product&&it.product.label}</span>
-                            {it.note&&<span style={{fontSize:11,color:T.muted}}> — {it.note}</span>}
-                          </div>
-                          <span style={{fontWeight:"bold",color:it.mode==="buy"?T.green:T.gold}}>{fmtAUD(it.price)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Finalise button */}
-                  <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}}
-                    onClick={finalize}>
-                    ✓ Complete Transaction
-                  </button>
-
-                  {/* Navigation */}
-                  <div style={c.row(10)}>
+                  <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}} onClick={finalize}>✓ Complete Transaction</button>
+                  <div style={{display:"flex",gap:10}}>
                     <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>setTxStep(5)}>← Back to Payment</button>
                     <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>{resetTx();setScreen("dashboard");}}>✕ Cancel</button>
                   </div>
@@ -3021,1482 +1042,510 @@ export default function Loot() {
             </div>
           )}
 
-          {/* ═══ STOCK / HOLDS ═══ */}
           {screen==="stock"&&(
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontSize:17,fontWeight:"bold",color:T.white,display:"flex",alignItems:"center"}}>Stock / Hold Manager<AIGhost settings={settings} label="Stock"/></div>
-                <button style={{...c.btn(T.gold,T.bg,{fontSize:11,padding:"7px 12px"})}} onClick={dlAccounting}>📊 Accounting</button>
+                <div style={{fontSize:17,fontWeight:"bold",color:T.white}}>Stock / Hold Manager<AIGhost settings={settings} label="Stock"/></div>
+                <button style={c.btn(T.gold,T.bg,{fontSize:11,padding:"7px 12px"})} onClick={dlAccounting}>📊 Accounting</button>
               </div>
-              {frozenSnap&&<div style={{...c.bnr("warn"),marginBottom:10}}>
-                ❄ Frozen at {frozenSnap.frozenAt} — Au {fmtAUD(frozenSnap.gSpot)}/oz · Ag {fmtAUD(frozenSnap.sSpot)}/oz. All melt values use these locked prices.
-                <button style={{...c.bsm(T.redBg,T.red),marginLeft:10,fontSize:10}} onClick={()=>setPinModal({reason:"Unfreeze accounting snapshot — manager PIN required.",cb:()=>{setFrozenSnap(null);pop("Snapshot unfrozen. Live prices resumed.","ok");}})}>Unfreeze</button>
-              </div>}
-              {!frozenSnap&&<div style={{...c.bnr("info"),marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span>📸 No frozen snapshot. Lock prices for month-end accounting.</span>
-                <button style={{...c.bsm(T.goldBg,T.gold),fontSize:10}} onClick={()=>setPinModal({reason:"Freeze accounting snapshot at current spot prices — manager PIN required.",cb:()=>{const snap={gSpot:gSpot,sSpot:sSpot,frozenAt:todayStr()};setFrozenSnap(snap);pop("Snapshot locked at Au "+fmtAUD(gSpot)+"/oz, Ag "+fmtAUD(sSpot)+"/oz.","ok");}})}>❄ Freeze Now</button>
-              </div>}
-              {/* Value summary by metal */}
-              {stock.length>0&&(
-                <div style={{...c.g2(10),marginBottom:12}}>
-                  {["Gold","Silver","Other"].map(cat=>(
-                    (stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold).length===0 ? null :
-                    <div key={cat} style={c.card({padding:12,borderLeft:"3px solid "+(cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.muted)})}>
-                      <div style={{fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
-                      <div style={{fontSize:15,fontWeight:"bold",color:cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.text}}>
-                        {fmtAUD((stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold).reduce((a,s)=>a+(s.price||0),0))}
-                      </div>
-                      <div style={{fontSize:10,color:T.green,marginTop:2}}>
-                        {(stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready · {fmtAUD((stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold&&!s.policeHold&&hoursLeft(s.holdUntil)<=0).reduce((a,s)=>a+(s.price||0),0))}
-                      </div>
-                    </div>
-                  ))}
+              {frozenSnap?<div style={{...c.bnr("warn"),marginBottom:10}}>❄ Frozen at {frozenSnap.frozenAt} — Au {fmtAUD(frozenSnap.gSpot)}/oz · Ag {fmtAUD(frozenSnap.sSpot)}/oz<button style={{...c.bsm(T.redBg,T.red),marginLeft:10,fontSize:10}} onClick={()=>setPinModal({reason:"Unfreeze snapshot — manager PIN required.",cb:()=>{setFrozenSnap(null);pop("Snapshot unfrozen.","ok");}})}>Unfreeze</button></div> :
+              <div style={{...c.bnr("info"),marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>📸 No frozen snapshot. Lock prices for month-end accounting.</span><button style={{...c.bsm(T.goldBg,T.gold),fontSize:10}} onClick={()=>setPinModal({reason:"Freeze snapshot at current spot prices — manager PIN required.",cb:()=>{setFrozenSnap({gSpot,sSpot,frozenAt:todayStr()});pop("Snapshot locked.","ok");}})}>❄ Freeze Now</button></div>}
+              {(stock||[]).length>0&&(
+                <div style={c.g3(10)}>
+                  {["Gold","Silver","Other"].map(cat=>{const items=(stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold);if(!items.length)return null;return <div key={cat} style={c.card({padding:12,borderLeft:"3px solid "+(cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.muted)})}>
+                    <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:4}}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
+                    <div style={{fontSize:15,fontWeight:"bold",color:cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.text}}>{fmtAUD(items.reduce((a,s)=>a+sN(s.price),0))}</div>
+                    <div style={{fontSize:10,color:T.green,marginTop:2}}>{items.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready</div>
+                  </div>;})}
                 </div>
               )}
-              <div style={{fontSize:11,color:T.muted,marginBottom:12}}>
-                🟠 In hold · 🟢 Ready for sale · 🔴 Police Hold
-              </div>
-              {stock.length===0
-                ?<div style={{color:T.muted,padding:40,textAlign:"center"}}>No stock items yet.</div>
-                :(stock||[]).map((s,i)=>(
-                  <StockCard key={s.id} s={s} T={T} c={c}
-                    fmtAUD={fmtAUD} fmtDate={fmtDate} calcMelt={calcMelt}
-                    frozenSnap={frozenSnap} hoursLeft={hoursLeft}
-                    togglePoliceHold={togglePoliceHold} setPinModal={setPinModal}
-                    setPinVal={setPinVal} setStock={setStock}
-                    setEditStockId={setEditStockId} setEditStockVal={setEditStockVal}
-                    nowISO={nowISO} GOLD_P={GOLD_P} SILV_P={SILV_P}/>
-                ))
-              }
+              <div style={{fontSize:11,color:T.muted,marginTop:8,marginBottom:12}}>🟠 In hold · 🟢 Ready for sale · 🔴 Police Hold</div>
+              {(stock||[]).length===0?<div style={{color:T.muted,padding:40,textAlign:"center"}}>No stock items yet.</div>
+                :(stock||[]).map(s=><StockCard key={s.id} s={s} frozenSnap={frozenSnap} gSpot={gSpot} sSpot={sSpot} togglePoliceHold={togglePoliceHold} setPinModal={setPinModal} setPinVal={setPinVal} setStock={setStock} setEditStockId={setEditStockId} setEditStockVal={setEditStockVal}/>)}
             </div>
           )}
 
-          {/* ═══ CLIENTS ═══ */}
           {screen==="clients"&&(
             <div>
-              <div style={{marginBottom:14}}><h1 style={{fontSize:17,fontWeight:"bold",color:T.white,margin:0,display:"flex",alignItems:"center"}}>Client Data<AIGhost settings={settings} label="Clients"/></h1><p style={{fontSize:11,color:T.muted,marginTop:3}}>Retained 7 years. Encrypted drive. Erase monthly (APP 11).</p></div>
+              <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:14}}>Client Files</div>
               <div style={c.card({padding:16,marginBottom:14})}>
-                <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>Download by Date Range</div>
+                <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>Batch Download</div>
                 <div style={c.g2(10)}><F label="From" type="date" value={cliFrom} onChange={setCliFrom}/><F label="To" type="date" value={cliTo} onChange={setCliTo}/></div>
-                <div style={c.row(10)}>
-                  <button style={c.btn(T.gold,T.bg)} onClick={dlBatch}>⬇ Download Files</button>
-                  <span style={{fontSize:11,color:T.muted}}>{txList.filter(t=>{const d=new Date(t.date),fr=cliFrom?new Date(cliFrom):new Date(0),to=cliTo?new Date(cliTo):new Date();to.setHours(23,59,59);return d>=fr&&d<=to;}).length} tx in range</span>
-                </div>
+                <div style={{display:"flex",gap:10}}><button style={c.btn(T.gold,T.bg)} onClick={dlBatch}>⬇ Download Range</button><span style={{fontSize:11,color:T.muted}}>{(txList||[]).filter(t=>{if(!cliFrom&&!cliTo)return true;const d=new Date(t.date),fr=cliFrom?new Date(cliFrom):new Date(0),to=cliTo?new Date(cliTo):new Date();to.setHours(23,59,59);return d>=fr&&d<=to;}).length} tx in range</span></div>
               </div>
-              <input style={c.inp({marginBottom:12})} type="text" placeholder="Search by name or invoice…" value={cliSearch} onChange={e=>setCliSearch(e.target.value)}/>
-              {txList.length===0
-                ?<div style={{...c.card({padding:32}),textAlign:"center",color:T.muted}}>No records yet.</div>
-                :txList.filter(tx=>{if(!cliSearch)return true;const q=cliSearch.toLowerCase();return((tx.client&&tx.client.fullName)||"").toLowerCase().includes(q)||(tx.id||"").toLowerCase().includes(q);}).map(tx=>(
-                  <div key={tx.id} style={{...c.card({padding:14}),marginBottom:8,borderLeft:"3px solid "+(isBlacklistedName((tx.client&&tx.client.fullName)||"")?T.red:T.border)}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
-                          <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{tx.id}</span>
-                          {tx.hasPhotos&&<span style={c.badge(T.green,T.greenBg)}>Photos</span>}
-                          {isBlacklistedName((tx.client&&tx.client.fullName)||"")&&<span style={c.badge(T.red)}>⛔ BL</span>}
-                          {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
-                        </div>
-                        <div style={{fontSize:12,color:T.white,fontWeight:500}}>{(tx.client&&tx.client.fullName)||"—"}</div>
-                        <div style={{fontSize:11,color:T.muted,marginTop:2}}>{fmtDate(tx.date)}{tx.client&&tx.client.dob?" · DOB: "+tx.client.dob:""}</div>
-                        {tx.clientNote&&<div style={{fontSize:11,color:T.gold,marginTop:2,fontStyle:"italic"}}>📝 {tx.clientNote}</div>}
+              <input style={c.inp({marginBottom:12})} type="text" placeholder="Search by name, ID, phone…" value={cliSearch} onChange={e=>setCliSearch(e.target.value)}/>
+              {(txList||[]).filter(tx=>{if(!cliSearch)return true;const q=cliSearch.toLowerCase();return(sS(tx.client&&tx.client.fullName)+sS(tx.client&&tx.client.idNumber)+sS(tx.client&&tx.client.phone)).toLowerCase().includes(q);}).map(tx=>(
+                <div key={tx.id} style={{...c.card({padding:14}),marginBottom:8,borderLeft:"3px solid "+(tx.smrFlagged?T.orange:tx.ttrRequired?T.red:T.border)}}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{sS(tx.client&&tx.client.fullName||"—")}</span>
+                        {tx.hasPhotos&&<span style={c.badge(T.green,T.greenBg)}>📷</span>}
+                        {isBlacklistedName(tx.client&&tx.client.fullName)&&<span style={c.badge(T.red)}>⛔ BLACKLISTED</span>}
+                        {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+                        {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR</span>}
                       </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                        <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>dlTx(tx)}>⬇</button>
-                        <button style={c.bsm(T.border,T.muted)} onClick={()=>{setCliNoteId(tx.id);setCliNoteVal(tx.clientNote||"");}}>📝</button>
-                        <button style={{...c.bsm(isBlacklistedName((tx.client&&tx.client.fullName)||"")?T.redBg:T.border,isBlacklistedName((tx.client&&tx.client.fullName)||"")?T.red:T.muted),fontSize:10,whiteSpace:"nowrap"}}
-                          onClick={()=>{const nm=(tx.client&&tx.client.fullName)||"";const bl=blacklist.some(b=>b.name.toLowerCase()===nm.toLowerCase());if(bl)setBlacklist(p=>p.filter(b=>b.name.toLowerCase()!==nm.toLowerCase()));else if(nm)setBlacklist(p=>[...p,{name:nm,addedAt:nowISO()}]);pop(bl?"Removed from blacklist.":"Added to blacklist.","ok");}}>
-                          {isBlacklistedName((tx.client&&tx.client.fullName)||"")?"⛔ Unban":"⛔ Ban"}
-                        </button>
-                      </div>
+                      <div style={{fontSize:12,color:T.white}}>{fmtAUD(tx.buyTotal)} buy · {fmtAUD(tx.sellTotal)} sell</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:2}}>{fmtDate(tx.date)} · {sS(tx.payment).toUpperCase()}</div>
+                      {tx.clientNote&&<div style={{fontSize:11,color:T.gold,marginTop:4,fontStyle:"italic"}}>{tx.clientNote}</div>}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>dlTx(tx)}>⬇</button>
+                      <button style={c.bsm(T.border,T.muted)} onClick={()=>{setCliNoteId(tx.id);setCliNoteVal(sS(tx.clientNote));}}>📝</button>
+                      <button style={c.bsm(isBlacklistedName(sS(tx.client&&tx.client.fullName))?T.redBg:T.border,isBlacklistedName(sS(tx.client&&tx.client.fullName))?T.red:T.muted)} onClick={()=>{const nm=sS(tx.client&&tx.client.fullName);if(!nm)return;if(isBlacklistedName(nm))setBlacklist(p=>p.filter(b=>b.name.toLowerCase()!==nm.toLowerCase()));else{setBlacklist(p=>[...p,{name:nm,addedAt:nowISO()}]);pop(nm+" added to blacklist.","warn");}}}>⛔</button>
                     </div>
                   </div>
-                ))
-              }
-              <button style={{...c.bsm(T.border,T.muted),marginTop:10,fontSize:11}} onClick={()=>{
-                const rows=[["Invoice","Date","Client","DOB","Buy","Sell","Net","Payment","TTR","SMR","KYC"]];
-                txList.forEach(t=>{rows.push([t.id,t.date&&t.date.slice(0,10),(t.client&&t.client.fullName)||"",(t.client&&t.client.dob)||"",t.buyTotal||0,t.sellTotal||0,t.net||0,(t.payment||"").toUpperCase(),t.ttrStatus||"",t.smrFlagged?"YES":"",t.kycDone?"YES":""])});
-                const DQ2=String.fromCharCode(34);const csvEsc=v=>{const s=String(v==null?"":v);return DQ2+s.split(DQ2).join(DQ2+DQ2)+DQ2;};
-                const csv=rows.map(r=>r.map(csvEsc).join(",")).join("\n");
-                dlFile(csv,"lootledgr-export-"+nowISO().slice(0,10)+".csv","text/csv");
-                pop("CSV exported.","ok");
-              }}>⬇ Export All as CSV</button>
+                </div>
+              ))}
+              <button style={{...c.bsm(T.border,T.muted),marginTop:10,fontSize:11,width:"100%"}} onClick={()=>{const rows=[["Invoice","Date","Client","DOB","Buy","Sell","Net","Payment","KYC","TTR","SMR"]];(txList||[]).forEach(t=>rows.push([sS(t.id),sS(t.date&&t.date.slice(0,10)),sS(t.client&&t.client.fullName),sS(t.client&&t.client.dob),sS(t.buyTotal),sS(t.sellTotal),sS(t.net),sS(t.payment),t.kycDone?"YES":"",t.ttrRequired?"YES":"",t.smrFlagged?"YES":""]));const Q='"';const esc=v=>Q+sS(v).replace(/"/g,Q+Q)+Q;dlFile(rows.map(r=>r.map(esc).join(",")).join("\n"),"lootledgr-export-"+todayStr()+".csv","text/csv");pop("CSV exported.","ok");}}>⬇ Export All as CSV</button>
             </div>
           )}
 
-          {/* ═══ HISTORY ═══ */}
           {screen==="history"&&(
             <div>
-              <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:10,display:"flex",alignItems:"center"}}>Transaction History<AIGhost settings={settings} label="History"/></div>
+              <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:14}}>Transaction History</div>
               <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-                {[["all","All ("+txList.length+")"],["smr","🚩 SMR ("+txList.filter(t=>t.smrFlagged).length+")"],["ttr","🔴 TTR Pending ("+txList.filter(t=>t.ttrStatus==="PENDING").length+")"]].map(([k,lbl])=>(
-                  <button key={k} style={{...c.bsm(histFilter===k?T.gold:T.border,histFilter===k?T.bg:T.muted),fontSize:11}} onClick={()=>setHistFilter(k)}>{lbl}</button>
-                ))}
+                {[["all","All ("+((txList||[]).length)+")"],["smr","🚩 SMR ("+((txList||[]).filter(t=>t.smrFlagged).length)+")"],["ttr","🔴 TTR ("+((txList||[]).filter(t=>t.ttrStatus==="PENDING").length)+")"]].map(([k,l])=><button key={k} style={c.bsm(histFilter===k?T.gold:T.border,histFilter===k?T.bg:T.text)} onClick={()=>setHistFilter(k)}>{l}</button>)}
               </div>
-              {txList.length===0
-                ?<div style={{color:T.muted,padding:40,textAlign:"center"}}>No transactions recorded yet.</div>
-                :txList.filter(tx=>histFilter==="smr"?tx.smrFlagged:histFilter==="ttr"?tx.ttrStatus==="PENDING":true).map(tx=>(
-                  <div key={tx.id} style={{...c.card({padding:14}),marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
-                          <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{tx.id}</span>
-                          <span style={{fontSize:11,color:T.muted}}>{fmtDate(tx.date)}</span>
-                          {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" ✓":""}</span>}
-                          {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
-                          {tx.items&&tx.items.some(i=>i.suspicious)&&<span style={c.badge(T.orange)}>🚩</span>}
-                          {tx.items&&tx.items.some(i=>i.policeHold)&&<span style={c.badge(T.red)}>🚔</span>}
-                        </div>
-                        <div style={{fontSize:13,color:T.white,fontWeight:500,marginBottom:3}}>{(tx.client&&tx.client.fullName)||"—"}</div>
-                        <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:12}}>
-                          {tx.buyTotal>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(tx.buyTotal)}</strong></span>}
-                          {tx.sellTotal>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(tx.sellTotal)}</strong></span>}
-                          <span>Net: <strong style={{color:tx.net>=0?T.gold:T.green}}>{fmtAUD(Math.abs(tx.net||0))}</strong></span>
-                          <span style={{color:T.muted,textTransform:"uppercase"}}>{tx.payment}</span>
-                        </div>
+              {(txList||[]).filter(tx=>histFilter==="smr"?tx.smrFlagged:histFilter==="ttr"?tx.ttrStatus==="PENDING":true).map(tx=>(
+                <div key={tx.id} style={c.card({padding:14,marginBottom:8})}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:4,alignItems:"center"}}>
+                        <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{sS(tx.id)}</span>
+                        <span style={{fontSize:11,color:T.muted}}>{fmtDate(tx.date)}</span>
+                        {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" FILED":" PENDING"}</span>}
+                        {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+                        {tx.voided&&<span style={c.badge(T.muted)}>VOIDED</span>}
                       </div>
-                      <div style={{display:"flex",gap:4}}>
-                        <button style={c.bsm()} onClick={()=>setSelTx(tx)}>View</button>
-                        <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setReceiptTx(tx)}>🧾</button>
-                        {!tx.voided&&<button style={c.bsm(T.redBg,T.red)} onClick={()=>setPinModal({reason:"Void transaction "+tx.id+"? This cannot be undone.",cb:()=>{setTxList(p=>p.map(x=>x.id===tx.id?{...x,voided:true,voidedAt:nowISO()}:x));pop("Transaction "+tx.id+" voided.","ok");}})}>✕ Void</button>}
-                        {tx.voided&&<span style={{...c.badge(T.red),fontSize:9}}>VOIDED</span>}
+                      <div style={{fontSize:13,color:T.white,fontWeight:500,marginBottom:3}}>{sS(tx.client&&tx.client.fullName||"—")}</div>
+                      <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:12,color:T.muted}}>
+                        {tx.buyTotal>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(tx.buyTotal)}</strong></span>}
+                        {tx.sellTotal>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(tx.sellTotal)}</strong></span>}
+                        <span>Net: <strong style={{color:sN(tx.net)>=0?T.gold:T.green}}>{fmtAUD(Math.abs(tx.net||0))}</strong></span>
                       </div>
                     </div>
+                    <div style={{display:"flex",gap:4,flexDirection:"column"}}>
+                      <button style={c.bsm()} onClick={()=>setSelTx(tx)}>View</button>
+                      <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setReceiptTx(tx)}>🧾</button>
+                      {!tx.voided&&<button style={c.bsm(T.redBg,T.red)} onClick={()=>setTxList(p=>p.map(x=>x.id===tx.id?{...x,voided:true,voidedAt:nowISO()}:x))}>Void</button>}
+                    </div>
                   </div>
-                ))
-              }
+                </div>
+              ))}
             </div>
           )}
 
-          {/* ═══ PRICE SHEET ═══ */}
           {screen==="prices"&&(
             <div>
-              <div style={{...c.row(0),justifyContent:"space-between",marginBottom:12}}>
-                <div style={{fontSize:17,fontWeight:"bold",color:T.white,display:"flex",alignItems:"center"}}>Live Price Sheet<AIGhost settings={settings} label="Prices"/></div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{fontSize:17,fontWeight:"bold",color:T.white}}>Price Sheet<AIGhost settings={settings} label="Prices"/></div>
                 <button style={c.btn(T.border,T.text,{padding:"8px 14px",fontSize:11})} onClick={()=>setShowCat(true)}>✎ Edit Catalog</button>
               </div>
-
-              {/* Manual spot override */}
-              <div style={{...c.card({padding:12}),marginBottom:14}}>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,letterSpacing:"0.06em"}}>⬡ Spot Prices (AUD/oz)</div>
+              <div style={c.card({padding:12,marginBottom:14})}>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>Manual Spot Override (60 min TTL)</div>
                 <div style={{display:"flex",gap:10}}>
-                  <div style={{flex:1}}>
-                    <label style={c.lbl}>Gold</label>
-                    <input style={c.inp()} type="number" placeholder="e.g. 4800" value={gSpot||""} onChange={e=>setGSpotManual(parseFloat(e.target.value)||0)}/>
-                  </div>
-                  <div style={{flex:1}}>
-                    <label style={c.lbl}>Silver</label>
-                    <input style={c.inp()} type="number" placeholder="e.g. 48" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/>
-                  </div>
+                  <div style={{flex:1}}><label style={c.lbl}>Gold (AUD/oz)</label><input style={c.inp()} type="number" value={gSpot||""} onChange={e=>setGSpotManual(parseFloat(e.target.value)||0)}/></div>
+                  <div style={{flex:1}}><label style={c.lbl}>Silver (AUD/oz)</label><input style={c.inp()} type="number" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/></div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                  <span style={{fontSize:10,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange,flex:1}}>
-                    {spotStatus==="live"
-                      ?"🟢 Live — "+spotSource
-                      :spotStatus==="manual"
-                        ?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — resumes in "+mins+" min";})()
-                      :"🟠 No API feed — price held"}
-                  </span>
-                  <button
-                    style={c.btn(spotStatus==="manual"?T.gold:T.border, spotStatus==="manual"?T.bg:T.muted, {fontSize:11,padding:"7px 16px"})}
-                    onClick={forceResumeAPI}>
-                    ↺ {spotStatus==="manual"?"Resume API Now":"Refresh Prices"}
-                  </button>
+                  <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
+                  <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
                 </div>
               </div>
-              {(catalog||[]).filter(p=>p.active).length===0
-                ?<div style={{...c.card({padding:40}),textAlign:"center"}}>
-                  <div style={{fontSize:18,marginBottom:12}}>📂</div>
-                  <div style={{color:T.white,fontWeight:"bold",marginBottom:8}}>No products in catalog yet</div>
-                  <div style={{color:T.muted,fontSize:12,marginBottom:20}}>Click Edit Catalog to add your first product.</div>
-                  <button style={c.btn(T.gold,T.bg,{fontSize:12})} onClick={()=>setShowCat(true)}>+ Add First Product</button>
-                </div>
-                :<div>
-                  {["Gold","Silver","Other"].map(cat=>(
-                    (catalog||[]).filter(p=>p.cat===cat&&p.active).length===0 ? null :
-                    <div key={cat} style={{marginBottom:14}}>
-                      <div style={c.shead(cat==="Gold")}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
-                      {(catalog||[]).filter(p=>p.cat===cat&&p.active).map(p=>(
-                        <div key={p.id} style={{...c.card({padding:12}),marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:"bold",color:T.white,fontSize:13}}>{p.label}</div>
-                            <div style={{fontSize:11,color:T.muted,marginTop:2}}>
-                              <span style={c.badge(p.type==="bullion"?T.gold:T.muted)}>{p.type}</span>
-                              <span style={{marginLeft:6}}>{p.unit}{p.carat?" · "+p.carat+"ct":p.purity?" · "+(p.purity*100).toFixed(0)+"%":""}</span>
-                            </div>
-                          </div>
-                          <div style={{textAlign:"right",flexShrink:0}}>
-                            <div style={{fontSize:13,fontWeight:"bold",color:T.green}}>{calcUnitPrice(p,gSpot,sSpot,"buy")?fmtAUD(calcUnitPrice(p,gSpot,sSpot,"buy")):"custom"}<span style={{fontSize:10,color:T.muted,fontWeight:"normal"}}> buy</span></div>
-                            <div style={{fontSize:13,fontWeight:"bold",color:T.gold}}>{calcUnitPrice(p,gSpot,sSpot,"sell")?fmtAUD(calcUnitPrice(p,gSpot,sSpot,"sell")):"custom"}<span style={{fontSize:10,color:T.muted,fontWeight:"normal"}}> sell</span></div>
-                          </div>
-                        </div>
-                      ))}
+              {(catalog||[]).filter(p=>p.active).length===0 ?
+                <div style={{...c.card({padding:40}),textAlign:"center"}}><div style={{fontSize:18,marginBottom:12}}>📂</div><div style={{color:T.white,fontWeight:"bold",marginBottom:8}}>No products in catalog</div><button style={c.btn(T.gold,T.bg,{fontSize:12})} onClick={()=>setShowCat(true)}>+ Add First Product</button></div>
+                :["Gold","Silver","Other"].map(cat=>{const prods=(catalog||[]).filter(p=>p.cat===cat&&p.active);if(!prods.length)return null;return <div key={cat} style={{marginBottom:14}}>
+                  <div style={c.shead(cat==="Gold")}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
+                  {prods.map(p=><div key={p.id} style={{...c.card({padding:12}),marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:"bold",color:T.white,fontSize:13}}>{p.label}</div>
+                      <div style={{fontSize:11,color:T.muted,marginTop:2}}><span style={c.badge(p.type==="bullion"?T.gold:T.muted)}>{p.type}</span><span style={{marginLeft:6}}>{p.unit}{p.carat?" · "+p.carat+"ct":p.purity?" · "+(p.purity*100).toFixed(0)+"%":""}</span></div>
                     </div>
-                  ))}
-                </div>
-              }
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:13,fontWeight:"bold",color:T.green}}>Buy: {fmtAUD(calcUnitPrice(p,gSpot,sSpot,"buy"))}/{p.unit}</div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:T.gold}}>Sell: {fmtAUD(calcUnitPrice(p,gSpot,sSpot,"sell"))}/{p.unit}</div>
+                    </div>
+                  </div>)}
+                </div>;})}
             </div>
           )}
+        </div>
 
-      </div>{/* end main content */}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.surface,borderTop:"1px solid "+T.border,display:"flex",zIndex:200}}>
+          {NAV.map(n=><button key={n.id} onClick={()=>{if(n.id==="newTx")resetTx();setScreen(n.id);}} style={{flex:1,background:"transparent",border:"none",color:screen===n.id?T.gold:T.muted,fontFamily:T.ff,fontSize:9,cursor:"pointer",padding:"7px 4px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,letterSpacing:"0.06em",textTransform:"uppercase"}}><span style={{fontSize:18}}>{n.icon}</span>{n.label}</button>)}
+        </div>
 
-      {/* BOTTOM NAV */}
-      <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.surface,
-        borderTop:"1px solid "+T.border,display:"flex",zIndex:200}}>
-        {NAV.map(n=>(
-          <button key={n.id} onClick={()=>{if(n.id==="newTx")resetTx();setScreen(n.id);}}
-            style={{flex:1,background:"transparent",border:"none",
-              color:screen===n.id?T.gold:T.muted,fontFamily:T.ff,fontSize:9,
-              cursor:"pointer",padding:"7px 4px",display:"flex",flexDirection:"column",
-              alignItems:"center",gap:2,letterSpacing:"0.06em",textTransform:"uppercase"}}>
-            <span style={{fontSize:18}}>{n.icon}</span>{n.label}
-          </button>
-        ))}
-      </div>
 
-      {/* ── MODALS ── */}
-
-      {/* SMR Flag */}
-      {showFlag&&(
-        <Modal title="🚩 Internal SMR Flag — CONFIDENTIAL" onClose={()=>setShowFlag(false)}>
-          <div style={c.bnr("block")}>⚠️ TIPPING OFF IS A CRIMINAL OFFENCE. Do not tell the customer. Never record on any customer-facing document.</div>
-          <div style={{fontSize:12,color:T.text,lineHeight:1.7,marginBottom:14}}>This flag is visible ONLY to the AML/CTF Compliance Officer. Record your observations below.</div>
-          <F label="What did you observe? Why does this seem suspicious?" value={flagNote} onChange={setFlagNote} as="textarea"/>
-          <div style={c.row(10)}>
-            <button style={c.btn(T.red,T.white)} onClick={()=>{
-              setStaff(p=>({...p,smrNote:flagNote,smrFlagged:true}));
-              setShowFlag(false);pop("SMR flag recorded internally.","warn");
-            }}>Submit Internal Flag</button>
+        {showFlag&&<Modal title="🚩 Internal SMR Flag — CONFIDENTIAL" onClose={()=>setShowFlag(false)}>
+          <div style={c.bnr("block")}>⚠️ TIPPING OFF IS A CRIMINAL OFFENCE. Do NOT inform the customer.</div>
+          <div style={{fontSize:12,lineHeight:1.7,marginBottom:14}}>Document what raised your suspicion. For internal records and AUSTRAC only.</div>
+          <F label="What did you observe?" value={flagNote} onChange={setFlagNote} as="textarea"/>
+          <div style={{display:"flex",gap:10}}>
+            <button style={c.btn(T.red,T.white)} onClick={()=>{setStaff(p=>({...p,smrNote:flagNote,smrFlagged:true}));setShowFlag(false);pop("SMR flag recorded internally.","warn");}}>Submit Internal Flag</button>
             <button style={c.bsm()} onClick={()=>setShowFlag(false)}>Cancel</button>
           </div>
-        </Modal>
-      )}
+        </Modal>}
 
-      {/* Manager PIN */}
-      {pinModal&&(
-        <div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-          onClick={()=>setPinModal(null)}>
+        {pinModal&&<div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPinModal(null)}>
           <div style={{...c.card({padding:24}),maxWidth:460,width:"100%"}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:15,fontWeight:"bold",color:T.white,marginBottom:16}}>🔒 Manager Authorisation</div>
+            <div style={{fontSize:15,fontWeight:"bold",color:T.white,marginBottom:16}}>🔐 Manager Authorisation Required</div>
             <div style={{...c.bnr("warn"),marginBottom:16}}>{pinModal.reason}</div>
-            <F label="Manager PIN" type="password" value={pinVal} onChange={setPinVal} placeholder="Enter PIN…"/>
-            <div style={c.row(10)}>
+            <F label="Manager PIN" type="password" value={pinVal} onChange={setPinVal}/>
+            <div style={{display:"flex",gap:10}}>
               <button style={c.btn(T.gold,T.bg)} onClick={submitPin}>Authorise</button>
-              <button style={c.bsm(T.border,T.text)} onClick={()=>{setPinModal(null);setPinVal("");}}>Cancel</button>
+              <button style={c.bsm()} onClick={()=>{setPinModal(null);setPinVal("");}}>Cancel</button>
             </div>
           </div>
-        </div>
-      )}
+        </div>}
 
-      {/* TX Detail */}
-      {selTx&&(
-        <Modal title={"Transaction — "+selTx.id} onClose={()=>setSelTx(null)} wide>
+        {selTx&&<Modal title={"Transaction — "+selTx.id} onClose={()=>setSelTx(null)} wide>
           <div style={c.g2(14)}>
-            {[
-              {l:"Date",v:fmtDate(selTx.date)},
-              {l:"Client",v:selTx.client&&selTx.client.fullName,col:T.white},
-              {l:"ID Type / Number",v:selTx.client&&selTx.client.idType||"?"+" / "+selTx.client&&selTx.client.idNumber||"?",col:T.muted},
-              {l:"Buy Total",v:fmtAUD(selTx.buyTotal),col:T.green},
-              {l:"Sell Total",v:fmtAUD(selTx.sellTotal),col:T.gold},
-              {l:"Net",v:fmtAUD(Math.abs(selTx.net||0))+" "+(selTx.net||0)>=0?"(client pays)":"(we pay)",bold:true},
-              {l:"Payment",v:(selTx.payment||"").toUpperCase()},
-              {l:"KYC",v:selTx.kycDone?"COMPLETED":"N/A",col:selTx.kycDone?T.green:T.muted},
-              {l:"TTR",v:selTx.ttrStatus||"N/A",col:selTx.ttrRequired?T.red:T.muted},
-              {l:"Auto-Delete After",v:fmtDate(selTx.deleteAfter),col:T.muted},
-            ].map(row=>(
-              <div key={row.l}><div style={c.lbl}>{row.l}</div><div style={{color:row.col||T.text,fontWeight:row.bold?"bold":"normal"}}>{row.v}</div></div>
-            ))}
+            {[{l:"Date",v:fmtDate(selTx.date)},{l:"Client",v:selTx.client&&selTx.client.fullName,col:T.white},{l:"Buy Total",v:fmtAUD(selTx.buyTotal),col:T.green},{l:"Sell Total",v:fmtAUD(selTx.sellTotal),col:T.gold},{l:"Net",v:fmtAUD(Math.abs(selTx.net||0))+" "+(sN(selTx.net)>=0?"(client pays)":"(we pay)")},{l:"Payment",v:sS(selTx.payment).toUpperCase()},{l:"KYC",v:selTx.kycDone?"COMPLETED":"N/A",col:selTx.kycDone?T.green:T.muted},{l:"TTR",v:sS(selTx.ttrStatus||"N/A"),col:selTx.ttrRequired?T.red:T.muted},{l:"Delete After",v:fmtDate(selTx.deleteAfter),col:T.muted}].map(row=><div key={row.l}><div style={c.lbl}>{row.l}</div><div style={{color:row.col||T.text}}>{sS(row.v)}</div></div>)}
           </div>
-          <div style={{marginTop:12,fontSize:11,color:T.muted}}>
-            Items: {(selTx.items||[]).map(i=>(i.product&&i.product.label)+" ("+i.mode+")").join(", ")}
-          </div>
-
-          {/* ── PHOTO MANAGEMENT ── */}
-          <div style={{marginTop:16,borderTop:"1px solid "+T.border,paddingTop:14}}>
+          <div style={{marginTop:12,fontSize:11,color:T.muted}}>Items: {(selTx.items||[]).map(i=>sS(i.product&&i.product.label)+" ("+i.mode.toUpperCase()+")").join(", ")}</div>
+          <div style={{marginTop:16,borderTop:"1px solid "+T.border,paddingTop:16}}>
             <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>Photos</div>
-            <TxPhotoManager selTx={selTx} store={store} setTxList={setTxList} setSelTx={setSelTx} T={T} c={c}/>
+            <TxPhotoManager selTx={selTx} store={store} setTxList={setTxList} setSelTx={setSelTx}/>
           </div>
+          {selTx.ttrRequired&&selTx.ttrStatus!=="FILED"&&<button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{setTxList(p=>p.map(t=>t.id===selTx.id?{...t,ttrStatus:"FILED"}:t));setSelTx(p=>({...p,ttrStatus:"FILED"}));pop("TTR marked as filed.","ok");}}>✓ Mark TTR Filed</button>}
+        </Modal>}
 
-          {selTx.ttrRequired&&selTx.ttrStatus!=="FILED"&&(
-            <button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{
-              setTxList(p=>p.map(t=>t.id===selTx.id?{...t,ttrStatus:"FILED"}:t));
-              setSelTx(p=>({...p,ttrStatus:"FILED"}));
-              pop("TTR marked as filed.","ok");
-            }}>✓ Mark TTR Filed</button>
-          )}
-        </Modal>
-      )}
+        {receiptTx&&<Modal title="🧾 Receipt" onClose={()=>setReceiptTx(null)}>
+          <pre style={{fontSize:11,fontFamily:"monospace",background:T.surface,padding:16,borderRadius:6,whiteSpace:"pre-wrap",color:T.text,marginBottom:14}}>{makeReceipt(receiptTx)}</pre>
+          <div style={{display:"flex",gap:10}}>
+            <button style={c.btn(T.gold,T.bg)} onClick={()=>dlFile(makeReceipt(receiptTx),"receipt-"+receiptTx.id+".txt","text/plain")}>⬇ Download</button>
+            <button style={c.bsm()} onClick={()=>setReceiptTx(null)}>Close</button>
+          </div>
+        </Modal>}
 
-      {/* Catalog Editor */}
-      {showCat&&(
-        <Modal title="Product Catalog Editor" onClose={()=>setShowCat(false)} wide>
+        {showCat&&<Modal title="Product Catalog Editor" onClose={()=>setShowCat(false)} wide>
           <div style={{marginBottom:18}}>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:12}}>{editProd?"Editing: "+editProd.label:"Add New Product"}</div>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:12}}>{editProd?"Edit Product":"Add New Product"}</div>
             <div style={c.g2(10)}>
               <F label="Product Label" required value={newProd.label} onChange={v=>setNewProd(p=>({...p,label:v}))}/>
               <SF label="Category" value={newProd.cat} onChange={v=>setNewProd(p=>({...p,cat:v}))} options={["Gold","Silver","Other"].map(x=>({value:x,label:x}))}/>
-              <F label="Sub-Category" value={newProd.sub} onChange={v=>setNewProd(p=>({...p,sub:v}))}/>
-              <SF label="Compliance Type" value={newProd.type} onChange={v=>setNewProd(p=>({...p,type:v}))} options={[{value:"bullion",label:"Bullion ($5k CDD)"},{value:"scrap",label:"Scrap/Jewellery ($10k CDD)"}]}/>
+              <SF label="Compliance Type" value={newProd.type} onChange={v=>setNewProd(p=>({...p,type:v}))} options={[{value:"bullion",label:"Bullion ($5k CDD)"},{value:"scrap",label:"Scrap / Jewellery ($10k)"},{value:"other",label:"Other"}]}/>
               <SF label="Unit" value={newProd.unit} onChange={v=>setNewProd(p=>({...p,unit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"oz",label:"Troy oz"},{value:"pc",label:"Piece (pc)"}]}/>
-              <F label="Purity (0–1)" value={newProd.purity} onChange={v=>setNewProd(p=>({...p,purity:v}))} placeholder="e.g. 0.999"/>
+              <F label="Purity (0–1, e.g. 0.999)" value={newProd.purity} onChange={v=>setNewProd(p=>({...p,purity:v}))} placeholder="e.g. 0.999"/>
               <F label="Carat (scrap gold only)" value={newProd.carat} onChange={v=>setNewProd(p=>({...p,carat:v}))} placeholder="e.g. 18"/>
-              <F label="Fixed Weight g (for coins)" value={newProd.weightG} onChange={v=>setNewProd(p=>({...p,weightG:v}))} placeholder="e.g. 7.98"/>
-              <F label="Buy Multiplier" value={newProd.buyMult} onChange={v=>setNewProd(p=>({...p,buyMult:v}))} placeholder="e.g. 0.90 = 90% of spot"/>
-              <F label="Sell Multiplier" value={newProd.sellMult} onChange={v=>setNewProd(p=>({...p,sellMult:v}))} placeholder="e.g. 1.35 = 135% of spot"/>
+              <F label="Fixed Weight g (for coins)" value={newProd.weightG} onChange={v=>setNewProd(p=>({...p,weightG:v}))} placeholder="e.g. 31.1"/>
+              <F label="Buy Multiplier" value={newProd.buyMult} onChange={v=>setNewProd(p=>({...p,buyMult:v}))} placeholder="e.g. 0.95"/>
+              <F label="Sell Multiplier" value={newProd.sellMult} onChange={v=>setNewProd(p=>({...p,sellMult:v}))} placeholder="e.g. 1.35"/>
             </div>
-            <div style={c.row(10)}>
+            <div style={{display:"flex",gap:10}}>
               <button style={c.btn(T.gold)} onClick={saveProd}>Save</button>
-              {editProd&&<button style={c.bsm()} onClick={e=>{e.stopPropagation();setEditProd(null);setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});}}>Cancel</button>}
+              {editProd&&<button style={c.bsm()} onClick={()=>{setEditProd(null);setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});}}>Cancel Edit</button>}
             </div>
           </div>
           <div style={{borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>All Products ({catalog.length})</div>
-            {catalog.length===0
-              ?<div style={{color:T.muted,fontSize:12,padding:16,textAlign:"center"}}>No products yet. Add one above.</div>
-              :(catalog||[]).map(p=>(
-                <div key={p.id} style={{background:T.surface,border:"1px solid "+T.border,borderRadius:8,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:2}}>{p.label}</div>
-                    <div style={{fontSize:11,color:T.muted}}>{p.cat} · {p.type} · {p.unit}{p.carat?" · "+p.carat+"ct":p.purity?" · "+(p.purity*100).toFixed(0)+"%":""}</div>
-                    <div style={{fontSize:11,color:T.muted,marginTop:1}}>Buy: {p.buyMult!=null?p.buyMult+"×":"custom"} · Sell: {p.sellMult!=null?p.sellMult+"×":"custom"}</div>
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-                    <button style={{...c.bsm(),padding:"8px 16px",fontSize:12,minWidth:60}} onClick={()=>{setEditProd(p);setNewProd({...p,purity:p.purity!=null?String(p.purity):"",carat:p.carat!=null?String(p.carat):"",buyMult:p.buyMult!=null?String(p.buyMult):"",sellMult:p.sellMult!=null?String(p.sellMult):"",weightG:p.weightG!=null?String(p.weightG):""});}}>✎ Edit</button>
-                    <button style={{...c.bsm(T.redBg,T.red),padding:"8px 16px",fontSize:12,minWidth:60}} onClick={()=>deleteProd(p.id,p.label)}>🗑 Delete</button>
-                  </div>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>All Products ({(catalog||[]).length})</div>
+            {(catalog||[]).length===0?<div style={{color:T.muted,padding:16,textAlign:"center"}}>No products yet. Add one above.</div>
+              :(catalog||[]).map(p=><div key={p.id} style={{background:T.surface,border:"1px solid "+T.border,borderRadius:8,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:"bold",color:T.white,fontSize:13}}>{p.label}</div>
+                  <div style={{fontSize:11,color:T.muted}}>{p.cat} · {p.type} · {p.unit}{p.carat?" · "+p.carat+"ct":p.purity?" · "+(sN(p.purity)*100).toFixed(0)+"%":""}</div>
+                  <div style={{fontSize:11,color:T.muted}}>Buy: {p.buyMult!=null?p.buyMult+"×":"custom"} · Sell: {p.sellMult!=null?p.sellMult+"×":"custom"}</div>
                 </div>
-              ))
-            }
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <button style={c.bsm()} onClick={()=>{setEditProd(p);setNewProd({...p,purity:p.purity!=null?String(p.purity):"",carat:p.carat!=null?String(p.carat):"",buyMult:p.buyMult!=null?String(p.buyMult):"",sellMult:p.sellMult!=null?String(p.sellMult):"",weightG:p.weightG!=null?String(p.weightG):""})}}>✎ Edit</button>
+                  <button style={c.bsm(T.redBg,T.red)} onClick={()=>deleteProd(p.id,p.label)}>🗑</button>
+                </div>
+              </div>)}
           </div>
-        </Modal>
-      )}
+        </Modal>}
 
-      {/* Settings */}
-      {showSet&&(
-        <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
-          {/* ── ACCORDION SECTIONS ── */}
-
-          {/* 1. SPOT FEED & PRICES */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("spotfeed")}>
-              <span>📡 Spot Feed — API Keys</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.spotfeed?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.spotfeed&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices screen beats all for 60 min.</div>
-                <div style={c.g2(10)}>
-                  <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxxxxxxxxxx"/>
-                  <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
-                  <F label="3. Metals.Dev key (fallback)" value={settings.metalsDevKey||""} onChange={v=>setSettings(p=>({...p,metalsDevKey:v}))} placeholder="from metals.dev"/>
-                </div>
-                <div style={{display:"flex",gap:10,marginTop:10}}>
-                  <div style={{flex:1}}>
-                    <label style={c.lbl}>Gold alert when ≥ (AUD/oz)</label>
-                    <input style={c.inp()} type="number" placeholder="e.g. 5000" value={settings.goldAlert||""} onChange={e=>setSettings(p=>({...p,goldAlert:e.target.value||null}))}/>
-                  </div>
-                  <div style={{flex:1}}>
-                    <label style={c.lbl}>Silver alert when ≥ (AUD/oz)</label>
-                    <input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/>
-                  </div>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface,flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>
-                    {spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const mins=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual override — "+mins+" min remaining";})():"🟠 No API feed — price held"}
-                  </span>
-                  <button
-                    style={c.btn(spotStatus==="manual"?T.gold:T.border, spotStatus==="manual"?T.bg:T.muted, {fontSize:11,padding:"7px 16px"})}
-                    onClick={forceResumeAPI}>
-                    ↺ {spotStatus==="manual"?"Resume API Now":"Refresh Prices"}
-                  </button>
-                </div>
+        {showSet&&<Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
+          {[
+            ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
+              <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices tab is valid for 60 min.</div>
+              <div style={c.g2(10)}>
+                <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxx"/>
+                <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
+                <F label="3. Metals.Dev key (fallback)" value={settings.metalsDevKey||""} onChange={v=>setSettings(p=>({...p,metalsDevKey:v}))} placeholder="from metals.dev"/>
               </div>
-            )}
-          </div>
-
-          {/* 2. BUSINESS */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("business")}>
-              <span>🏪 Business Details</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.business?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.business&&(
-              <div style={{paddingBottom:14}}>
-                <div style={c.g2(10)}>
-                  <F label="Business Name" value={settings.businessName} onChange={v=>setSettings(p=>({...p,businessName:v}))}/>
-                  <F label="ABN" value={settings.abn} onChange={v=>setSettings(p=>({...p,abn:v}))}/>
-                  <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
-                  <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
-                  <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
-                  <F label="Secondhand Dealer Licence No" value={settings.dealerLicenceNo||""} onChange={v=>setSettings(p=>({...p,dealerLicenceNo:v}))} placeholder="e.g. SHD1234"/>
-                  <F label="Local Police Station Name" value={settings.policeStation||""} onChange={v=>setSettings(p=>({...p,policeStation:v}))} placeholder="e.g. Ballarat Police Station"/>
-                  <F label="Police Station Email (for reports)" value={settings.policeEmail||""} onChange={v=>setSettings(p=>({...p,policeEmail:v}))} placeholder="ballaratcid@police.vic.gov.au"/>
-
-                </div>
+              <div style={{display:"flex",gap:10,marginTop:10}}>
+                <div style={{flex:1}}><label style={c.lbl}>Gold alert ≥ (AUD/oz)</label><input style={c.inp()} type="number" placeholder="e.g. 5000" value={settings.goldAlert||""} onChange={e=>setSettings(p=>({...p,goldAlert:e.target.value||null}))}/></div>
+                <div style={{flex:1}}><label style={c.lbl}>Silver alert ≥ (AUD/oz)</label><input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/></div>
               </div>
-            )}
-          </div>
-
-          {/* 3. APPEARANCE */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("appearance")}>
-              <span>🎨 Appearance</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.appearance?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.appearance&&(
-              <div style={{paddingBottom:14}}>
-
-                <div style={{marginBottom:16}}>
-                  <label style={c.lbl}>Contrast</label>
-                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Softer ←→ Stronger</div>
-                  <input type="range" min={-5} max={5} step={1} value={contrast}
-                    onChange={e=>setContrast(Number(e.target.value))}
-                    style={{width:"100%",accentColor:T.gold}}/>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
-                    <span>Soft</span><span style={{color:T.gold,fontWeight:"bold"}}>{contrast===0?"Default":contrast>0?"+"+contrast:contrast}</span><span>Strong</span>
-                  </div>
-                </div>
-                <div style={{marginBottom:16}}>
-                  <label style={c.lbl}>Font Size</label>
-                  <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Small ←→ Large</div>
-                  <input type="range" min={12} max={36} step={1} value={fontSize}
-                    onChange={e=>setFontSize(Number(e.target.value))}
-                    style={{width:"100%",accentColor:T.gold}}/>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.muted,marginTop:4}}>
-                    <span>Small</span>
-                    <span style={{color:T.gold,fontWeight:"bold"}}>{fontSize}px · {fontSize<=14?"Regular":fontSize<=18?"Medium":fontSize<=24?"Semi-Bold":"Bold"}</span>
-                    <span>Large & Bold</span>
-                  </div>
-                </div>
-                <div style={{marginBottom:16}}>
-                  <label style={c.lbl}>Zoom</label>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
-                    {[80,90,100,110,120].map(z=><button key={z} style={c.btn(zoom===z?T.gold:T.border,zoom===z?T.bg:T.text,{padding:"6px 12px",fontSize:11})} onClick={()=>setZoom(z)}>{z}%</button>)}
-                  </div>
-                </div>
-                <div>
-                  <label style={c.lbl}>Simplified View</label>
-                  <div style={{fontSize:10,color:T.muted,marginBottom:6}}>Larger text + touch targets — recommended for phones</div>
-                  <div style={c.row(8)}>
-                    <button style={c.btn(simp?T.green:T.border,simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(true)}>ON</button>
-                    <button style={c.btn(!simp?T.gold:T.border,!simp?T.bg:T.text,{padding:"7px 14px",fontSize:11})} onClick={()=>setSimp(false)}>OFF</button>
-                  </div>
-                </div>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface}}>
+                <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
+                <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
               </div>
-            )}
-          </div>
-
-          {/* 4. SCALE */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("scale")}>
-              <span>⚖ Bluetooth Scale</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.scale?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.scale&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
-                  Connect via Bluetooth on this device. Works in Chrome and Edge on Android. Does not work on Safari/iOS.
-                  Scale must be in range and powered on when connecting.
-                </div>
-
-                {/* Connection status + button */}
-                <div style={{...c.card({padding:14}),marginBottom:12}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-                    <div>
-                      <div style={{fontSize:12,fontWeight:"bold",color:T.white}}>
-                        {scaleStatus==="connected"?"⚖ "+((scaleDevice&&scaleDevice.name)||"Scale")+" connected":
-                         scaleStatus==="connecting"?"⚖ Connecting…":
-                         scaleStatus==="error"?"⚠ Connected — no scale service found":
-                         "⚖ No scale connected"}
-                      </div>
-                      {scaleLive&&<div style={{fontSize:13,color:T.gold,fontWeight:"bold",marginTop:4}}>{fmtScaleWeight(scaleLive)}</div>}
-                    </div>
-                    <div style={c.row(8)}>
-                      {scaleStatus!=="connected"
-                        ?<button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 16px"})} onClick={connectScale}>⚖ Connect Scale</button>
-                        :<button style={c.bsm(T.redBg,T.red)} onClick={disconnectScale}>✕ Disconnect</button>
-                      }
-                    </div>
-                  </div>
-                </div>
-
-                {/* Protocol */}
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>Protocol</label>
-                  <select style={{...c.sel(),width:"100%"}} value={settings.scaleProtocol||"auto"} onChange={e=>setSettings(p=>({...p,scaleProtocol:e.target.value}))}>
-                    <option value="auto">Auto-detect (tries all — recommended)</option>
-                    <option value="standard">Standard BLE Weight Scale (Bluetooth SIG 0x181D)</option>
-                    <option value="nordic_uart">Nordic UART / ASCII (Ohaus, Adam, A&D, Kern BLE adapters)</option>
-                    <option value="custom">Custom UUID (advanced)</option>
-                  </select>
-                </div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.6}}>
-                  <strong>Auto</strong> tries Standard BLE then Nordic UART — covers most brands.<br/>
-                  <strong>Nordic UART</strong> covers Ohaus Scout BT kit, Adam BLE, A&D BLE, Kern BLE — these send ASCII weight strings.<br/>
-                  <strong>Standard BLE</strong> covers newer consumer scales (A&D UC-352BLE etc).<br/>
-                  <strong>Custom</strong> — enter your scale's GATT service and characteristic UUIDs from its manual.
-                </div>
-
-                {settings.scaleProtocol==="custom"&&(
-                  <div style={c.g2(8)}>
-                    <F label="Service UUID" value={settings.scaleCustomServiceUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomServiceUUID:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-                    <F label="Characteristic UUID" value={settings.scaleCustomCharUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomCharUUID:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-                  </div>
-                )}
-
-                {/* Display unit */}
-                <div style={{marginTop:10}}>
-                  <label style={c.lbl}>Display unit</label>
-                  <div style={c.row(8)}>
-                    {["g","oz","ozt"].map(u=>(
-                      <button key={u} style={c.btn((settings.scaleUnit||"g")===u?T.gold:T.border,(settings.scaleUnit||"g")===u?T.bg:T.text,{padding:"6px 14px",fontSize:11,textTransform:"none"})}
-                        onClick={()=>setSettings(p=>({...p,scaleUnit:u}))}>{u}</button>
-                    ))}
-                  </div>
-                  <div style={{fontSize:10,color:T.muted,marginTop:4}}>Internal precision is always grams. Display unit is cosmetic only.</div>
-                </div>
+            </div>],
+            ["business","🏪 Business Details",<div style={{paddingBottom:14}}>
+              <div style={c.g2(10)}>
+                <F label="Business Name" value={settings.businessName} onChange={v=>setSettings(p=>({...p,businessName:v}))}/>
+                <F label="ABN" value={settings.abn} onChange={v=>setSettings(p=>({...p,abn:v}))}/>
+                <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
+                <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
+                <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
+                <F label="Dealer Licence No" value={settings.dealerLicenceNo||""} onChange={v=>setSettings(p=>({...p,dealerLicenceNo:v}))} placeholder="e.g. SHD1234"/>
+                <F label="Police Station Name" value={settings.policeStation||""} onChange={v=>setSettings(p=>({...p,policeStation:v}))} placeholder="e.g. Ballarat Police Station"/>
+                <F label="Police Station Email" value={settings.policeEmail||""} onChange={v=>setSettings(p=>({...p,policeEmail:v}))} placeholder="ballaratcid@police.vic.gov.au"/>
+                <SF label="State / Territory" value={settings.state||"VIC"} onChange={v=>setSettings(p=>({...p,state:v}))} options={["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(x=>({value:x,label:x}))}/>
               </div>
-            )}
-          </div>
-
-          {/* 5. SECURITY */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("security")}>
-              <span>🔒 Security</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.security?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.security&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>When enabled, a PIN screen blocks access on every app open.</div>
-                <div style={c.g2(10)}>
-                  <div>
-                    <label style={c.lbl}>Require PIN to open app</label>
-                    <div style={c.row(10)}>
-                      <button style={c.btn(settings.requirePin?T.green:T.border,settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})} onClick={()=>setSettings(p=>({...p,requirePin:true}))}>ON</button>
-                      <button style={c.btn(!settings.requirePin?T.gold:T.border,!settings.requirePin?T.bg:T.text,{padding:"7px 16px",fontSize:11})} onClick={()=>setSettings(p=>({...p,requirePin:false}))}>OFF</button>
-                    </div>
-                  </div>
-                  <div>
-                    <label style={c.lbl}>Session timeout</label>
-                    <select style={{...c.sel(),width:"100%"}} value={settings.sessionTimeout||"never"} onChange={e=>setSettings(p=>({...p,sessionTimeout:e.target.value}))}>
-                      <option value="never">Never</option>
-                      <option value="1h">1 hour</option>
-                      <option value="8h">8 hours</option>
-                      <option value="close">On app close</option>
-                    </select>
-                  </div>
-                </div>
+            </div>],
+            ["appearance","🎨 Appearance",<div style={{paddingBottom:14}}>
+              <div style={{marginBottom:16}}>
+                <label style={c.lbl}>Contrast: {contrast>0?"+":""}{contrast}</label>
+                <input type="range" min="-5" max="5" step="1" value={contrast} onChange={e=>setContrast(Number(e.target.value))} style={{width:"100%"}}/>
               </div>
-            )}
-          </div>
-
-          {/* 5. POLICE HELP */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("policehelp")}>
-              <span>🆘 Police Help — Duress Alerts</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.policehelp?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.policehelp&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{...c.bnr("warn"),marginBottom:14,fontSize:11}}>
-                  Pressing <strong>🆘 Police Help</strong> sends SMS to all contacts instantly — no confirmation. Set this up and test it before you ever need it.
-                </div>
-
-                {/* ── SMS PROVIDER ── */}
-                <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:10}}>SMS Provider</div>
-
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>How to send the emergency SMS</label>
-                  <select style={{...c.sel(),width:"100%"}} value={settings.smsProvider||"sms_uri"} onChange={e=>setSettings(p=>({...p,smsProvider:e.target.value}))}>
-                    <option value="textbelt">◈ Textbelt — works directly, 1 free SMS/day, no setup</option>
-                    <option value="webhook">🔗 Webhook (Zapier / Make / n8n → Twilio/Vonage)</option>
-                    <option value="twilio_fn">⬡ Twilio Function URL — deploy once, free forever</option>
-                    <option value="sms_uri">📲 Device SMS App — requires SIM on this device</option>
-                  </select>
-                </div>
-
-                {/* TEXTBELT — works directly from browser */}
-                {settings.smsProvider==="textbelt"&&(
-                  <div style={{...c.card({padding:12}),marginBottom:10}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Textbelt</div>
-                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
-                      Works directly from this app — no server needed, no CORS issues. Free key sends 1 SMS/day. Buy credits at textbelt.com for more (~$0.09/SMS AU).
-                    </div>
-                    <F label="Textbelt API Key" value={settings.textbeltKey||"textbelt"} onChange={v=>setSettings(p=>({...p,textbeltKey:v}))} placeholder="textbelt"/>
-                    <div style={{fontSize:10,color:T.muted,marginTop:4}}>
-                      Use <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>textbelt</code> as the key for 1 free SMS/day (no account needed). For paid: sign up at textbelt.com, get a key, paste here.
-                    </div>
-                  </div>
-                )}
-
-                {/* WEBHOOK — Zapier / Make */}
-                {settings.smsProvider==="webhook"&&(
-                  <div style={{...c.card({padding:12}),marginBottom:10}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Webhook → SMS Gateway</div>
-                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
-                      This app POSTs a JSON payload to your webhook URL. Wire it to Twilio or any SMS provider via Zapier, Make, or n8n. Works from WiFi — no SIM needed.
-                    </div>
-                    <F label="Webhook URL" value={settings.duressWebhookUrl||""} onChange={v=>setSettings(p=>({...p,duressWebhookUrl:v}))} placeholder="https://hooks.zapier.com/hooks/catch/..."/>
-                    <div style={{fontSize:10,color:T.muted,marginTop:8,lineHeight:1.6}}>
-                      <strong>Setup (Zapier):</strong> New Zap → Trigger: Webhooks by Zapier (Catch Hook) → Action: Twilio (Send SMS). Map <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>message</code> and <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>contacts</code> from the payload. Free Zapier plan works.
-                    </div>
-                    <div style={{fontSize:10,color:T.muted,marginTop:6,lineHeight:1.6}}>
-                      The app sends: <code style={{background:T.surface,padding:"1px 4px",borderRadius:3}}>{"{type:'DURESS_ALERT', message:'...', contacts:[...], address:'...'}"}</code>
-                    </div>
-                  </div>
-                )}
-
-                {/* TWILIO FUNCTION */}
-                {settings.smsProvider==="twilio_fn"&&(
-                  <div style={{...c.card({padding:12}),marginBottom:10}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6}}>Twilio Function URL</div>
-                    <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
-                      Deploy a tiny Twilio Function (free tier) that receives the call and sends the SMS. You get a URL to paste here. Works over WiFi, no CORS issues.
-                    </div>
-                    <F label="Twilio Function URL" value={settings.twilioFnUrl||""} onChange={v=>setSettings(p=>({...p,twilioFnUrl:v}))} placeholder="https://xx.twil.io/duress-sms"/>
-                    <div style={{fontSize:10,color:T.muted,marginTop:8,lineHeight:1.7}}>
-                      <strong>Setup (5 min):</strong><br/>
-                      1. Sign up free at twilio.com (no credit card for trial)<br/>
-                      2. Console → Functions → Create Service → Add Function<br/>
-                      3. Paste this code:<br/>
-                      <code style={{display:"block",background:T.surface,padding:"8px",borderRadius:4,marginTop:4,fontSize:9,lineHeight:1.5,wordBreak:"break-all"}}>
-                        {"exports.handler=(ctx,ev,cb)=>{const c=new(require('@twilio/runtime-handler').Context)(ctx);const t=require('twilio')(ctx.ACCOUNT_SID,ctx.AUTH_TOKEN);ev.contacts.split(',').forEach(n=>t.messages.create({to:n,from:ctx.FROM,body:ev.message}));cb(null,{sent:true});}"}
-                      </code>
-                      <br/>4. Add environment vars: ACCOUNT_SID, AUTH_TOKEN, FROM (your Twilio number)<br/>
-                      5. Deploy → copy the URL → paste above
-                    </div>
-                  </div>
-                )}
-
-                {/* SMS APP */}
-                {settings.smsProvider==="sms_uri"&&(
-                  <div style={{...c.bnr("warn"),marginBottom:10,fontSize:10}}>
-                    Opens your device SMS app pre-filled with the emergency message. Only works on devices with a SIM card, or iPhone with SMS Relay, or Android with Messages web. If this is a WiFi-only tablet, use Textbelt or Webhook instead.
-                  </div>
-                )}
-
-                {/* ── EMERGENCY CONTACTS ── */}
-                <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:6,marginTop:14}}>Emergency Contacts (up to 10)</div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:10}}>
-                  International format — +614XXXXXXXX. All contacts receive the SMS simultaneously.
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  {[1,2,3,4,5,6,7,8,9,10].map(n=>(
-                    <div key={n}>
-                      <label style={c.lbl}>Contact {n}</label>
-                      <input style={c.inp()} type="tel" placeholder="+61400000000"
-                        value={settings["duressContact"+n]||""}
-                        onChange={e=>setSettings(p=>({...p,["duressContact"+n]:e.target.value.trim()}))}/>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Test button */}
-                <button style={{...c.bsm(T.border,T.muted),marginTop:14,width:"100%"}}
-                  onClick={async()=>{
-                    const contacts=[1,2,3,4,5,6,7,8,9,10]
-                      .map(n=>settings["duressContact"+n]||"").filter(Boolean);
-                    if(!contacts.length){pop("No contacts configured.","warn");return;}
-                    const testMsg="TEST — This is a test of the Loot Ledgr duress alert system for "+
-                      (settings.businessName||"your shop")+". No action required.";
-                    let sent=0;
-                    for(const c of contacts){const r=await sendDuressSMS(c,testMsg);if(r.ok)sent++;}
-                    pop("Test sent to "+sent+"/"+contacts.length+" contact(s).","ok");
-                  }}>📲 Send Test SMS to All Contacts</button>
+              <div style={{marginBottom:16}}>
+                <label style={c.lbl}>Font Size: {fontSize}px</label>
+                <input type="range" min="12" max="24" step="1" value={fontSize} onChange={e=>setFontSize(Number(e.target.value))} style={{width:"100%"}}/>
               </div>
-            )}
-          </div>
-
-{/* 6. COMPLIANCE */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("compliance")}>
-              <span>📋 Compliance — TTR</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.compliance?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.compliance&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{...c.card({padding:14})}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Threshold Transaction Reports</div>
-                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>TTR applies to physical cash over $10,000. If you never accept cash over $2,000 this will never trigger.</div>
-                    </div>
-                    <button style={{...c.btn(settings.ttrEnabled!==false?T.green:T.border,settings.ttrEnabled!==false?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                      onClick={()=>setSettings(p=>({...p,ttrEnabled:p.ttrEnabled===false?true:false}))}>
-                      {settings.ttrEnabled!==false?"ON":"OFF"}
-                    </button>
-                  </div>
-                  {settings.ttrEnabled===false&&<div style={{...c.bnr("warn"),marginBottom:0}}>TTR disabled. Only turn off if you never accept cash over $10,000.</div>}
-                </div>
+              <div style={{marginBottom:16}}>
+                <label style={c.lbl}>Simplified View</label>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={simp} onChange={e=>setSimp(e.target.checked)}/>Larger text, simplified controls</label>
               </div>
-            )}
-          </div>
-
-          {/* 7. CRYPTO */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("crypto")}>
-              <span>₿ Cryptocurrency Payments</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.crypto?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.crypto&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{...c.card({padding:14}),marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Accept Crypto</div>
-                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>Adds Crypto to payment selector. No AUSTRAC registration needed — just record AUD value for tax.</div>
-                    </div>
-                    <button style={{...c.btn(settings.cryptoEnabled?T.green:T.border,settings.cryptoEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                      onClick={()=>setSettings(p=>({...p,cryptoEnabled:!p.cryptoEnabled}))}>
-                      {settings.cryptoEnabled?"ON":"OFF"}
-                    </button>
-                  </div>
-                </div>
-                {settings.cryptoEnabled&&(
-                  <div style={{...c.card({padding:14})}}>
-                    <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>Wallet Addresses</div>
-                    {[
-                      {k:"walletBTC",label:"Bitcoin (BTC)",placeholder:"1... or 3... or bc1...",validate:v=>/^(1[a-km-zA-HJ-NP-Z1-9]{25,33}|3[a-km-zA-HJ-NP-Z1-9]{25,33}|bc1[a-z0-9]{6,87})$/.test(v),hint:"Starts with 1, 3, or bc1"},
-                      {k:"walletETH",label:"Ethereum / BNB BEP-20",placeholder:"0x...",validate:v=>/^0x[0-9a-fA-F]{40}$/.test(v),hint:"0x + 40 hex chars"},
-                      {k:"walletBNB",label:"Binance BEP-2 (native)",placeholder:"bnb1...",validate:v=>/^bnb1[0-9a-z]{38}$/.test(v),hint:"bnb1 + 38 chars"},
-                      {k:"walletXRP",label:"Ripple (XRP)",placeholder:"r...",validate:v=>/^r[0-9a-zA-Z]{24,34}$/.test(v),hint:"r + 24–34 chars"},
-                      {k:"walletSOL",label:"Solana (SOL)",placeholder:"Base58...",validate:v=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v),hint:"Base58 · 32–44 chars"},
-                    ].map(field=>{
-                      const val=settings[field.k]||"";
-                      const ok=val===""||field.validate(val);
-                      return(
-                        <div key={field.k} style={{marginBottom:12}}>
-                          <label style={c.lbl}>{field.label}</label>
-                          <input style={{...c.inp(),borderColor:val&&!ok?T.red:val&&ok?T.green:T.border,fontFamily:"monospace",fontSize:11}}
-                            value={val} placeholder={field.placeholder}
-                            onChange={e=>setSettings(p=>({...p,[field.k]:e.target.value.trim()}))}/>
-                          <div style={{fontSize:10,marginTop:2,color:val&&!ok?T.red:T.muted}}>{val&&!ok?"⚠ "+field.hint:field.hint}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+            </div>],
+            ["scale","⚖ Bluetooth Scale",<div style={{paddingBottom:14}}>
+              <div style={{display:"flex",gap:10,marginBottom:14}}>
+                {scaleStatus==="connected"?<button style={c.btn(T.red,T.white)} onClick={disconnectScale}>Disconnect Scale</button>:<button style={c.btn(T.gold,T.bg)} onClick={connectScale}>Connect Scale</button>}
+                <span style={{fontSize:11,color:scaleStatus==="connected"?T.green:T.muted,padding:"8px 0"}}>{scaleStatus==="connected"?"● "+sS(scaleDevice&&scaleDevice.name||"Connected"):scaleStatus==="connecting"?"Connecting…":"Not connected"}</span>
               </div>
-            )}
-          </div>
-
-          {/* 8. AI AGENT */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("ai")}>
-              <span>🤖 AI Agent</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.ai?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.ai&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{...c.card({padding:14})}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:"bold",color:T.white}}>AI Agent</div>
-                      <div style={{fontSize:11,color:T.muted,marginTop:3}}>Connect Sophiie, Claude, or any AI agent.</div>
-                    </div>
-                    <button style={{...c.btn(settings.aiAgentEnabled?T.green:T.border,settings.aiAgentEnabled?T.bg:T.muted,{marginLeft:16,flexShrink:0,fontSize:11})}}
-                      onClick={()=>setSettings(p=>({...p,aiAgentEnabled:!p.aiAgentEnabled}))}>
-                      {settings.aiAgentEnabled?"ON":"OFF"}
-                    </button>
-                  </div>
-                  {settings.aiAgentEnabled&&(
-                    <div>
-                      <div style={{marginBottom:10}}><label style={c.lbl}>Agent Name</label><input style={c.inp()} value={settings.aiAgentName||""} placeholder="Sophiie" onChange={e=>setSettings(p=>({...p,aiAgentName:e.target.value}))}/></div>
-                      <div style={{marginBottom:10}}><label style={c.lbl}>Webhook URL (optional)</label><input style={c.inp()} value={settings.aiAgentUrl||""} placeholder="https://..." onChange={e=>setSettings(p=>({...p,aiAgentUrl:e.target.value}))}/></div>
-                      <div>
-                        <label style={c.lbl}>Access Level</label>
-                        <div style={c.row(8)}>
-                          <button style={c.btn(settings.aiAgentLevel===1?T.gold:T.border,settings.aiAgentLevel===1?T.bg:T.text,{fontSize:11,padding:"7px 14px"})} onClick={()=>setSettings(p=>({...p,aiAgentLevel:1}))}>Level 1 — Observe</button>
-                          <button style={c.btn(settings.aiAgentLevel===2?T.orange:T.border,settings.aiAgentLevel===2?T.bg:T.muted,{fontSize:11,padding:"7px 14px"})} onClick={()=>setPinModal({reason:"Level 2 grants AI control. Manager PIN required.",cb:()=>setSettings(p=>({...p,aiAgentLevel:2}))})}>Level 2 — Autonomous (v2.0)</button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              <SF label="Protocol" value={settings.scaleProtocol||"auto"} onChange={v=>setSettings(p=>({...p,scaleProtocol:v}))} options={[{value:"auto",label:"Auto-detect (try both)"},{value:"standard",label:"Standard BLE Weight Scale"},{value:"nordic_uart",label:"Nordic UART (NUS)"},{value:"custom",label:"Custom UUID"}]}/>
+              {settings.scaleProtocol==="custom"&&<div style={c.g2(10)}><F label="Service UUID" value={settings.scaleCustomServiceUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomServiceUUID:v}))}/><F label="Characteristic UUID" value={settings.scaleCustomCharUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomCharUUID:v}))}/></div>}
+              <SF label="Display Unit" value={settings.scaleUnit||"g"} onChange={v=>setSettings(p=>({...p,scaleUnit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"ozt",label:"Troy oz (ozt)"},{value:"oz",label:"Avoirdupois oz"}]}/>
+            </div>],
+            ["security","🔒 Security",<div style={{paddingBottom:14}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>setSettings(p=>({...p,requirePin:e.target.checked}))}/>Require PIN to open app</label>
+              <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
+            </div>],
+            ["policehelp","🆘 Police Help — Duress Alerts",<div style={{paddingBottom:14}}>
+              <div style={c.bnr("warn")}>The POLICE HELP button on the dashboard sends silent SMS alerts to all configured contacts. Never disclose this to potential offenders.</div>
+              <SF label="SMS Provider" value={settings.smsProvider||"sms_uri"} onChange={v=>setSettings(p=>({...p,smsProvider:v}))} options={[{value:"textbelt",label:"Textbelt (1 free/day, then paid)"},{value:"webhook",label:"Webhook (Make / Zapier)"},{value:"twilio_fn",label:"Twilio Function"},{value:"sms_uri",label:"SMS App (opens on device)"}]}/>
+              {settings.smsProvider==="textbelt"&&<F label="Textbelt API Key" value={settings.textbeltKey||"textbelt"} onChange={v=>setSettings(p=>({...p,textbeltKey:v}))} note="'textbelt' = 1 free SMS/day. Buy a key at textbelt.com for more."/>}
+              {settings.smsProvider==="webhook"&&<F label="Webhook URL" value={settings.duressWebhookUrl||""} onChange={v=>setSettings(p=>({...p,duressWebhookUrl:v}))} placeholder="https://hook.make.com/…"/>}
+              {settings.smsProvider==="twilio_fn"&&<F label="Twilio Function URL" value={settings.twilioFnUrl||""} onChange={v=>setSettings(p=>({...p,twilioFnUrl:v}))} placeholder="https://…twil.io/…"/>}
+              <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginTop:14,marginBottom:8}}>Emergency Contacts (up to 10)</div>
+              <div style={c.g2(8)}>
+                {[1,2,3,4,5,6,7,8,9,10].map(n=><F key={n} label={"Contact "+n} value={settings["duressContact"+n]||""} onChange={v=>setSettings(p=>({...p,["duressContact"+n]:v}))} placeholder="+61400000000"/>)}
               </div>
-            )}
-          </div>
-
-          {/* 9. INTEGRATIONS */}
-          <div style={{borderBottom:"1px solid "+T.border}}>
-            <button style={{width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"}} onClick={()=>toggleSection("integrations")}>
-              <span>🔗 Integrations</span>
-              <span style={{fontSize:16,color:T.muted}}>{settingsOpen.integrations?"▲":"▾"}</span>
-            </button>
-            {settingsOpen.integrations&&(
-              <div style={{paddingBottom:14}}>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,marginTop:4}}>🖥 EFTPOS Terminal</div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Connect a physical payment terminal. Square Terminal works globally. Linkly connects to any Australian bank terminal (CBA, NAB, ANZ, Westpac) via the PC-EFTPOS app running on the same device.</div>
-                <div style={{marginBottom:10}}>
-                  <label style={c.lbl}>EFTPOS Provider</label>
-                  <select style={{...c.sel(),width:"100%"}} value={settings.eftposProvider||"none"} onChange={e=>setSettings(p=>({...p,eftposProvider:e.target.value}))}>
-                    <option value="none">None (manual confirmation)</option>
-                    <option value="square">Square Terminal API</option>
-                    <option value="linkly">Linkly / PC-EFTPOS (AU bank terminals)</option>
-                  </select>
-                </div>
-                {settings.eftposProvider==="square"&&(
-                  <div style={{marginBottom:10}}>
-                    <label style={c.lbl}>Square Terminal Device ID</label>
-                    <input style={c.inp()} value={settings.squareTerminalId||""} placeholder="device:XXXXXXXXXXXXXXXX" onChange={e=>setSettings(p=>({...p,squareTerminalId:e.target.value}))}/>
-                    <div style={{fontSize:10,color:T.muted,marginTop:3}}>Find in Square Dashboard → Devices → your terminal → Device ID</div>
-                  </div>
-                )}
-                {settings.eftposProvider==="linkly"&&(
-                  <div style={{marginBottom:10}}>
-                    <label style={c.lbl}>Linkly Base URL</label>
-                    <input style={c.inp()} value={settings.linklyBaseUrl||"http://localhost:4242"} placeholder="http://localhost:4242" onChange={e=>setSettings(p=>({...p,linklyBaseUrl:e.target.value}))}/>
-                    <div style={{fontSize:10,color:T.muted,marginTop:3}}>Default is localhost:4242. PC-EFTPOS must be running on this device.</div>
-                  </div>
-                )}
-                <div style={{height:1,background:T.border,margin:"12px 0"}}/>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8,marginTop:4}}>💳 Square</div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY → vendor expense (Orders+Payments API) · SELL → checkout link</div>
-                <div style={c.g2(10)}>
-                  <F label="Square Access Token" type="password" value={settings.squareToken} onChange={v=>setSettings(p=>({...p,squareToken:v}))} placeholder="EAAAl…"/>
-                  <F label="Square Location ID" value={settings.squareLoc} onChange={v=>setSettings(p=>({...p,squareLoc:v}))}/>
-                  <F label="Redirect URL" value={settings.squareRedirect} onChange={v=>setSettings(p=>({...p,squareRedirect:v}))} placeholder="https://…"/>
-                </div>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>📊 Google Sheets</div>
-                <div style={c.g2(10)}>
-                  <F label="Spreadsheet ID" value={settings.sheetsId} onChange={v=>setSettings(p=>({...p,sheetsId:v}))}/>
-                  <F label="Range" value={settings.sheetsRange} onChange={v=>setSettings(p=>({...p,sheetsRange:v}))} placeholder="Sheet1!A1"/>
-                  <F label="OAuth Token" type="password" value={settings.sheetsToken} onChange={v=>setSettings(p=>({...p,sheetsToken:v}))}/>
-                </div>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>🔗 Webhook (Zapier / Make / n8n)</div>
-                <div style={c.g2(10)}>
-                  <F label="Webhook URL" value={settings.webhookUrl} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hooks.zapier.com/…"/>
-                </div>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>🛍 Shopify</div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY → vendor draft order · SELL → completed order</div>
-                <div style={c.g2(10)}>
-                  <F label="Store Domain (xxx.myshopify.com)" value={settings.shopifyDomain} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))}/>
-                  <F label="Admin API Token" type="password" value={settings.shopifyToken} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
-                </div>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,margin:"14px 0 8px"}}>📒 Xero</div>
-                <div style={{fontSize:10,color:T.muted,marginBottom:8}}>BUY = ACCPAY · SELL = ACCREC. OAuth2 bearer token from Xero Developer Portal.</div>
-                <div style={c.g2(10)}>
-                  <F label="Xero Bearer Token" type="password" value={settings.xeroToken||""} onChange={v=>setSettings(p=>({...p,xeroToken:v}))} placeholder="OAuth2 Bearer"/>
-                  <F label="Xero Tenant ID" value={settings.xeroTenantId||""} onChange={v=>setSettings(p=>({...p,xeroTenantId:v}))} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-                  <div style={{display:"flex",gap:10}}>
-                    <div style={{flex:1}}><label style={c.lbl}>Buy Account Code</label><input style={c.inp()} type="text" value={settings.xeroBuyCode||"310"} placeholder="310" onChange={e=>setSettings(p=>({...p,xeroBuyCode:e.target.value}))}/></div>
-                    <div style={{flex:1}}><label style={c.lbl}>Sell Account Code</label><input style={c.inp()} type="text" value={settings.xeroSellCode||"200"} placeholder="200" onChange={e=>setSettings(p=>({...p,xeroSellCode:e.target.value}))}/></div>
-                  </div>
-                </div>
+              <button style={c.btn(T.border,T.text,{fontSize:11,marginTop:10})} onClick={async()=>{const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);if(!contacts.length){pop("No contacts configured.","warn");return;}const r=await sendDuressSMS(contacts[0],"LOOT LEDGR — Test alert from duress system. If received, system is working.");pop(r.msg,r.ok?"ok":"err");}}>Test SMS to Contact 1</button>
+            </div>],
+            ["compliance","📋 Compliance — TTR",<div style={{paddingBottom:14}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={settings.ttrEnabled!==false} onChange={e=>setSettings(p=>({...p,ttrEnabled:e.target.checked}))}/>Enable TTR check at $10,000 cash threshold</label>
+              <div style={{fontSize:10,color:T.muted,marginTop:8}}>Disabling TTR check does NOT remove your legal obligation to file Threshold Transaction Reports with AUSTRAC. Only disable if your business is exempt.</div>
+            </div>],
+            ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
+              {settings.cryptoEnabled&&<div style={c.g2(10)}>
+                {[{k:"walletBTC",l:"Bitcoin (BTC)"},{k:"walletETH",l:"Ethereum (ETH)"},{k:"walletBNB",l:"Binance BEP-2 (BNB)"},{k:"walletXRP",l:"Ripple (XRP)"},{k:"walletSOL",l:"Solana (SOL)"}].map(w=><F key={w.k} label={w.l} value={settings[w.k]||""} onChange={v=>setSettings(p=>({...p,[w.k]:v}))} placeholder="Wallet address…"/>)}
+              </div>}
+            </div>],
+            ["ai","🤖 AI Agent",<div style={{paddingBottom:14}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.aiAgentEnabled} onChange={e=>setSettings(p=>({...p,aiAgentEnabled:e.target.checked}))}/>Enable AI Agent indicator</label>
+              {settings.aiAgentEnabled&&<div style={c.g2(10)}>
+                <F label="Agent Name" value={settings.aiAgentName||"Sophiie"} onChange={v=>setSettings(p=>({...p,aiAgentName:v}))}/>
+                <F label="Agent URL" value={settings.aiAgentUrl||""} onChange={v=>setSettings(p=>({...p,aiAgentUrl:v}))} placeholder="https://…"/>
+                <SF label="Level" value={String(settings.aiAgentLevel||1)} onChange={v=>setSettings(p=>({...p,aiAgentLevel:parseInt(v)}))} options={[{value:"1",label:"1 — Listening (blue)"},{value:"2",label:"2 — Autonomous (amber)"}]}/>
+              </div>}
+            </div>],
+            ["integrations","🔗 Integrations",<div style={{paddingBottom:14}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>EFTPOS Terminal</div>
+              <SF label="Provider" value={settings.eftposProvider||"none"} onChange={v=>setSettings(p=>({...p,eftposProvider:v}))} options={[{value:"none",label:"None / Manual"},{value:"square",label:"Square Terminal"},{value:"linkly",label:"Linkly / PC-EFTPOS"}]}/>
+              {settings.eftposProvider==="square"&&<F label="Square Terminal Device ID" value={settings.squareTerminalId||""} onChange={v=>setSettings(p=>({...p,squareTerminalId:v}))}/>}
+              {settings.eftposProvider==="linkly"&&<F label="Linkly Base URL" value={settings.linklyBaseUrl||"http://localhost:4242"} onChange={v=>setSettings(p=>({...p,linklyBaseUrl:v}))}/>}
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Square API</div>
+              <div style={c.g2(10)}>
+                <F label="Access Token" type="password" value={settings.squareToken||""} onChange={v=>setSettings(p=>({...p,squareToken:v}))} placeholder="EAAAl…"/>
+                <F label="Location ID" value={settings.squareLoc||""} onChange={v=>setSettings(p=>({...p,squareLoc:v}))}/>
+                <F label="Redirect URL (after checkout)" value={settings.squareRedirect||""} onChange={v=>setSettings(p=>({...p,squareRedirect:v}))} placeholder="https://lootledgr.netlify.app"/>
               </div>
-            )}
-          </div>
-
-          {/* 9. DANGER ZONE — always visible at bottom */ }
-
-          <button style={c.btn(T.gold,T.bg,{marginTop:14})} onClick={()=>{
-            setAppUnlocked(!settings.requirePin);
-            if(settings.requirePin)store.set("sessionActive",false);
-            setShowSet(false);
-          }}>✓ Done — All changes saved automatically</button>
-          <div style={{marginTop:24,borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.red,marginBottom:6}}>⚠ Danger Zone</div>
-            <div style={{...c.bnr("warn"),marginBottom:10,fontSize:11}}>Both actions below require manager PIN confirmation.</div>
-            <button style={{...c.bsm(T.orangeBg,T.orange),marginBottom:8}} onClick={()=>{
-              setPinModal({
-                reason:"PURGE EXPIRED RECORDS — This will permanently delete all transactions and stock items past their 7-year retention date. This cannot be undone. Enter manager PIN to confirm.",
-                cb:()=>{purge();setShowSet(false);}
-              });
-              setPinVal("");
-            }}>🗑 Purge Expired Records (7yr)</button>
-            <button style={c.bsm(T.redBg,T.red)} onClick={()=>{
-              setPinModal({
-                reason:"CLEAR ALL APP DATA — This will permanently erase every transaction, client record, stock item, catalog entry, photo and setting on this device. There is no recovery. Enter manager PIN to confirm.",
-                cb:()=>{
-                  try{
-                    localStorage.clear();
-                    pop("All app data cleared. Reloading…","ok");
-                    setTimeout(()=>window.location.reload(),1500);
-                  }catch(e){pop("Could not clear data.","err");}
-                }
-              });
-              setPinVal("");
-            }}>🗑 Clear All App Data</button>
-            <div style={{fontSize:10,color:T.muted,marginTop:5}}>Removes all transactions, stock, catalog, photos and settings from this device.</div>
-          </div>
-
-          {/* ── SPOT PRICE HISTORY ── */}
-          <div style={{marginTop:20,borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.muted,letterSpacing:"0.08em",marginBottom:8}}>SPOT PRICE LOG (last 30)</div>
-            {spotLog.length===0&&<div style={{fontSize:11,color:T.muted}}>No price records yet.</div>}
-            {spotLog.slice(0,10).map((e,i)=>(
-              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"4px 0",borderBottom:"1px solid "+T.border+"22"}}>
-                <span style={{color:T.muted}}>{new Date(e.t).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span>
-                <span style={{color:T.gold}}>Au {fmtAUD(e.g)}</span>
-                <span style={{color:T.silver}}>Ag {fmtAUD(e.s)}</span>
-                <span style={{color:T.muted,fontSize:9}}>{e.src}</span>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Shopify</div>
+              <div style={c.g2(10)}>
+                <F label="Store Domain" value={settings.shopifyDomain||""} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))} placeholder="yourstore.myshopify.com"/>
+                <F label="Admin API Token" type="password" value={settings.shopifyToken||""} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
               </div>
-            ))}
-          </div>
-
-          {/* ── BLACKLIST ── */}
-          <div style={{marginTop:20,borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.red,letterSpacing:"0.08em",marginBottom:8}}>⛔ CLIENT BLACKLIST</div>
-            <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Blacklisted clients are flagged in red on the Clients screen. To ban a client, go to Clients and tap the ⛔ Ban button on their record.</div>
-            {blacklist.length===0
-              ?<div style={{fontSize:11,color:T.muted,fontStyle:"italic"}}>No blacklisted clients.</div>
-              :blacklist.map((b,i)=>(
-                <div key={i} style={{...c.card({padding:12}),marginBottom:8,borderLeft:"3px solid "+T.red,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontWeight:"bold",color:T.red,fontSize:13}}>⛔ {b.name}</div>
-                    {b.addedAt&&<div style={{fontSize:10,color:T.muted,marginTop:2}}>Banned: {fmtDate(b.addedAt)}</div>}
-                  </div>
-                  <button style={{...c.bsm(T.redBg,T.red),fontWeight:"bold"}} onClick={()=>{setBlacklist(p=>p.filter(x=>x.name!==b.name));pop(b.name+" removed from blacklist.","ok");}}>✓ Remove Ban</button>
-                </div>
-              ))
-            }
-          </div>
-
-          {/* ── QUICK ACTIONS ── */}
-          <div style={{marginTop:20,borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.muted,letterSpacing:"0.08em",marginBottom:10}}>QUICK ACTIONS</div>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Webhook</div>
+              <F label="Webhook URL (POST on every transaction)" value={settings.webhookUrl||""} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hook.make.com/…"/>
+            </div>],
+          ].map(([key,title,content])=>(
+            <div key={key} style={{borderBottom:"1px solid "+T.border}}>
+              <button style={ABTN} onClick={()=>toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
+              {settingsOpen[key]&&content}
+            </div>
+          ))}
+          <div style={{marginTop:14,borderTop:"2px solid "+T.border,paddingTop:14}}>
+            <div style={{fontSize:11,fontWeight:"bold",color:T.red,marginBottom:10}}>⚠ Danger Zone</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <button style={c.bsm(T.border,T.muted)} onClick={()=>{setShowSet(false);setShowVendors(true);}}>🏪 Suppliers</button>
-              <button style={c.bsm(T.border,T.muted)} onClick={()=>{setShowSet(false);setShowStaff(true);}}>👥 Staff</button>
-              <button style={c.bsm(T.border,T.muted)} onClick={()=>{setShowSet(false);setShowBackup(true);}}>💾 Backup</button>
+              <button style={c.bsm(T.redBg,T.red)} onClick={()=>{if(window.confirm&&!window.confirm("Clear all transactions and stock? This cannot be undone."))return;setTxList([]);setStock([]);pop("All data cleared.","warn");}}>🗑 Clear All Data</button>
+              <button style={c.bsm(T.border,T.muted)} onClick={purge}>🧹 Purge Expired (7yr)</button>
+            </div>
+            <div style={{marginTop:14}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Spot Price History (last 90)</div>
+              {(spotLog||[]).slice(0,10).map((e,i)=><div key={i} style={{fontSize:10,color:T.muted,marginBottom:2}}>{sS(e.t).slice(0,16)} Au {fmtAUD(e.g)} Ag {fmtAUD(e.s)} [{sS(e.src)}]</div>)}
+            </div>
+            <div style={{marginTop:14}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Blacklist ({(blacklist||[]).length})</div>
+              {(blacklist||[]).map((b,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,marginBottom:4}}><span>{sS(b.name)}</span><button style={c.bsm(T.border,T.muted)} onClick={()=>setBlacklist(p=>p.filter((_,j)=>j!==i))}>Remove</button></div>)}
+            </div>
+            <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledgr v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
+          </div>
+        </Modal>}
+
+        {showApi&&<Modal title="⇄ API & Export" onClose={()=>setShowApi(false)}>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Current Prices (JSON Export)</div>
+            <pre style={{fontSize:10,fontFamily:"monospace",background:T.surface,padding:12,borderRadius:6,overflowX:"auto",color:T.text}}>{JSON.stringify(exportPayload(),null,2)}</pre>
+            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(JSON.stringify(exportPayload(),null,2));pop("Copied to clipboard.","ok");}}>📋 Copy JSON</button>
+          </div>
+          <div style={{borderTop:"1px solid "+T.border,paddingTop:14}}>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Downloads</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button style={c.btn(T.gold,T.bg)} onClick={dlAccounting}>📊 Accounting CSV</button>
+              <button style={c.bsm(T.border,T.muted)} onClick={()=>{const rows=[["Invoice","Date","Client","Buy","Sell","Net","Payment","KYC","TTR","SMR"]];(txList||[]).forEach(t=>rows.push([sS(t.id),sS(t.date&&t.date.slice(0,10)),sS(t.client&&t.client.fullName),sS(t.buyTotal),sS(t.sellTotal),sS(t.net),sS(t.payment),t.kycDone?"YES":"",t.ttrRequired?"YES":"",t.smrFlagged?"YES":""]));const Q='"';const esc=v=>Q+sS(v).replace(/"/g,Q+Q)+Q;dlFile(rows.map(r=>r.map(esc).join(",")).join("\n"),"lootledgr-tx-"+todayStr()+".csv","text/csv");pop("TX CSV exported.","ok");}}>⬇ TX CSV</button>
             </div>
           </div>
+        </Modal>}
 
-          {/* ── ABOUT ── */}
-          <div style={{marginTop:28,borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <button onClick={()=>setShowAbout(v=>!v)}
-              style={{width:"100%",background:"transparent",border:"none",cursor:"pointer",
-                display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0"}}>
-              <span style={{fontSize:12,fontWeight:"bold",color:T.muted,letterSpacing:"0.08em"}}>ABOUT</span>
-              <span style={{color:T.muted,fontSize:14}}>{showAbout?"▲":"▼"}</span>
-            </button>
-            {showAbout&&(
-              <div style={{paddingTop:16,textAlign:"center"}}>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:12}}>
-                  <img src={settings.logoImg||SEED_LOGO} alt="logo" style={{width:52,height:52,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,background:"#fff",padding:4,marginBottom:10,display:"block"}}/>
-                  <div style={{fontSize:16,fontWeight:"bold",color:T.gold,lineHeight:1.2}}>Loot Ledgr</div>
-                  <div style={{fontSize:10,color:T.muted,letterSpacing:"0.12em",textTransform:"uppercase",marginTop:4}}>Compliance POS · Second-Hand Sale Tracking</div>
-                </div>
-                <div style={{background:T.surface,borderRadius:8,padding:"10px 18px",marginBottom:14,textAlign:"left",display:"inline-block"}}>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Version <span style={{color:T.white,fontWeight:"bold"}}>{"v"+APP_VERSION}</span></div>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Built with <span style={{color:T.white}}>React · Vite · Capacitor</span></div>
-                  <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Storage <span style={{color:T.white}}>localStorage / Dexie (IndexedDB)</span></div>
-                  <div style={{fontSize:11,color:T.muted}}>Compliance <span style={{color:T.white}}>AUSTRAC AML/CTF · Vic SHD Act</span></div>
-                </div>
-                <div style={{fontSize:12,color:T.muted,marginBottom:4}}>Developed by</div>
-                <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:2}}>Guillaume Weber</div>
-                <div style={{fontSize:11,color:T.gold,fontStyle:"italic",marginBottom:16}}>The Professor Goldenfrog</div>
-                <div style={{fontSize:10,color:T.muted,lineHeight:1.7}}>
-                  This application is provided for internal business use only.<br/>
-                  All compliance obligations remain the responsibility of the operator.
-                </div>
+        {showPolice&&<Modal title="🚔 Police Report Generator" onClose={()=>setShowPolice(false)} wide>
+          {(()=>{
+            const[dateFrom,setDateFrom]=React.useState(new Date(Date.now()-7*86400000).toISOString().slice(0,10));
+            const[dateTo,setDateTo]=React.useState(new Date().toISOString().slice(0,10));
+            const[suspicious,setSuspicious]=React.useState(false);
+            const sc=settings.state||"VIC";const st=STATE_INFO[sc]||STATE_INFO.VIC;
+            return <div>
+              <div style={{...c.card({padding:12}),marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>State: {st.name}</div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Governing Act: {st.act}</div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Hold Period: {st.hold}</div>
+                <div style={{fontSize:11,color:T.muted}}>{st.note}</div>
               </div>
-            )}
-          </div>
+              <div style={c.g2(10)}>
+                <F label="From" type="date" value={dateFrom} onChange={setDateFrom}/>
+                <F label="To" type="date" value={dateTo} onChange={setDateTo}/>
+              </div>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={suspicious} onChange={e=>setSuspicious(e.target.checked)}/>Only include SMR-flagged transactions</label>
+              <div style={{display:"flex",gap:10}}>
+                <button style={c.btn(T.gold,T.bg)} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);dlFile(csv,"police-report-"+todayStr()+".csv","text/csv");pop("Police report downloaded.","ok");}}>⬇ Download Report CSV</button>
+                <button style={c.bsm()} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);const subject="Secondhand Dealer Transaction Report — "+sS(settings.businessName);window.location.href="mailto:"+(settings.policeEmail||st.defaultEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent("Please find attached the transaction register.\n\nBusiness: "+sS(settings.businessName)+"\nABN: "+sS(settings.abn)+"\nLicence: "+sS(settings.dealerLicenceNo));pop("Email client opened.","ok");}}>✉ Email to Station</button>
+              </div>
+            </div>;
+          })()}
+        </Modal>}
 
-        </Modal>
+        {showEOD&&<Modal title="📋 End of Day Report" onClose={()=>setShowEOD(false)}>
+          {(()=>{
+            const txs=todayTxData;
+            const tot={buy:txs.reduce((s,t)=>s+sN(t.buyTotal),0),sell:txs.reduce((s,t)=>s+sN(t.sellTotal),0)};
+            return <div>
+              <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:4}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long"})}</div>
+              <div style={c.g2(10)}>
+                <div style={c.card({padding:12})}><div style={c.lbl}>Transactions</div><div style={{fontSize:24,fontWeight:"bold",color:T.white}}>{txs.length}</div></div>
+                <div style={c.card({padding:12})}><div style={c.lbl}>Buy Total</div><div style={{fontSize:20,fontWeight:"bold",color:T.green}}>{fmtAUD(tot.buy)}</div></div>
+                <div style={c.card({padding:12})}><div style={c.lbl}>Sell Total</div><div style={{fontSize:20,fontWeight:"bold",color:T.gold}}>{fmtAUD(tot.sell)}</div></div>
+                <div style={c.card({padding:12})}><div style={c.lbl}>Net</div><div style={{fontSize:20,fontWeight:"bold",color:T.white}}>{fmtAUD(tot.sell-tot.buy)}</div></div>
+              </div>
+              {txs.filter(t=>t.ttrStatus==="PENDING").length>0&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 {txs.filter(t=>t.ttrStatus==="PENDING").length} TTR(s) pending — file with AUSTRAC Online today.</div>}
+              <div style={{display:"flex",gap:10,marginTop:14}}>
+                <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlAccounting();setShowEOD(false);}}>📊 Download Accounting</button>
+                <button style={c.bsm()} onClick={()=>setShowEOD(false)}>Close</button>
+              </div>
+            </div>;
+          })()}
+        </Modal>}
+
+        {showVendors&&<Modal title="🏪 Suppliers / Vendors" onClose={()=>setShowVendors(false)}>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:10}}>{editVendor?"Edit Supplier":"Add Supplier"}</div>
+            <div style={c.g2(10)}>
+              <F label="Name" required value={vendorForm.name||""} onChange={v=>setVendorForm(p=>({...p,name:v}))}/>
+              <F label="ABN / ACN" value={vendorForm.abn||""} onChange={v=>setVendorForm(p=>({...p,abn:v}))}/>
+              <F label="Phone" value={vendorForm.phone||""} onChange={v=>setVendorForm(p=>({...p,phone:v}))}/>
+              <F label="Email" value={vendorForm.email||""} onChange={v=>setVendorForm(p=>({...p,email:v}))}/>
+              <F label="Address" value={vendorForm.address||""} onChange={v=>setVendorForm(p=>({...p,address:v}))}/>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button style={c.btn(T.gold)} onClick={()=>{if(!vendorForm.name){pop("Supplier name required.","warn");return;}if(editVendor)setVendors(p=>p.map(x=>x.id===editVendor.id?{...x,...vendorForm}:x));else setVendors(p=>[...p,{...vendorForm,id:uid(),addedAt:nowISO()}]);setEditVendor(null);setVendorForm({});pop("Supplier saved.","ok");}}>Save</button>
+              {editVendor&&<button style={c.bsm()} onClick={()=>{setEditVendor(null);setVendorForm({});}}>Cancel</button>}
+            </div>
+          </div>
+          {(vendors||[]).map(v=><div key={v.id} style={{...c.card({padding:12}),marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontWeight:"bold",color:T.white}}>{v.name}</div><div style={{fontSize:11,color:T.muted}}>{sS(v.abn)}{v.phone?" · "+v.phone:""}</div></div>
+            <div style={{display:"flex",gap:6}}><button style={c.bsm()} onClick={()=>{setEditVendor(v);setVendorForm({...v});}}>✎</button><button style={c.bsm(T.redBg,T.red)} onClick={()=>setVendors(p=>p.filter(x=>x.id!==v.id))}>🗑</button></div>
+          </div>)}
+        </Modal>}
+
+        {showStaff&&<Modal title="👥 Staff" onClose={()=>setShowStaff(false)}>
+          <div style={{marginBottom:14}}>
+            <div style={c.g2(10)}>
+              <F label="Staff Name" required value={staffForm.name||""} onChange={v=>setStaffForm(p=>({...p,name:v}))}/>
+              <F label="Role" value={staffForm.role||""} onChange={v=>setStaffForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
+            </div>
+            <button style={c.btn(T.gold)} onClick={()=>{if(!staffForm.name){pop("Name required.","warn");return;}setStaffList(p=>[...p,{...staffForm,id:uid()}]);setStaffForm({});pop("Staff member added.","ok");}}>Add Staff Member</button>
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={c.lbl}>Active Staff Member</label>
+            <select style={{...c.sel(),width:"100%"}} value={activeStaff} onChange={e=>setActiveStaff(e.target.value)}>
+              <option value="">— None selected —</option>
+              {(staffList||[]).map(s=><option key={s.id} value={s.id}>{sS(s.name)}{s.role?" ("+s.role+")":""}</option>)}
+            </select>
+          </div>
+          {(staffList||[]).map(s=><div key={s.id} style={{...c.card({padding:12}),marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontWeight:"bold",color:T.white}}>{sS(s.name)}</div><div style={{fontSize:11,color:T.muted}}>{sS(s.role)}</div></div>
+            <button style={c.bsm(T.redBg,T.red)} onClick={()=>setStaffList(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
+          </div>)}
+        </Modal>}
+
+        {cliNoteId&&<Modal title="📝 Client Note" onClose={()=>setCliNoteId(null)}>
+          <F label="Note (internal — not shown to client)" value={cliNoteVal} onChange={setCliNoteVal} as="textarea"/>
+          <div style={{display:"flex",gap:10}}>
+            <button style={c.btn(T.gold)} onClick={()=>{setTxList(p=>p.map(t=>t.id===cliNoteId?{...t,clientNote:cliNoteVal}:t));setCliNoteId(null);pop("Note saved.","ok");}}>Save Note</button>
+            <button style={c.bsm()} onClick={()=>setCliNoteId(null)}>Cancel</button>
+          </div>
+        </Modal>}
+
+        {editStockId&&<Modal title="✎ Edit Stock Item" onClose={()=>setEditStockId(null)}>
+          <div style={c.g2(10)}>
+            <F label="Description" value={editStockVal.description||""} onChange={v=>setEditStockVal(p=>({...p,description:v}))}/>
+            <F label="Weight (g)" value={editStockVal.weight_g||""} onChange={v=>setEditStockVal(p=>({...p,weight_g:v}))} type="number"/>
+            <F label="Purity" value={editStockVal.purity||""} onChange={v=>setEditStockVal(p=>({...p,purity:v}))} placeholder="e.g. 18ct or 0.925"/>
+            <F label="Storage Location" value={editStockVal.storageLocation||""} onChange={v=>setEditStockVal(p=>({...p,storageLocation:v}))}/>
+            <F label="Price Paid ($)" value={editStockVal.price||""} onChange={v=>setEditStockVal(p=>({...p,price:v}))} type="number"/>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button style={c.btn(T.gold)} onClick={()=>{setStock(p=>p.map(s=>s.id===editStockId?{...s,...editStockVal,weight_g:editStockVal.weight_g?parseFloat(editStockVal.weight_g):s.weight_g,price:editStockVal.price?parseFloat(editStockVal.price):s.price}:s));setEditStockId(null);pop("Stock item updated.","ok");}}>Save</button>
+            <button style={c.bsm()} onClick={()=>setEditStockId(null)}>Cancel</button>
+          </div>
+        </Modal>}
+
+        {showBackup&&<Modal title="💾 Backup & Restore" onClose={()=>setShowBackup(false)}>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Download Backup</div>
+            <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Includes all transactions, stock, catalog, vendors, staff, blacklist, and frozen snapshot. Does not include photos or logo.</div>
+            <button style={c.btn(T.gold,T.bg)} onClick={dlBackup}>⬇ Download Backup ({(txList||[]).length} tx, {(stock||[]).length} stock)</button>
+          </div>
+          <div style={{borderTop:"1px solid "+T.border,paddingTop:14}}>
+            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Restore from Backup</div>
+            <div style={{...c.bnr("warn"),marginBottom:10}}>⚠ Restoring will overwrite your current data. Download a fresh backup first.</div>
+            <label style={{...c.btn(T.border,T.text),display:"inline-block",cursor:"pointer"}}>📂 Choose Backup File<input type="file" accept=".json,application/json" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;restoreBackup(f);setShowBackup(false);}}/></label>
+          </div>
+        </Modal>}
+
+        {logoPinMode&&<div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setLogoPinMode(false)}>
+          <div style={{...c.card({padding:24}),maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:16}}>🖼 Logo Manager</div>
+            <div style={{marginBottom:14}}>
+              <label style={{...c.btn(T.gold,T.bg),display:"inline-block",cursor:"pointer",marginBottom:10}}>Upload Logo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const data=ev.target.result;const entry={id:uid(),data,isLogo:true};setLogoLib(p=>[entry,...p]);setSettings(p=>({...p,logoImg:data}));pop("Logo updated.","ok");setLogoPinMode(false);};r.readAsDataURL(f);e.target.value="";  }}/></label>
+              {(logoLib||[]).length>0&&<div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:8}}>Saved logos:</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {(logoLib||[]).map(l=><div key={l.id} style={{position:"relative",cursor:"pointer"}} onClick={()=>{setSettings(p=>({...p,logoImg:l.data}));pop("Logo selected.","ok");setLogoPinMode(false);}}>
+                    <img src={l.data} alt="logo" style={{width:56,height:56,borderRadius:"50%",objectFit:"cover",border:"2px solid "+(settings.logoImg===l.data?T.gold:T.border)}}/>
+                  </div>)}
+                </div>
+              </div>}
+            </div>
+            <button style={c.bsm()} onClick={()=>setLogoPinMode(false)}>Close</button>
+          </div>
+        </div>}
+
+        <Notif msg={notify&&notify.msg} type={notify&&notify.type} onClose={()=>setNotify(null)}/>
+      </div>
       )}
-
-      {/* API Export */}
-      {showApi&&(
-        <Modal title="⇄ API / Export & Diagnostics" onClose={()=>setShowApi(false)} wide>
-
-          {/* ── LIVE PAYLOAD ── */}
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>📦 Current Transaction Payload</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:8}}>This is the exact JSON that gets sent to Square, Shopify, Xero and webhooks. Use it to verify your data before testing integrations.</div>
-          <pre style={{background:T.surface,padding:12,borderRadius:6,fontSize:10,color:T.muted,overflowX:"auto",maxHeight:220,marginBottom:8}}>
-            {JSON.stringify(exportPayload(),null,2)}
-          </pre>
-          <div style={{...c.row(10),marginBottom:20,flexWrap:"wrap"}}>
-            <button style={c.btn(T.gold,T.bg)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(JSON.stringify(exportPayload(),null,2));pop("JSON copied.","ok");}}>Copy JSON</button>
-            {settings.webhookUrl&&<button style={c.btn(T.green,T.bg)} onClick={()=>{fetch(settings.webhookUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(exportPayload())}).then(()=>pop("Pushed to webhook.","ok")).catch(()=>pop("Webhook failed.","err"));}}>Push Webhook</button>}
-          </div>
-
-          {/* ── SQUARE DIAGNOSTICS ── */}
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>⬡ Square — Connection Test</div>
-          <div style={{...c.card({padding:12}),marginBottom:6,fontSize:11,color:T.muted}}>
-            <div>Token: <span style={{color:settings.squareToken?T.green:T.red}}>{settings.squareToken?settings.squareToken.slice(0,12)+"…":"Not set"}</span></div>
-            <div>Location ID: <span style={{color:settings.squareLoc?T.green:T.red}}>{settings.squareLoc||"Not set"}</span></div>
-            <div style={{marginTop:6,fontSize:10}}>⚠ Square tokens start with <strong>EAAAl</strong> (live) or <strong>EAAAlhb</strong> (sandbox). Location IDs are alphanumeric ~10 chars.</div>
-          </div>
-          <button style={{...c.btn(T.gold,T.bg),marginBottom:4}} onClick={async()=>{
-            if(!settings.squareToken||!settings.squareLoc){pop("Add Square credentials in Settings first.","warn");return;}
-            pop("Testing Square connection…","ok");
-            try{
-              const r=await fetch("https://connect.squareup.com/v2/locations/"+settings.squareLoc,{
-                headers:{"Authorization":"Bearer "+settings.squareToken,"Square-Version":"2024-11-20"},
-              });
-              const d=await r.json();
-              if(d.location) pop("✓ Square OK — Location: "+d.location.name+" ("+d.location.status+")","ok");
-              else pop("✗ Square error: "+(d.errors&&d.errors[0]&&d.errors[0].detail||JSON.stringify(d)),"err");
-            }catch(e){pop("✗ Square connection failed: "+e.message,"err");}
-          }}>⬡ Test Square Connection</button>
-          <div style={{fontSize:10,color:T.muted,marginBottom:16}}>
-            Troubleshooting: <strong>401</strong> = wrong token · <strong>404</strong> = wrong Location ID · <strong>CORS</strong> = test after deployment, not in StackBlitz · Get tokens at <strong>developer.squareup.com → Apps → OAuth</strong>
-          </div>
-
-          {/* ── SHOPIFY DIAGNOSTICS ── */}
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>🛍 Shopify — Connection Test</div>
-          <div style={{...c.card({padding:12}),marginBottom:6,fontSize:11,color:T.muted}}>
-            <div>Domain: <span style={{color:settings.shopifyDomain?T.green:T.red}}>{settings.shopifyDomain||"Not set"}</span></div>
-            <div>Token: <span style={{color:settings.shopifyToken?T.green:T.red}}>{settings.shopifyToken?settings.shopifyToken.slice(0,12)+"…":"Not set"}</span></div>
-            <div style={{marginTop:6,fontSize:10}}>⚠ Domain = <strong>yourstore.myshopify.com</strong> (no https://). Token starts with <strong>shpat_</strong>. Needs scopes: write_orders, write_draft_orders.</div>
-          </div>
-          <button style={{...c.btn(T.gold,T.bg),marginBottom:4}} onClick={async()=>{
-            if(!settings.shopifyDomain||!settings.shopifyToken){pop("Add Shopify credentials in Settings first.","warn");return;}
-            pop("Testing Shopify connection…","ok");
-            try{
-              const r=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/shop.json",{
-                headers:{"X-Shopify-Access-Token":settings.shopifyToken},
-              });
-              const d=await r.json();
-              if(d.shop) pop("✓ Shopify OK — Shop: "+d.shop.name+" ("+d.shop.email+")","ok");
-              else pop("✗ Shopify error: "+JSON.stringify(d.errors||d),"err");
-            }catch(e){pop("✗ Shopify connection failed: "+e.message,"err");}
-          }}>🛍 Test Shopify Connection</button>
-          <div style={{fontSize:10,color:T.muted,marginBottom:16}}>
-            Troubleshooting: <strong>401</strong> = wrong token · <strong>403</strong> = missing scope (write_orders or write_draft_orders) · <strong>404</strong> = wrong domain · Get token at <strong>Shopify Admin → Apps → Develop apps → API credentials</strong>
-          </div>
-
-          {/* ── XERO DIAGNOSTICS ── */}
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>📒 Xero — Connection Test</div>
-          <div style={{...c.card({padding:12}),marginBottom:6,fontSize:11,color:T.muted}}>
-            <div>Bearer token: <span style={{color:settings.xeroToken?T.green:T.red}}>{settings.xeroToken?settings.xeroToken.slice(0,16)+"…":"Not set"}</span></div>
-            <div>Tenant ID: <span style={{color:settings.xeroTenantId?T.green:T.red}}>{settings.xeroTenantId||"Not set"}</span></div>
-            <div>Buy code: <span style={{color:T.white}}>{settings.xeroBuyCode||"310"}</span> · Sell code: <span style={{color:T.white}}>{settings.xeroSellCode||"200"}</span></div>
-            <div style={{marginTop:6,fontSize:10}}>⚠ Xero tokens expire after <strong>30 minutes</strong>. If you get 401, refresh the token in Xero Developer Portal → My Apps → OAuth 2.0 playground.</div>
-          </div>
-          <button style={{...c.btn(T.gold,T.bg),marginBottom:4}} onClick={async()=>{
-            if(!settings.xeroToken){pop("Add Xero Bearer token in Settings first.","warn");return;}
-            pop("Testing Xero connection…","ok");
-            try{
-              const r=await fetch("https://api.xero.com/connections",{
-                headers:{"Authorization":"Bearer "+settings.xeroToken,"Content-Type":"application/json"},
-              });
-              if(r.status===401){pop("✗ Xero 401 — Token expired or invalid. Refresh in Xero Developer Portal.","err");return;}
-              const d=await r.json();
-              if(Array.isArray(d)&&d.length>0){
-                const orgs=d.map(c=>c.tenantName).join(", ");
-                const ids=d.map(c=>c.tenantId);
-                const match=ids.includes(settings.xeroTenantId);
-                pop("✓ Xero OK — Orgs: "+orgs+(match?" · Tenant ID matches ✓":" · ⚠ Tenant ID not found in list"),"ok");
-              } else {
-                pop("✗ Xero: no connections found. Check token has org access.","err");
-              }
-            }catch(e){pop("✗ Xero connection failed: "+e.message,"err");}
-          }}>📒 Test Xero Connection</button>
-          <button style={{...c.btn(T.border,T.text),marginBottom:4,marginLeft:8}} onClick={async()=>{
-            if(!settings.xeroToken){pop("Add Xero token first.","warn");return;}
-            try{
-              const r=await fetch("https://api.xero.com/connections",{
-                headers:{"Authorization":"Bearer "+settings.xeroToken},
-              });
-              const d=await r.json();
-              if(Array.isArray(d)){
-                const txt=d.map(c=>c.tenantName+" → "+c.tenantId).join("\n");
-                navigator.clipboard&&navigator.clipboard.writeText(txt);
-                pop("Tenant IDs copied:\n"+txt,"ok");
-              }
-            }catch(e){pop("Failed: "+e.message,"err");}
-          }}>Copy Tenant IDs</button>
-          <div style={{fontSize:10,color:T.muted,marginBottom:16}}>
-            Troubleshooting: <strong>401</strong> = token expired (30min limit) · <strong>403</strong> = wrong tenant ID · <strong>Account code errors</strong> = code does not exist in your Xero chart of accounts · Account 310 = Purchases, 200 = Revenue (default AU Xero). Verify in Xero: Accounting, then Chart of Accounts.
-          </div>
-
-          {/* ── GOOGLE SHEETS FORMAT ── */}
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>📊 Google Sheets — REST Format</div>
-          <pre style={{background:T.surface,padding:12,borderRadius:6,fontSize:10,color:T.muted,overflowX:"auto",marginBottom:4}}>
-{"PUT https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/{RANGE}\n?valueInputOption=USER_ENTERED\nAuthorization: Bearer {OAUTH_TOKEN}\nContent-Type: application/json\n\nBody: { \"values\": [[\"key\",\"value\"], ...] }"}
-          </pre>
-          <div style={{fontSize:10,color:T.muted,marginBottom:8}}>Get Sheet ID from the URL: docs.google.com/spreadsheets/d/<strong>THIS_PART</strong>/edit</div>
-
-        </Modal>
-      )}
-
-        {/* ── LOGO MODAL ── */}
-        {showLogoLib&&(
-          <Modal title="🖼 Logo" onClose={()=>setShowLogoLib(false)} wide>
-            <div style={{fontSize:11,color:T.muted,marginBottom:12}}>Upload images here. Tick one to use it as the app logo. Images are stored locally on this device.</div>
-            {/* Drop zone */}
-            <div
-              style={{border:"2px dashed "+(logoDragOver?T.gold:T.border),borderRadius:8,padding:"24px 16px",textAlign:"center",marginBottom:16,background:logoDragOver?T.goldBg:"transparent",transition:"all 0.15s",cursor:"pointer"}}
-              onDragOver={e=>{e.preventDefault();setLogoDragOver(true);}}
-              onDragLeave={()=>setLogoDragOver(false)}
-              onDrop={e=>{
-                e.preventDefault();setLogoDragOver(false);
-                const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith("image/"));
-                files.forEach(f=>{
-                  const r=new FileReader();
-                  r.onload=ev=>checkPhotoSize(ev.target.result,d=>{
-                    setLogoLib(p=>[...p,{id:uid(),data:d,isLogo:false}]);
-                    pop("Image added.","ok");
-                  });
-                  r.readAsDataURL(f);
-                });
-              }}>
-              <div style={{fontSize:28,marginBottom:6}}>📂</div>
-              <div style={{fontSize:13,color:logoDragOver?T.gold:T.muted,fontWeight:"bold"}}>Drop images here</div>
-              <div style={{fontSize:11,color:T.muted,marginTop:4}}>or</div>
-              <label style={{display:"inline-block",marginTop:8,...c.btn(T.gold,T.bg,{fontSize:11,padding:"8px 18px",cursor:"pointer"})}}>
-                Browse Files
-                <input type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>{
-                  const files=Array.from(e.target.files||[]);
-                  files.forEach(f=>{
-                    const r=new FileReader();
-                    r.onload=ev=>checkPhotoSize(ev.target.result,d=>{
-                      setLogoLib(p=>[...p,{id:uid(),data:d,isLogo:false}]);
-                      pop("Image added.","ok");
-                    });
-                    r.readAsDataURL(f);
-                  });
-                  e.target.value="";
-                }}/>
-              </label>
-            </div>
-            {/* Image grid */}
-            {logoLib.length===0
-              ?<div style={{color:T.muted,textAlign:"center",padding:20,fontSize:12}}>No images yet. Drop or browse to add your logo.</div>
-              :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:12}}>
-                {(logoLib||[]).map(img=>{
-                  const isActive=settings.logoImg===img.data;
-                  return(
-                    <div key={img.id} style={{...c.card({padding:8}),borderColor:isActive?T.gold:T.border,borderWidth:isActive?2:1,position:"relative",textAlign:"center"}}>
-                      <img src={img.data} alt={img.name} style={{width:"100%",height:80,objectFit:"contain",borderRadius:4,marginBottom:6,background:T.surface}}/>
-                      
-                      <div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                        <button
-                          style={{...c.bsm(isActive?T.goldBg:T.border,isActive?T.gold:T.muted),fontSize:10,padding:"4px 8px",fontWeight:isActive?"bold":"normal"}}
-                          onClick={()=>{
-                            setSettings(p=>({...p,logoImg:isActive?null:img.data}));
-                            setLogoLib(p=>p.map(x=>({...x,isLogo:x.id===img.id&&!isActive})));
-                            pop(isActive?"Logo removed.":img.name+" set as logo.","ok");
-                          }}>
-                          {isActive?"✓ Logo":"Set Logo"}
-                        </button>
-                        <button style={{...c.bsm(T.border,T.muted),fontSize:10,padding:"4px 8px"}}
-                          title="Download image"
-                          onClick={()=>{
-                            const a=document.createElement("a");
-                            a.href=img.data;
-                            a.download=(img.name||"logo")+".png";
-                            a.click();
-                            pop("Downloading "+( img.name||"image")+"…","ok");
-                          }}>⬇</button>
-                        <button style={{...c.bsm(T.redBg,T.red),fontSize:10,padding:"4px 8px"}}
-                          onClick={()=>{
-                            if(isActive)setSettings(p=>({...p,logoImg:null}));
-                            setLogoLib(p=>p.filter(x=>x.id!==img.id));
-                            pop("Image removed.","ok");
-                          }}>🗑</button>
-                      </div>
-                      {isActive&&<div style={{position:"absolute",top:4,right:4,background:T.gold,borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:T.bg,fontWeight:"bold"}}>✓</div>}
-                    </div>
-                  );
-                })}
-              </div>
-            }
-          </Modal>
-        )}
-
-        {/* ── STOCK EDIT MODAL ── */}
-        {editStockId&&(
-          <Modal title="✎ Edit Stock Item" onClose={()=>setEditStockId(null)}>
-            {[["Description","description","text"],["Weight (g)","weight_g","number"],["Bought Price ($)","price","number"],["Storage Location","storageLocation","text"]].map(([lbl,key,type])=>(
-              <div key={key} style={{marginBottom:10}}>
-                <label style={c.lbl}>{lbl}</label>
-                <input style={c.inp()} type={type} value={editStockVal[key]||""} onChange={e=>setEditStockVal(p=>({...p,[key]:e.target.value}))}/>
-              </div>
-            ))}
-            <div style={{marginBottom:10}}>
-              <label style={c.lbl}>Purity</label>
-              <select style={c.inp()} value={editStockVal.purity||""} onChange={e=>setEditStockVal(p=>({...p,purity:e.target.value}))}>
-                <option value="">— select —</option>
-                <optgroup label="Gold">{Object.keys(GOLD_P).map(k=><option key={k} value={k}>{k}</option>)}</optgroup>
-                <optgroup label="Silver">{Object.keys(SILV_P).map(k=><option key={k} value={k}>{k}</option>)}</optgroup>
-              </select>
-            </div>
-            <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={()=>{
-              setStock(p=>p.map(x=>x.id===editStockId?{...x,
-                description:editStockVal.description||x.description,
-                weight_g:editStockVal.weight_g?parseFloat(editStockVal.weight_g)||x.weight_g:x.weight_g,
-                purity:editStockVal.purity||x.purity,
-                storageLocation:editStockVal.storageLocation||x.storageLocation,
-                price:editStockVal.price?parseFloat(editStockVal.price)||x.price:x.price,
-              }:x));
-              setEditStockId(null);pop("Item updated.","ok");
-            }}>Save Changes</button>
-          </Modal>
-        )}
-
-        {/* ── RECEIPT MODAL ── */}
-        {receiptTx&&(
-          <Modal title="🧾 Receipt / Contract" onClose={()=>setReceiptTx(null)} wide>
-            <pre style={{background:T.surface,padding:14,borderRadius:6,fontSize:11,color:T.text,overflowX:"auto",whiteSpace:"pre-wrap",fontFamily:"monospace",lineHeight:1.6}}>{makeReceipt(receiptTx)}</pre>
-            <div style={c.row(10)}>
-              <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlFile(makeReceipt(receiptTx),"receipt-"+receiptTx.id+".txt","text/plain");pop("Receipt downloaded.","ok");}}>⬇ Download</button>
-              <button style={c.btn(T.green,T.bg)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(makeReceipt(receiptTx));pop("Copied to clipboard.","ok");}}>Copy</button>
-            </div>
-          </Modal>
-        )}
-
-        {/* ── EOD SUMMARY MODAL ── */}
-        {showEOD&&(
-          <Modal title="📋 End of Day Summary" onClose={()=>setShowEOD(false)} wide>
-            <div style={{fontSize:12,color:T.muted,marginBottom:12}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
-            <div style={c.g2(12)}>
-              {[{l:"Transactions",v:todayTx().length,col:T.white},{l:"Total Bought",v:fmtAUD(todayTx().reduce((a,t)=>a+(t.buyTotal||0),0)),col:T.green},{l:"Total Sold",v:fmtAUD(todayTx().reduce((a,t)=>a+(t.sellTotal||0),0)),col:T.gold},{l:"Net",v:fmtAUD(Math.abs(todayTx().reduce((a,t)=>a+(t.sellTotal||0),0)-todayTx().reduce((a,t)=>a+(t.buyTotal||0),0))),col:T.gold}].map(st=>(
-                <div key={st.l} style={c.card({padding:12})}>
-                  <div style={c.lbl}>{st.l}</div>
-                  <div style={{fontSize:20,fontWeight:"bold",color:st.col}}>{st.v}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{marginTop:12}}>
-              {[["💵 Cash","cash"],["💳 Card","card"],["🏦 Bank","bank"]].map(([lbl,pay])=>(
-                <div key={pay} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid "+T.border+"33",fontSize:12}}>
-                  <span style={{color:T.muted}}>{lbl}</span>
-                  <span style={{color:T.white}}>{todayTx().filter(t=>t.payment===pay).length} tx · {fmtAUD(todayTx().filter(t=>t.payment===pay).reduce((a,t)=>a+(t.buyTotal||0)+(t.sellTotal||0),0))}</span>
-                </div>
-              ))}
-            </div>
-            {todayTx().some(t=>t.ttrStatus==="PENDING")&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR pending — file with AUSTRAC within 10 business days.</div>}
-            {todayTx().some(t=>t.smrFlagged)&&<div style={{...c.bnr("warn"),marginTop:8}}>🚩 SMR-flagged transactions today.</div>}
-            <button style={{...c.btn(T.gold,T.bg),width:"100%",marginTop:14}} onClick={()=>{
-              const txs=todayTx();const b=settings.businessName||"";
-              const paySum=(pay)=>fmtAUD(txs.filter(t=>t.payment===pay).reduce((a,t)=>a+(t.buyTotal||0)+(t.sellTotal||0),0));
-              const txt=["EOD REPORT "+todayStr(),b,"","Transactions: "+txs.length,"Bought: "+fmtAUD(txs.reduce((a,t)=>a+(t.buyTotal||0),0)),"Sold: "+fmtAUD(txs.reduce((a,t)=>a+(t.sellTotal||0),0)),"Cash: "+paySum("cash"),"Card: "+paySum("card"),"Bank: "+paySum("bank")].join("\n");
-              dlFile(txt,"eod-"+todayStr()+".txt","text/plain");
-              pop("EOD report downloaded.","ok");
-            }}>⬇ Download EOD Report</button>
-          </Modal>
-        )}
-
-        {/* ── VENDOR DB MODAL ── */}
-        {showVendors&&(
-          <Modal title="🏪 Supplier / Vendor Database" onClose={()=>setShowVendors(false)} wide>
-            <div style={{...c.bnr("info"),marginBottom:10}}>Professional suppliers who sell to you regularly. Separate from one-off KYC client records.</div>
-            <button style={{...c.btn(T.gold,T.bg),marginBottom:10}} onClick={()=>{setEditVendor("new");setVendorForm({});}}>+ Add Supplier</button>
-            {editVendor&&(
-              <div style={{...c.card({padding:14}),marginBottom:10}}>
-                <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:10}}>{editVendor==="new"?"New Supplier":"Edit Supplier"}</div>
-                {[["Business / Trade Name","name"],["Contact Name","contact"],["Phone","phone"],["ABN / ID","abn"],["Address","address"],["Metal types supplied","metals"],["Notes","notes"]].map(([lbl,key])=>(
-                  <div key={key} style={{marginBottom:8}}>
-                    <label style={c.lbl}>{lbl}</label>
-                    <input style={c.inp()} value={vendorForm[key]||""} onChange={e=>setVendorForm(p=>({...p,[key]:e.target.value}))}/>
-                  </div>
-                ))}
-                <div style={c.row(10)}>
-                  <button style={c.btn(T.gold,T.bg)} onClick={()=>{
-                    if(!vendorForm.name){pop("Supplier name required.","warn");return;}
-                    if(editVendor==="new") setVendors(p=>[...p,{id:uid(),...vendorForm,createdAt:nowISO()}]);
-                    else setVendors(p=>p.map(v=>v.id===editVendor?{...v,...vendorForm}:v));
-                    setEditVendor(null);setVendorForm({});pop("Supplier saved.","ok");
-                  }}>Save</button>
-                  <button style={c.bsm()} onClick={()=>{setEditVendor(null);setVendorForm({});}}>Cancel</button>
-                </div>
-              </div>
-            )}
-            {vendors.length===0&&!editVendor&&<div style={{color:T.muted,padding:20,textAlign:"center"}}>No suppliers yet.</div>}
-            {vendors.map(v=>(
-              <div key={v.id} style={{...c.card({padding:12}),marginBottom:8}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontWeight:"bold",color:T.white,fontSize:13}}>{v.name}</div>
-                    {v.contact&&<div style={{fontSize:11,color:T.muted}}>{v.contact}{v.phone?" · "+v.phone:""}</div>}
-                    {v.abn&&<div style={{fontSize:11,color:T.muted}}>ABN/ID: {v.abn}</div>}
-                    {v.metals&&<div style={{fontSize:11,color:T.gold}}>Supplies: {v.metals}</div>}
-                    {v.notes&&<div style={{fontSize:11,color:T.muted,fontStyle:"italic"}}>{v.notes}</div>}
-                  </div>
-                  <div style={{display:"flex",gap:6}}>
-                    <button style={c.bsm(T.border,T.muted)} onClick={()=>{setEditVendor(v.id);setVendorForm({...v});}}>✎</button>
-                    <button style={c.bsm(T.redBg,T.red)} onClick={()=>setVendors(p=>p.filter(x=>x.id!==v.id))}>🗑</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Modal>
-        )}
-
-        {/* ── STAFF PROFILES MODAL ── */}
-        {showStaff&&(
-          <Modal title="👥 Staff Profiles" onClose={()=>setShowStaff(false)} wide>
-            <button style={{...c.btn(T.gold,T.bg),marginBottom:10}} onClick={()=>setStaffForm({name:"",pin:"",role:"staff"})}>+ Add Staff</button>
-            {staffForm.name!==undefined&&(
-              <div style={{...c.card({padding:14}),marginBottom:10}}>
-                {[["Name","name","text"],["PIN","pin","password"],["Role","role","text"]].map(([lbl,key,type])=>(
-                  <div key={key} style={{marginBottom:8}}>
-                    <label style={c.lbl}>{lbl}</label>
-                    <input style={c.inp()} type={type} value={staffForm[key]||""} onChange={e=>setStaffForm(p=>({...p,[key]:e.target.value}))}/>
-                  </div>
-                ))}
-                <div style={c.row(10)}>
-                  <button style={c.btn(T.gold,T.bg)} onClick={()=>{
-                    if(!staffForm.name||!staffForm.pin){pop("Name and PIN required.","warn");return;}
-                    const exists=staffList.find(s=>s.id===staffForm.id);
-                    if(exists) setStaffList(p=>p.map(s=>s.id===staffForm.id?{...s,...staffForm}:s));
-                    else setStaffList(p=>[...p,{id:uid(),...staffForm,createdAt:nowISO()}]);
-                    setStaffForm({});pop("Staff saved.","ok");
-                  }}>Save</button>
-                  <button style={c.bsm()} onClick={()=>setStaffForm({})}>Cancel</button>
-                </div>
-              </div>
-            )}
-            {staffList.length===0&&staffForm.name===undefined&&<div style={{color:T.muted,padding:20,textAlign:"center"}}>No staff profiles yet.</div>}
-            {(staffList||[]).map(s=>(
-              <div key={s.id} style={{...c.card({padding:12}),marginBottom:8,borderLeft:"3px solid "+(activeStaff===s.id?T.green:T.border)}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontWeight:"bold",color:T.white}}>{s.name}</div>
-                    <div style={{fontSize:11,color:T.muted}}>{s.role||"staff"}{activeStaff===s.id?" · ✓ Active":""}</div>
-                  </div>
-                  <div style={{display:"flex",gap:6}}>
-                    <button style={c.bsm(activeStaff===s.id?T.greenBg:T.border,activeStaff===s.id?T.green:T.muted)} onClick={()=>{setActiveStaff(activeStaff===s.id?"":s.id);pop(activeStaff===s.id?"Deselected.":s.name+" set as active.","ok");}}>
-                      {activeStaff===s.id?"✓ Active":"Select"}
-                    </button>
-                    <button style={c.bsm(T.border,T.muted)} onClick={()=>setStaffForm({...s})}>✎</button>
-                    <button style={c.bsm(T.redBg,T.red)} onClick={()=>setStaffList(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </Modal>
-        )}
-
-        {/* ── CLIENT NOTE MODAL ── */}
-        {cliNoteId&&(
-          <Modal title="📝 Client Note" onClose={()=>setCliNoteId(null)}>
-            <label style={c.lbl}>Note (internal — not shown to client)</label>
-            <textarea style={{...c.inp(),minHeight:80,marginBottom:10}} value={cliNoteVal} onChange={e=>setCliNoteVal(e.target.value)} placeholder="e.g. Regular supplier. Trustworthy. Brings 22ct chains."/>
-            <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={()=>{
-              setTxList(p=>p.map(x=>x.id===cliNoteId?{...x,clientNote:cliNoteVal}:x));
-              setCliNoteId(null);pop("Note saved.","ok");
-            }}>Save Note</button>
-          </Modal>
-        )}
-
-        {/* ── POLICE REPORT MODAL ── */}
-        {showPolice&&(
-          <div style={{position:"fixed",inset:0,background:"#000000d0",zIndex:1500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-            onClick={()=>setShowPolice(false)}>
-            <div style={{...c.card({padding:24}),maxWidth:480,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-              <div style={{...c.row(0),justifyContent:"space-between",marginBottom:20}}>
-                <span style={{fontSize:15,fontWeight:"bold",color:T.white}}>🚔 Police Report</span>
-                <button style={c.bsm()} onClick={()=>setShowPolice(false)}>✕</button>
-              </div>
-              <div style={{marginBottom:14}}>
-                <label style={c.lbl}>State / Territory</label>
-                <select style={{...c.sel(),width:"100%"}} value={settings.state||"VIC"} onChange={e=>setSettings(p=>({...p,state:e.target.value}))}>
-                  {["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(s=>(
-                    <option key={s} value={s}>{s} — {(STATE_INFO[s]||{}).name||s}</option>
-                  ))}
-                </select>
-              </div>
-              {(()=>{const st=STATE_INFO[settings.state||"VIC"]||STATE_INFO.VIC;return(
-                <div style={{...c.bnr("info"),marginBottom:14,fontSize:11}}>
-                  <strong>{st.act}</strong><br/>
-                  Hold period: <strong>{st.hold}</strong> · Submit: <strong>{st.freq}</strong><br/>
-                  {st.note}
-                </div>
-              );})()}
-
-              {/* Option 1: Immediate suspicious item report */}
-              <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.red}}>
-                <div style={{fontSize:12,fontWeight:"bold",color:T.red,marginBottom:6}}>🚨 Immediate — Suspicious Item Report</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
-                  Generates a report of all SMR-flagged transactions. Use when you have purchased an item you suspect may be stolen and need to notify police immediately.
-                </div>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  <button style={c.btn(T.red,"#fff",{fontSize:12})} onClick={()=>{
-                    const csv=genPoliceReport(new Date(0),new Date(),true,settings.state||"VIC");
-                    const flagged=txList.filter(t=>t.smrFlagged).length;
-                    if(flagged===0){pop("No SMR-flagged transactions found.","warn");return;}
-                    dlFile(csv,"suspicious_items_"+(settings.state||"VIC")+"_"+new Date().toISOString().slice(0,10)+".csv","text/csv");
-                    pop("Suspicious items report downloaded — "+flagged+" transaction(s).","ok");
-                  }}>⬇ Download CSV</button>
-                  {((STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail)&&(
-                    <button style={c.bsm(T.border,T.muted)} onClick={()=>{
-                      const stateEmail=(STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail||"";
-                            window.open("mailto:"+stateEmail+
-                        "?subject=Suspicious+Item+Report+—+"+(settings.businessName||"Secondhand+Dealer")+
-                        "&body=Please+find+attached+our+suspicious+item+report.+Licence+No:+"+(settings.dealerLicenceNo||"[Licence]")+
-                        ".+ABN:+"+(settings.abn||"[ABN]")+".");
-                    }}>📧 Open Email Draft</button>
-                  )}
-                </div>
-              </div>
-
-              {/* Option 2: Weekly report */}
-              <div style={{...c.card({padding:14}),marginBottom:14,borderLeft:"3px solid "+T.gold}}>
-                <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:6}}>📋 Weekly Transaction Report</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
-                  Covers all buy transactions in the selected 7-day period. Required weekly under the Secondhand Dealers & Pawnbrokers Act 1989 (Vic).
-                </div>
-                {(()=>{
-                  const now=new Date();
-                  const dayOfWeek=now.getDay();
-                  const lastMonday=new Date(now);lastMonday.setDate(now.getDate()-(dayOfWeek===0?6:dayOfWeek-1));lastMonday.setHours(0,0,0,0);
-                  const lastSunday=new Date(lastMonday);lastSunday.setDate(lastMonday.getDate()+6);lastSunday.setHours(23,59,59,999);
-                  const txCount=txList.filter(t=>{
-                    if(!t.date) return false;
-                    const d=new Date(t.date);
-                    return d>=lastMonday&&d<=lastSunday&&(t.items||[]).some(i=>i.mode==="buy");
-                  }).length;
-                  return(
-                    <div>
-                      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
-                        Period: {lastMonday.toLocaleDateString("en-AU")} — {lastSunday.toLocaleDateString("en-AU")} · {txCount} buy transaction(s)
-                      </div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        <button style={c.btn(T.gold,T.bg,{fontSize:12})} onClick={()=>{
-                          const csv=genPoliceReport(lastMonday,lastSunday,false,settings.state||"VIC");
-                          dlFile(csv,"police_report_"+(settings.state||"VIC")+"_"+lastMonday.toISOString().slice(0,10)+".csv","text/csv");
-                          pop("Weekly police report downloaded — "+txCount+" transaction(s).","ok");
-                        }}>⬇ Download CSV</button>
-                        {((STATE_INFO[settings.state||"VIC"]||{}).defaultEmail||settings.policeEmail)&&(
-                          <button style={c.bsm(T.border,T.muted)} onClick={()=>{
-                            window.open("mailto:"+settings.policeEmail+
-                              "?subject=Weekly+Transaction+Report+—+"+(settings.businessName||"Secondhand+Dealer")+
-                              "+w/e+"+(lastSunday.toLocaleDateString("en-AU").replace(/\//g,"-"))+
-                              "&body=Please+find+attached+our+weekly+transaction+report+for+the+period+"+
-                              lastMonday.toLocaleDateString("en-AU")+" to "+lastSunday.toLocaleDateString("en-AU")+
-                              ".+Dealer+Licence+No:+"+(settings.dealerLicenceNo||"[Licence]")+
-                              ".+ABN:+"+(settings.abn||"[ABN]")+".");
-                          }}>📧 Open Email Draft</button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Station config reminder */}
-              {(!settings.policeEmail||!settings.dealerLicenceNo)&&(
-                <div style={c.bnr("warn")}>
-                  ⚠ Set your <strong>police station email</strong> and <strong>dealer licence number</strong> in Settings → Business to enable email drafts.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── BACKUP / RESTORE MODAL ── */}
-        {showBackup&&(
-          <Modal title="💾 Backup & Restore" onClose={()=>setShowBackup(false)} wide>
-            <div style={{...c.bnr("warn"),marginBottom:12}}>Backup includes all transactions, stock, catalog, vendors and staff. Photos are not included (too large).</div>
-            <button style={{...c.btn(T.gold,T.bg),width:"100%",marginBottom:12}} onClick={dlBackup}>⬇ Download Backup (.json)</button>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Restore from backup</div>
-            <div style={{...c.bnr("block"),marginBottom:10}}>⚠ Restore will overwrite all current data. Cannot be undone.</div>
-            <label style={{...c.btn(T.border,T.text,{display:"block",textAlign:"center",cursor:"pointer",padding:10,fontSize:12})}}>
-              📂 Select Backup File (.json)
-              <input type="file" accept=".json" style={{display:"none"}} onChange={e=>{
-                const f=e.target.files&&e.target.files[0];if(!f)return;
-                setPinModal({reason:"Restore backup — overwrites ALL current data. Manager PIN required.",cb:()=>restoreBackup(f)});
-                setPinVal("");e.target.value="";
-              }}/>
-            </label>
-          </Modal>
-        )}
-
-      {notify&&<Notif msg={notify.msg} type={notify.type} onClose={()=>setNotify(null)}/>}
     </div>
   );
 }
