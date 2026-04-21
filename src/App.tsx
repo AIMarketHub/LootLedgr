@@ -346,6 +346,7 @@ export default function Loot(){
   const[showApi,setShowApi]=useState(false);
   const[selTx,setSelTx]=useState(null);
   const[notify,setNotify]=useState(null);
+  const[apiError,setApiError]=useState("");
   const[editProd,setEditProd]=useState(null);
   const[newProd,setNewProd]=useState({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});
   const[addMode,setAddMode]=useState("buy");
@@ -406,45 +407,50 @@ export default function Loot(){
     const{goldApiKey:k1,metalsApiKey:k2,metalsDevKey:k3}=settings;
     if(!k1&&!k2&&!k3){pop("No API keys configured in Settings → Spot Feed.","warn");return;}
     pop("Fetching live prices…","ok");
+    const errs=[];
     const applyLive=(g,s,src)=>{manualTs.current=0;store.set("manualSpotTs",0);setGSpot(parseFloat(Number(g).toFixed(2)));setSSpot(parseFloat(Number(s).toFixed(2)));setSpotStatus("live");setSpotSource(src);pop("🟢 Live prices from "+src+".","ok");};
     if(k1){
       try{
-        const[gR,sR]=await Promise.all([
-          fetch("https://www.goldapi.io/api/XAU/AUD",{"headers":{"x-access-token":k1}}),
-          fetch("https://www.goldapi.io/api/XAG/AUD",{"headers":{"x-access-token":k1}}),
-        ]);
-        const gD=await gR.json(), sD=await sR.json();
-        if(!gR.ok){pop("GoldAPI error "+gR.status+": "+(gD.message||gD.error||JSON.stringify(gD)),"warn");}
+        const gR=await fetch("https://www.goldapi.io/api/XAU/AUD",{headers:{"x-access-token":k1}});
+        const gD=await gR.json();
+        console.log("GoldAPI XAU response",gR.status,gD);
+        if(!gR.ok){errs.push("GoldAPI "+gR.status+": "+(gD.message||gD.error||gD.info||JSON.stringify(gD).slice(0,60)));}
         else{
+          const sR=await fetch("https://www.goldapi.io/api/XAG/AUD",{headers:{"x-access-token":k1}});
+          const sD=await sR.json();
           const g=gD.price||gD.ask||gD.bid, s=sD.price||sD.ask||sD.bid;
           if(g&&s){applyLive(g,s,"GoldAPI");return;}
-          else pop("GoldAPI: unexpected response — "+JSON.stringify(gD).slice(0,80),"warn");
+          else errs.push("GoldAPI: got response but no price field. Got: "+JSON.stringify(gD).slice(0,80));
         }
-      }catch(e){pop("GoldAPI network error: "+e.message+" — check CORS / internet","warn");}
+      }catch(e){errs.push("GoldAPI fetch failed: "+e.message);}
     }
     if(k2){
       try{
         const r=await fetch("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");
         const d=await r.json();
-        if(!r.ok||!d.success){pop("Metals-API error: "+(d.message||d.error||r.status),"warn");}
+        console.log("Metals-API response",r.status,d);
+        if(!r.ok||!d.success){errs.push("Metals-API "+r.status+": "+(d.message||d.error||"success=false"));}
         else{
           const g=d.rates&&(d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null));
           const s=d.rates&&(d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null));
           if(g&&s){applyLive(g,s,"Metals-API");return;}
-          else pop("Metals-API: no AUD rates in response","warn");
+          else errs.push("Metals-API: rates present but no XAU/XAG found");
         }
-      }catch(e){pop("Metals-API network error: "+e.message,"warn");}
+      }catch(e){errs.push("Metals-API fetch failed: "+e.message);}
     }
     if(k3){
       try{
         const r=await fetch("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");
         const d=await r.json();
-        if(!r.ok){pop("Metals.Dev error "+r.status+": "+(d.message||d.error||"check key"),"warn");}
+        console.log("Metals.Dev response",r.status,d);
+        if(!r.ok){errs.push("Metals.Dev "+r.status+": "+(d.message||d.error||"check key"));}
         else if(d.metals&&d.metals.gold&&d.metals.silver){applyLive(d.metals.gold,d.metals.silver,"Metals.Dev");return;}
-        else pop("Metals.Dev: unexpected response — "+JSON.stringify(d).slice(0,80),"warn");
-      }catch(e){pop("Metals.Dev network error: "+e.message,"warn");}
+        else errs.push("Metals.Dev: unexpected shape: "+JSON.stringify(d).slice(0,80));
+      }catch(e){errs.push("Metals.Dev fetch failed: "+e.message);}
     }
-    pop("All APIs failed — see error messages above. Keys may be invalid or expired.","warn");
+    const msg=errs.length ? errs.join(" | ") : "All APIs failed — no keys configured?";
+    setApiError(msg);
+    pop(msg,"warn");
   };
 
   useEffect(()=>{
@@ -1186,6 +1192,7 @@ export default function Loot(){
                   <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
                 </div>
               </div>
+              {apiError&&<div style={{background:"#2a0a0a",border:"1px solid #cc3333",borderRadius:6,padding:"10px 14px",marginTop:8,fontSize:12,color:"#ff6666",wordBreak:"break-word"}}><strong>API Error:</strong> {apiError}</div>}
               {(catalog||[]).filter(p=>p.active).length===0 ?
                 <div style={{...c.card({padding:40}),textAlign:"center"}}><div style={{fontSize:18,marginBottom:12}}>📂</div><div style={{color:T.white,fontWeight:"bold",marginBottom:8}}>No products in catalog</div><button style={c.btn(T.gold,T.bg,{fontSize:12})} onClick={()=>setShowCat(true)}>+ Add First Product</button></div>
                 :["Gold","Silver","Other"].map(cat=>{const prods=(catalog||[]).filter(p=>p.cat===cat&&p.active);if(!prods.length)return null;return <div key={cat} style={{marginBottom:14}}>
@@ -1304,6 +1311,7 @@ export default function Loot(){
               <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface}}>
                 <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
                 <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
+              {apiError&&<div style={{background:"#2a0a0a",border:"1px solid #cc3333",borderRadius:6,padding:"10px 14px",marginTop:8,fontSize:12,color:"#ff6666",wordBreak:"break-word"}}><strong>API Error:</strong> {apiError}<button style={{marginLeft:10,background:"none",border:"none",color:"#ff6666",cursor:"pointer",fontSize:11}} onClick={()=>setApiError("")}>✕</button></div>}
               </div>
             </div>],
             ["business","🏪 Business Details",<div style={{paddingBottom:14}}>
