@@ -406,19 +406,52 @@ export default function Loot(){
     const{goldApiKey:k1,metalsApiKey:k2,metalsDevKey:k3}=settings;
     if(!k1&&!k2&&!k3){pop("No API keys configured in Settings → Spot Feed.","warn");return;}
     pop("Fetching live prices…","ok");
-    const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok)return null;return await r.json();}catch(_){return null;}};
     const applyLive=(g,s,src)=>{manualTs.current=0;store.set("manualSpotTs",0);setGSpot(parseFloat(Number(g).toFixed(2)));setSSpot(parseFloat(Number(s).toFixed(2)));setSpotStatus("live");setSpotSource(src);pop("🟢 Live prices from "+src+".","ok");};
-    if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applyLive(g,s,"GoldAPI");return;}}
-    if(k2){const d=await tF("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");if(d&&d.success&&d.rates){const g=d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null),s=d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null);if(g&&s){applyLive(g,s,"Metals-API");return;}}}
-    if(k3){const d=await tF("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");if(d&&d.metals&&d.metals.gold&&d.metals.silver){applyLive(d.metals.gold,d.metals.silver,"Metals.Dev");return;}}
-    pop("Could not reach any price API. Check keys in Settings → Spot Feed.","warn");
+    if(k1){
+      try{
+        const[gR,sR]=await Promise.all([
+          fetch("https://www.goldapi.io/api/XAU/AUD",{"headers":{"x-access-token":k1,"Content-Type":"application/json"}}),
+          fetch("https://www.goldapi.io/api/XAG/AUD",{"headers":{"x-access-token":k1,"Content-Type":"application/json"}}),
+        ]);
+        const gD=await gR.json(), sD=await sR.json();
+        if(!gR.ok){pop("GoldAPI error "+gR.status+": "+(gD.message||gD.error||JSON.stringify(gD)),"warn");}
+        else{
+          const g=gD.price||gD.ask||gD.bid, s=sD.price||sD.ask||sD.bid;
+          if(g&&s){applyLive(g,s,"GoldAPI");return;}
+          else pop("GoldAPI: unexpected response — "+JSON.stringify(gD).slice(0,80),"warn");
+        }
+      }catch(e){pop("GoldAPI network error: "+e.message+" — check CORS / internet","warn");}
+    }
+    if(k2){
+      try{
+        const r=await fetch("https://metals-api.com/api/latest?access_key="+k2+"&base=AUD&symbols=XAU,XAG");
+        const d=await r.json();
+        if(!r.ok||!d.success){pop("Metals-API error: "+(d.message||d.error||r.status),"warn");}
+        else{
+          const g=d.rates&&(d.rates.AUDXAU||(d.rates.XAU?1/d.rates.XAU:null));
+          const s=d.rates&&(d.rates.AUDXAG||(d.rates.XAG?1/d.rates.XAG:null));
+          if(g&&s){applyLive(g,s,"Metals-API");return;}
+          else pop("Metals-API: no AUD rates in response","warn");
+        }
+      }catch(e){pop("Metals-API network error: "+e.message,"warn");}
+    }
+    if(k3){
+      try{
+        const r=await fetch("https://api.metals.dev/v1/latest?api_key="+k3+"&currency=AUD&unit=troy_oz");
+        const d=await r.json();
+        if(!r.ok){pop("Metals.Dev error "+r.status+": "+(d.message||d.error||"check key"),"warn");}
+        else if(d.metals&&d.metals.gold&&d.metals.silver){applyLive(d.metals.gold,d.metals.silver,"Metals.Dev");return;}
+        else pop("Metals.Dev: unexpected response — "+JSON.stringify(d).slice(0,80),"warn");
+      }catch(e){pop("Metals.Dev network error: "+e.message,"warn");}
+    }
+    pop("All APIs failed — see error messages above. Keys may be invalid or expired.","warn");
   };
 
   useEffect(()=>{
     const{goldApiKey:k1,metalsApiKey:k2,metalsDevKey:k3}=settings;
     if(!k1&&!k2&&!k3){setSpotStatus("off");return;}
     const applySpot=(g,s,src)=>{setSpotLog(p=>[{t:nowISO(),g,s,src},...p].slice(0,90));if(isManualActive())return;setGSpot(parseFloat(Number(g).toFixed(2)));setSSpot(parseFloat(Number(s).toFixed(2)));setSpotStatus("live");setSpotSource(src);if(settings.goldAlert&&g>=parseFloat(settings.goldAlert))pop("⬡ Gold alert: "+fmtAUD(parseFloat(settings.goldAlert)),"ok");if(settings.silverAlert&&s>=parseFloat(settings.silverAlert))pop("◈ Silver alert: "+fmtAUD(parseFloat(settings.silverAlert)),"ok");};
-    const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok)return null;return await r.json();}catch(_){return null;}};
+    const tF=async(url,h={})=>{try{const r=await fetch(url,{headers:h});if(!r.ok){console.warn("Spot API",r.status,url);return null;}return await r.json();}catch(e){console.warn("Spot API network:",e.message,url);return null;}};
     const fetchSpot=async()=>{
       if(isManualActive()){setSpotStatus("manual");return;}setSpotStatus("stale");
       if(k1){const[gD,sD]=await Promise.all([tF("https://www.goldapi.io/api/XAU/AUD",{"x-access-token":k1,"Content-Type":"application/json"}),tF("https://www.goldapi.io/api/XAG/AUD",{"x-access-token":k1,"Content-Type":"application/json"})]);const g=gD&&(gD.price||gD.ask||gD.bid),s=sD&&(sD.price||sD.ask||sD.bid);if(g&&s){applySpot(parseFloat(g),parseFloat(s),"GoldAPI");return;}}
