@@ -358,8 +358,8 @@ export default function Loot(){
   const prevStockRef=useRef([]);
   const[spotStatus,setSpotStatus]=useState("off");
   const[spotSource,setSpotSource]=useState("");
-  const manualTs=useRef(store.get("manualSpotTs",0));
-  const MANUAL_TTL=60*60*1000;
+  const manualTs=useRef(0); // manual override resets on reload — API always tries fresh
+  const MANUAL_TTL=5*60*1000; // 5 min manual override — API resumes quickly
   const isManualActive=()=>(Date.now()-manualTs.current)<MANUAL_TTL;
 
   T=LIGHT;
