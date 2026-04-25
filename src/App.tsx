@@ -30,8 +30,8 @@ const store={
   del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(_){}},
 };
 
-const SB_URL="https://uimrnctjkwhhgwewgmzm.supabase.co";
-const SB_KEY="sb_publishable_wgIxqpsjftysrlJuWZPS6g_EmDiaoaR";
+const SB_URL=import.meta.env.VITE_SUPABASE_URL;
+const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
 const SHOP_ID="default";
 const sbFetch=async(path,opts={})=>{try{const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});if(!r.ok)return null;const t=await r.text();return t?JSON.parse(t):null;}catch(_){return null;}};
 const ts=()=>new Date().toISOString();
