@@ -2,24 +2,10 @@
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {THRESH,TROY_OZ,APP_VERSION,GOLD_P,SILV_P,STATE_INFO,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
+import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
-
-// Defensive sanitisers — guard all data from users, servers, APIs
-const sN=n=>(n==null||isNaN(n)||!isFinite(n))?0:Number(n);
-const sS=v=>v==null?"":String(v);
-const uid=()=>Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase();
-const fmt2=n=>sN(n).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtAUD=n=>(n==null||isNaN(n)||!isFinite(n))?"—":"$"+fmt2(n);
-const fmtDate=iso=>iso?new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
-const addHours=(iso,h)=>new Date(new Date(iso).getTime()+h*3600000).toISOString();
-const hoursLeft=iso=>Math.max(0,(new Date(iso)-Date.now())/3600000);
-const fmtHold=iso=>{if(!iso)return"—";const h=hoursLeft(iso);if(h<=0)return"EXPIRED";return Math.floor(h)+"h "+Math.floor((h%1)*60)+"m";};
-const sevenYrsFrom=iso=>addHours(iso,7*365.25*24);
-const isExpired7yr=iso=>iso&&new Date(iso)<new Date();
-const nowISO=()=>new Date().toISOString();
-const todayStr=()=>nowISO().slice(0,10);
 
 const store={
   get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
@@ -61,7 +47,6 @@ function runMigration(){
 }
 runMigration();
 
-const invDay=()=>{const d=new Date();return String(d.getDate()).padStart(2,"0")+String(d.getMonth()+1).padStart(2,"0")+String(d.getFullYear()).slice(-2);};
 function peekInv(){const t=invDay(),r=store.get("invday",{d:"",n:0});return t+((r.d===t?r.n:0)+1);}
 function makeInv(){const t=invDay();let r=store.get("invday",{d:"",n:0});if(r.d!==t)r={d:t,n:0};r.n++;store.set("invday",r);return t+r.n;}
 
@@ -167,11 +152,6 @@ function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
 function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}
 
 const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS(abn)+"\n\nWe collect your personal information (name, DOB, address, ID) to verify your identity as required by:\n• Anti-Money Laundering & Counter-Terrorism Financing Act 2006 (Cth)\n• Second-Hand Dealers & Pawnbrokers Act 1989 (Vic)\n\nRetained 7 years. May be reported to AUSTRAC or Victoria Police if required by law.";
-
-function toGrams(val,unit){if(!val||isNaN(val))return null;if(unit==="kg"||unit==="kgs")return{g:val*1000,raw:val.toFixed(3)+"kg",stable:true};if(unit==="lb"||unit==="lbs")return{g:val*453.592,raw:val.toFixed(3)+"lb",stable:true};if(unit==="oz"&&!unit.includes("t"))return{g:val*28.3495,raw:val.toFixed(3)+"oz",stable:true};if(unit==="ozt"||unit==="toz")return{g:val*31.1035,raw:val.toFixed(3)+"ozt",stable:true};if(unit==="ct"||unit==="cts")return{g:val*0.2,raw:val.toFixed(2)+"ct",stable:true};return{g:val,raw:val.toFixed(3)+"g",stable:true};}
-function parseStdWeight(dv){const flags=dv.getUint8(0),raw=dv.getUint16(1,true),isImp=(flags&0x01)!==0;if(isImp){const lb=raw*0.01;return{g:lb*453.592,raw:lb.toFixed(3)+" lb",stable:true};}const kg=raw*0.005;return{g:kg*1000,raw:kg.toFixed(3)+" kg",stable:true};}
-function parseAsciiWeight(str){const s=sS(str).replace(/[\r\n]+/g,"").trim();const o=/[A-Z]{2},[A-Z]{2},[+-]?(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(o)return toGrams(parseFloat(o[1]),(o[2]||"g").toLowerCase());const g=/[+-]?\s*(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(g)return toGrams(parseFloat(g[1]),(g[2]||"g").toLowerCase());return null;}
-function fmtScaleWeight(reading,unit){if(!reading)return"—";if(unit==="ozt")return(reading.g/31.1035).toFixed(4)+" ozt";if(unit==="oz")return(reading.g/28.3495).toFixed(3)+" oz";return reading.g.toFixed(3)+" g";}
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
