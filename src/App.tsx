@@ -309,6 +309,7 @@ export default function Loot(){
   const[showLogoLib,setShowLogoLib]=useState(false);
   const[logoPinMode,setLogoPinMode]=useState(false);
   const[logoPinVal,setLogoPinVal]=useState("");
+  const[logoDel,setLogoDel]=useState(null);
   const[logoDragOver,setLogoDragOver]=useState(false);
   const[editStockId,setEditStockId]=useState(null);
   const[editStockVal,setEditStockVal]=useState({});
@@ -1649,9 +1650,16 @@ export default function Loot(){
               <label style={{...c.btn(T.gold,T.bg),display:"inline-block",cursor:"pointer",marginBottom:10}}>Upload Logo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{const data=ev.target.result;const entry={id:uid(),data,isLogo:true};setLogoLib(p=>[entry,...p]);setSettings(p=>({...p,logoImg:data}));pop("Logo updated.","ok");setLogoPinMode(false);};r.readAsDataURL(f);e.target.value="";  }}/></label>
               {(logoLib||[]).length>0&&<div>
                 <div style={{fontSize:11,color:T.muted,marginBottom:8}}>Saved logos:</div>
+                {logoDel&&<div style={{...c.bnr("warn"),marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <img src={logoDel.data} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>
+                  <span style={{flex:1,minWidth:140,fontSize:12}}>Delete this image? This cannot be undone.</span>
+                  <button style={c.btn(T.red,T.white,{fontSize:11,padding:"6px 12px"})} onClick={()=>{const wasActive=settings.logoImg===logoDel.data;setLogoLib(p=>p.filter(x=>x.id!==logoDel.id));if(wasActive)setSettings(p=>({...p,logoImg:""}));pop("Logo deleted.","ok");setLogoDel(null);}}>Delete</button>
+                  <button style={c.bsm()} onClick={()=>setLogoDel(null)}>Cancel</button>
+                </div>}
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
                   {(logoLib||[]).map(l=><div key={l.id} style={{position:"relative",cursor:"pointer"}} onClick={()=>{setSettings(p=>({...p,logoImg:l.data}));pop("Logo selected.","ok");setLogoPinMode(false);}}>
                     <img src={l.data} alt="logo" style={{width:56,height:56,borderRadius:"50%",objectFit:"cover",border:"2px solid "+(settings.logoImg===l.data?T.gold:T.border)}}/>
+                    {l.id!=="default-logo"&&<button title="Delete this image" onClick={e=>{e.stopPropagation();setLogoDel(l);}} style={{position:"absolute",top:-4,right:-4,width:20,height:20,borderRadius:"50%",background:T.red,color:T.white,border:"1px solid "+T.bg,cursor:"pointer",fontSize:11,lineHeight:"18px",padding:0,fontWeight:"bold"}}>✕</button>}
                   </div>)}
                 </div>
               </div>}
