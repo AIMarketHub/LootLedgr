@@ -672,7 +672,7 @@ export default function Loot(){
                 <input style={{background:"transparent",border:"none",color:col,fontFamily:T.ff,fontSize:11,fontWeight:"bold",width:w,outline:"none",textAlign:"right"}} type="number" value={val} onChange={e=>setter(parseFloat(e.target.value)||0)}/>
               </div>
             ))}
-            <span title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override":"No API"} style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",background:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
+            <span title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override":"No API"} style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",background:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
             <button style={{...c.bsm(T.border),padding:"4px 8px",fontSize:11}} onClick={()=>setShowSet(true)}>⚙</button>
             <button style={{...c.bsm(T.border),padding:"4px 8px",fontSize:11}} onClick={()=>setShowApi(true)}>⇄</button>
           </div>
@@ -1166,7 +1166,7 @@ export default function Loot(){
                   <div style={{flex:1}}><label style={c.lbl}>Silver (AUD/oz)</label><input style={c.inp()} type="number" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/></div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
+                  <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
                   <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
                 </div>
               </div>
@@ -1287,7 +1287,7 @@ export default function Loot(){
                 <div style={{flex:1}}><label style={c.lbl}>Silver alert ≥ (AUD/oz)</label><input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/></div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface}}>
-                <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
+                <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
                 <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
               {apiError&&<div style={{background:"#2a0a0a",border:"1px solid #cc3333",borderRadius:6,padding:"10px 14px",marginTop:8,fontSize:12,color:"#ff6666",wordBreak:"break-word"}}><strong>API Error:</strong> {apiError}<button style={{marginLeft:10,background:"none",border:"none",color:"#ff6666",cursor:"pointer",fontSize:11}} onClick={()=>setApiError("")}>✕</button></div>}
               </div>
@@ -1475,7 +1475,7 @@ export default function Loot(){
               <div style={{...c.card({padding:12}),display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
                 <div>
                   <div style={{fontWeight:"bold",color:T.white,fontSize:12}}>📡 Spot Price API</div>
-                  <div style={{fontSize:11,color:T.muted}}>Status: <span style={{color:spotStatus==="live"?T.green:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus}</span>{spotSource?" — "+spotSource:""}</div>
+                  <div style={{fontSize:11,color:T.muted}}>Status: <span style={{color:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus}</span>{spotSource?" — "+spotSource:""}</div>
                 </div>
                 <button style={c.btn(T.gold,T.bg,{fontSize:11,padding:"8px 14px"})} onClick={forceResumeAPI}>↺ Refresh Prices</button>
               </div>
