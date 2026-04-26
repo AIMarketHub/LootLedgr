@@ -2,7 +2,7 @@
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 
-const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
+const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
 
 const THRESH={CASH_WARN:2000,BULLION_CDD:5000,CASH_TTR:10000,HOLD_HOURS:168};
@@ -200,7 +200,7 @@ function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
   useEffect(()=>{const t=setInterval(()=>tick(p=>p+1),30000);return()=>clearInterval(t);},[]);
   if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
-  if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.green)}/><span style={c.badge(T.green)}>FREE</span></span>;
+  if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
   return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
 }
 function Modal({title,onClose,wide,children}){
@@ -252,7 +252,7 @@ function TxPhotoManager({selTx,store,setTxList,setSelTx}){
 
 function StockCard({s,frozenSnap,gSpot,sSpot,togglePoliceHold,setPinModal,setPinVal,setStock,setEditStockId,setEditStockVal}){
   const mv=calcMeltFn(s,frozenSnap,gSpot,sSpot),pl=mv!=null?mv-sN(s.price):null;
-  return <div style={{...c.card({padding:14}),marginBottom:10,borderLeft:"4px solid "+(s.policeHold?T.red:s.sold?T.muted:hoursLeft(s.holdUntil)>0?T.orange:T.green)}}>
+  return <div style={{...c.card({padding:14}),marginBottom:10,borderLeft:"4px solid "+(s.policeHold?T.red:s.sold?T.muted:hoursLeft(s.holdUntil)>0?T.orange:T.readyGreen)}}>
     <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10}}>
       <div style={{flex:1,minWidth:0}}>
         <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:3}}>{sS(s.description||(s.product&&s.product.label)||"—")}{s.sold&&<span style={{...c.badge(T.muted),marginLeft:6,fontSize:9}}>SOLD</span>}</div>
@@ -264,7 +264,7 @@ function StockCard({s,frozenSnap,gSpot,sSpot,togglePoliceHold,setPinModal,setPin
       <div style={{display:"flex",flexDirection:"column",gap:4}}>
         <button style={{...c.bsm(s.policeHold?T.redBg:T.border,s.policeHold?T.red:T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>{if(s.policeHold){setPinModal({reason:"Remove police hold — manager PIN required.",cb:()=>togglePoliceHold(s.id,false)});setPinVal("");}else togglePoliceHold(s.id,true);}}>{s.policeHold?"🚔 Held":"🚔 Hold"}</button>
         <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>{setEditStockId(s.id);setEditStockVal({description:s.description||"",weight_g:sS(s.weight_g),purity:s.purity||"",storageLocation:s.storageLocation||"",price:sS(s.price)});}}>✎ Edit</button>
-        {!s.sold&&hoursLeft(s.holdUntil)<=0&&!s.policeHold&&<button style={{...c.bsm(T.greenBg,T.green),padding:"6px 10px",fontSize:11}} onClick={()=>setStock(p=>p.map(x=>x.id===s.id?{...x,sold:true,soldDate:nowISO()}:x))}>💰</button>}
+        {!s.sold&&hoursLeft(s.holdUntil)<=0&&!s.policeHold&&<button style={{...c.bsm(T.readyGreenBg,T.readyGreen),padding:"6px 10px",fontSize:11}} onClick={()=>setStock(p=>p.map(x=>x.id===s.id?{...x,sold:true,soldDate:nowISO()}:x))}>💰</button>}
         <button style={{...c.bsm(T.border,T.muted),padding:"6px 10px",fontSize:11}} onClick={()=>setStock(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
       </div>
     </div>
@@ -1095,7 +1095,7 @@ export default function Loot(){
                   {["Gold","Silver","Other"].map(cat=>{const items=(stock||[]).filter(s=>s.product&&s.product.cat===cat&&!s.sold);if(!items.length)return null;return <div key={cat} style={c.card({padding:12,borderLeft:"3px solid "+(cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.muted)})}>
                     <div style={{fontSize:10,color:T.muted,textTransform:"uppercase",marginBottom:4}}>{cat==="Gold"?"⬡":cat==="Silver"?"◈":"◇"} {cat}</div>
                     <div style={{fontSize:15,fontWeight:"bold",color:cat==="Gold"?T.gold:cat==="Silver"?T.silver:T.text}}>{fmtAUD(items.reduce((a,s)=>a+sN(s.price),0))}</div>
-                    <div style={{fontSize:10,color:T.green,marginTop:2}}>{items.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready</div>
+                    <div style={{fontSize:10,color:T.readyGreen,marginTop:2}}>{items.filter(s=>!s.policeHold&&hoursLeft(s.holdUntil)<=0).length} ready</div>
                   </div>;})}
                 </div>
               )}
