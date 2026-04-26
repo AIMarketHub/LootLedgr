@@ -1,8 +1,9 @@
 // LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
-import {THRESH,TROY_OZ,APP_VERSION,GOLD_P,SILV_P,STATE_INFO,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
+import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
@@ -69,89 +70,7 @@ const c={
   shead:(g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver}),
 };
 
-function checkCompliance(items,payment,ttrEnabled=true){
-  const isCash=payment==="cash";
-  const buys=(items||[]).filter(i=>i.mode==="buy");
-  const total=buys.reduce((s,i)=>s+sN(i.price),0);
-  const bullionCash=isCash?buys.filter(i=>i.product&&i.product.type==="bullion").reduce((s,i)=>s+sN(i.price),0):0;
-  const anyCash=isCash?total:0;
-  const flags=[{level:"info",key:"id",msg:"🪪 ID must be sighted for every transaction — Victorian law s.19, no exceptions."}];
-  if(isCash&&total>=THRESH.CASH_WARN&&bullionCash<THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
-    flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Manager must acknowledge before proceeding."});
-  if(bullionCash>=THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
-    flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory."});
-  if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)
-    flags.push({level:"block",key:"ttr",msg:"🔴 $"+fmt2(anyCash)+" cash — AUSTRAC HARD BLOCK: KYC/CDD + TTR required within 10 business days."});
-  return{flags,total,bullionCash,anyCash,requiresKYC:bullionCash>=THRESH.BULLION_CDD||(ttrEnabled&&anyCash>=THRESH.CASH_TTR)};
-}
-
-function calcUnitPrice(p,gSpot,sSpot,mode="buy"){
-  if(!p||!gSpot||!sSpot)return null;
-  const isG=p.cat==="Gold",perG=(isG?gSpot:sSpot)/TROY_OZ,perOz=isG?gSpot:sSpot;
-  const mult=mode==="buy"?p.buyMult:p.sellMult;
-  if(mode==="buy"&&p.buyMode==="carat"&&p.carat)return(perG/24)*p.carat*p.buyMult;
-  if(mult==null)return null;
-  if(p.weightG&&p.purity)return perG*p.purity*p.weightG*mult;
-  if(p.unit==="oz")return perOz*(p.purity||1)*mult;
-  return perG*(p.purity||1)*mult;
-}
-
-function calcMeltFn(item,frozenSnap,gSpot,sSpot){
-  const g=frozenSnap?frozenSnap.gSpot:gSpot,s=frozenSnap?frozenSnap.sSpot:sSpot;
-  const metal=sS(item.product&&item.product.cat||item.metalCat);
-  const weight=sN(item.weight_g||item.qty);
-  if(!weight)return null;
-  const pk=sS(item.purity||(item.product&&item.product.purity));
-  const pn=sN(item.purity||(item.product&&item.product.purity));
-  const cn=sN(item.carat||(item.product&&item.product.carat));
-  if(metal==="Gold"){
-    if(GOLD_P[pk])return weight*(g/TROY_OZ)*GOLD_P[pk];
-    if(cn>0)return weight*(g/TROY_OZ)*(cn/24);
-    if(pn>0&&pn<=1)return weight*(g/TROY_OZ)*pn;
-    return null;
-  }
-  if(metal==="Silver"){
-    if(SILV_P[pk])return weight*(s/TROY_OZ)*SILV_P[pk];
-    if(pn>0&&pn<=1)return weight*(s/TROY_OZ)*pn;
-    return null;
-  }
-  return null;
-}
-
-function makeReceiptFn(tx,settings){
-  const b=sS(settings.businessName)||"The Gold Shop";
-  const L=["========================================",b.toUpperCase(),"ABN: "+sS(settings.abn),sS(settings.address),"========================================","CONTRACT:  "+sS(tx.id),"DATE:      "+new Date(tx.date).toLocaleString("en-AU"),"CLIENT:    "+sS(tx.client&&tx.client.fullName),"----------------------------------------"];
-  (tx.items||[]).forEach((it,i)=>{L.push((i+1)+". "+sS(it.product&&it.product.label||"Item").slice(0,30));L.push("   "+it.mode.toUpperCase()+" "+fmtAUD(it.price));if(it.note)L.push("   "+sS(it.note).slice(0,40));});
-  L.push("----------------------------------------");
-  if(tx.buyTotal>0)L.push("BUY TOTAL:  "+fmtAUD(tx.buyTotal));
-  if(tx.sellTotal>0)L.push("SELL TOTAL: "+fmtAUD(tx.sellTotal));
-  L.push("NET:        "+fmtAUD(Math.abs(tx.net||0))+(sN(tx.net)>=0?" (client pays)":" (we pay)"));
-  L.push("PAYMENT:    "+sS(tx.payment).toUpperCase(),"========================================","Signature: _____________________________","Date:      _____________________________","========================================","Licensed — SHD Act 1989 (Vic) | AUSTRAC entity");
-  return L.join("\n");
-}
-
-function makeTxt(tx){
-  const cl=tx.client||{},st=tx.staff||{};
-  return["LOOT LEDGR — TRANSACTION RECORD","Invoice: "+sS(tx.id),"Date: "+fmtDate(tx.date),"Payment: "+sS(tx.payment).toUpperCase(),"","── CLIENT ──────────────────","Name: "+sS(cl.fullName),"DOB: "+sS(cl.dob),"Phone: "+sS(cl.phone),"Address: "+sS(cl.address),"","── ID ──────────────────────","Type: "+sS(cl.idType),"Number: "+sS(cl.idNumber),"Sighted: "+(tx.idSighted?"Yes":"No"),"","── ITEMS ───────────────────",
-    ...(tx.items||[]).filter(i=>i.mode==="buy").map((it,n)=>"  "+(n+1)+". [BUY] "+sS(it.product&&it.product.label||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
-    ...(tx.items||[]).filter(i=>i.mode==="sell").map((it,n)=>"  "+(n+1)+". [SELL] "+sS(it.product&&it.product.label||"Item")+" — "+fmtAUD(it.price)+(it.note?" ("+it.note+")":"")),
-    "","Buy Total: "+fmtAUD(tx.buyTotal),"Sell Total: "+fmtAUD(tx.sellTotal),"","── COMPLIANCE ──────────────","KYC: "+(tx.kycDone?"Completed":"N/A"),"TTR: "+sS(tx.ttrStatus||"N/A"),"SMR: "+(tx.smrFlagged?"YES":"No"),"Staff: "+sS(st.staffName),"Storage: "+sS(st.storageLocation),"","Delete After: "+fmtDate(tx.deleteAfter)
-  ].join("\n");
-}
-
-function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
-  const sc=stateCode||sS(settings.state)||"VIC";
-  const st=STATE_INFO[sc]||STATE_INFO.VIC;
-  const txs=(txList||[]).filter(t=>{if(!t.date)return false;if(suspicious)return t.smrFlagged;const d=new Date(t.date);return d>=dateFrom&&d<=dateTo;});
-  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Notes"]];
-  txs.forEach(tx=>{const cl=tx.client||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(it.note)]);});});
-  if(rows.length<=15)rows.push(["(No qualifying buy transactions in this period)"]);
-  return rows.map(r=>r.map(v=>'"'+sS(v).replace(/"/g,'""')+'"').join(",")).join("\n");
-}
-
 function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}
-
-const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS(abn)+"\n\nWe collect your personal information (name, DOB, address, ID) to verify your identity as required by:\n• Anti-Money Laundering & Counter-Terrorism Financing Act 2006 (Cth)\n• Second-Hand Dealers & Pawnbrokers Act 1989 (Vic)\n\nRetained 7 years. May be reported to AUSTRAC or Victoria Police if required by law.";
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
