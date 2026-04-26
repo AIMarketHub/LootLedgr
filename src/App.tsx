@@ -1,13 +1,10 @@
 // LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
+import {THRESH,TROY_OZ,APP_VERSION,GOLD_P,SILV_P,STATE_INFO,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#9A3A00",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#991B1B",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
-
-const THRESH={CASH_WARN:2000,BULLION_CDD:5000,CASH_TTR:10000,HOLD_HOURS:168};
-const TROY_OZ=31.1035;
-const APP_VERSION="5";
 
 // Defensive sanitisers — guard all data from users, servers, APIs
 const sN=n=>(n==null||isNaN(n)||!isFinite(n))?0:Number(n);
@@ -114,8 +111,6 @@ function calcUnitPrice(p,gSpot,sSpot,mode="buy"){
   return perG*(p.purity||1)*mult;
 }
 
-const GOLD_P={"24ct":1,"23ct":0.9583,"22ct":0.9167,"21ct":0.875,"20ct":0.8333,"18ct":0.75,"14ct":0.5833,"10ct":0.4167,"9ct":0.375};
-const SILV_P={".999":0.999,".925":0.925,".900":0.9,".835":0.835,".800":0.8,".500":0.5};
 function calcMeltFn(item,frozenSnap,gSpot,sSpot){
   const g=frozenSnap?frozenSnap.gSpot:gSpot,s=frozenSnap?frozenSnap.sSpot:sSpot;
   const metal=sS(item.product&&item.product.cat||item.metalCat);
@@ -159,17 +154,6 @@ function makeTxt(tx){
   ].join("\n");
 }
 
-const STATE_INFO={
-  VIC:{name:"Victoria",act:"Second-Hand Dealers and Pawnbrokers Act 1989 (Vic)",hold:"7 days",freq:"Weekly (within 3 working days)",defaultEmail:"",note:"Submit to your local Victoria Police station by email."},
-  NSW:{name:"New South Wales",act:"Pawnbrokers and Second-hand Dealers Act 1996 (NSW)",hold:"14 days",freq:"Within 3 working days",defaultEmail:"#PBU@police.nsw.gov.au",note:"Submit via NSW Police Weblink or email #PBU@police.nsw.gov.au"},
-  QLD:{name:"Queensland",act:"Second-hand Dealers and Pawnbrokers Act 2003 (Qld)",hold:"Check local conditions",freq:"Regular forwarding to SPIRS",defaultEmail:"SPIRS.Admin@police.qld.gov.au",note:"Forward CSV to SPIRS (Stolen Property ID & Recovery System)."},
-  SA:{name:"South Australia",act:"Second-hand Dealers and Pawnbrokers Act 1996 (SA)",hold:"10 days (3 if full buyer details)",freq:"Keep on premises — available for inspection",defaultEmail:"sapol.leb@police.sa.gov.au",note:"Keep records on premises. Email SAPOL Licensing Enforcement Branch."},
-  WA:{name:"Western Australia",act:"Second-hand Dealers and Pawnbrokers Act 1994 (WA)",hold:"3 days minimum",freq:"Available for inspection on request",defaultEmail:"",note:"Submit to local WA Police on request."},
-  NT:{name:"Northern Territory",act:"Second-hand Dealers Act (NT)",hold:"14 days",freq:"Available for police inspection at any time",defaultEmail:"",note:"Contact local NT Police station."},
-  ACT:{name:"Australian Capital Territory",act:"Second-Hand Dealers Act 1995 (ACT)",hold:"7 days",freq:"Available for ACT Policing inspection",defaultEmail:"",note:"Available for ACT Policing inspection."},
-  TAS:{name:"Tasmania",act:"Second-Hand Dealers Act 1994 (Tas)",hold:"7 days",freq:"Available for Tasmania Police inspection",defaultEmail:"",note:"Contact your local Tasmania Police station."},
-};
-
 function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
   const sc=stateCode||sS(settings.state)||"VIC";
   const st=STATE_INFO[sc]||STATE_INFO.VIC;
@@ -180,17 +164,10 @@ function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
   return rows.map(r=>r.map(v=>'"'+sS(v).replace(/"/g,'""')+'"').join(",")).join("\n");
 }
 
-const DEFAULT_SETTINGS={businessName:"",abn:"",address:"",phone:"",staffPin:"1234",squareToken:"",squareLoc:"",squareRedirect:"",sheetsId:"",sheetsRange:"Sheet1!A1",sheetsToken:"",webhookUrl:"",shopifyDomain:"",shopifyToken:"",xeroToken:"",xeroTenantId:"",xeroBuyCode:"310",xeroSellCode:"200",requirePin:false,sessionTimeout:"never",ttrEnabled:true,eftposProvider:"none",squareTerminalId:"",linklyBaseUrl:"http://localhost:4242",aiAgentEnabled:false,aiAgentLevel:1,aiAgentUrl:"",aiAgentName:"Sophiie",cryptoEnabled:false,walletBTC:"",walletETH:"",walletBNB:"",walletXRP:"",walletSOL:"",goldApiKey:"",metalsApiKey:"",metalsDevKey:"",duressContact1:"",duressContact2:"",duressContact3:"",duressContact4:"",duressContact5:"",duressContact6:"",duressContact7:"",duressContact8:"",duressContact9:"",duressContact10:"",smsProvider:"textbelt",textbeltKey:"textbelt",duressWebhookUrl:"",twilioFnUrl:"",policeEmail:"",policeStation:"",dealerLicenceNo:"",logoImg:null,scaleProtocol:"auto",scaleCustomServiceUUID:"",scaleCustomCharUUID:"",scaleUnit:"g",scaleFilter:true,state:"VIC",goldAlert:null,silverAlert:null};
-
 function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}
 
-const ID_OPTIONS=[{value:"",label:"— Select —"},{value:"dl",label:"Driver's Licence"},{value:"pp",label:"Passport"},{value:"lp",label:"Learner Permit"},{value:"fl",label:"Firearms Licence"},{value:"op",label:"Other Photo ID"},{value:"2doc",label:"Two Non-Photo Documents"}];
 const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS(abn)+"\n\nWe collect your personal information (name, DOB, address, ID) to verify your identity as required by:\n• Anti-Money Laundering & Counter-Terrorism Financing Act 2006 (Cth)\n• Second-Hand Dealers & Pawnbrokers Act 1989 (Vic)\n\nRetained 7 years. May be reported to AUSTRAC or Victoria Police if required by law.";
 
-const SCALE_STD_SVC="0000181d-0000-1000-8000-00805f9b34fb";
-const SCALE_STD_CHAR="00002a9d-0000-1000-8000-00805f9b34fb";
-const NUS_SVC="6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const NUS_TX="6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 function toGrams(val,unit){if(!val||isNaN(val))return null;if(unit==="kg"||unit==="kgs")return{g:val*1000,raw:val.toFixed(3)+"kg",stable:true};if(unit==="lb"||unit==="lbs")return{g:val*453.592,raw:val.toFixed(3)+"lb",stable:true};if(unit==="oz"&&!unit.includes("t"))return{g:val*28.3495,raw:val.toFixed(3)+"oz",stable:true};if(unit==="ozt"||unit==="toz")return{g:val*31.1035,raw:val.toFixed(3)+"ozt",stable:true};if(unit==="ct"||unit==="cts")return{g:val*0.2,raw:val.toFixed(2)+"ct",stable:true};return{g:val,raw:val.toFixed(3)+"g",stable:true};}
 function parseStdWeight(dv){const flags=dv.getUint8(0),raw=dv.getUint16(1,true),isImp=(flags&0x01)!==0;if(isImp){const lb=raw*0.01;return{g:lb*453.592,raw:lb.toFixed(3)+" lb",stable:true};}const kg=raw*0.005;return{g:kg*1000,raw:kg.toFixed(3)+" kg",stable:true};}
 function parseAsciiWeight(str){const s=sS(str).replace(/[\r\n]+/g,"").trim();const o=/[A-Z]{2},[A-Z]{2},[+-]?(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(o)return toGrams(parseFloat(o[1]),(o[2]||"g").toLowerCase());const g=/[+-]?\s*(\d+\.?\d*)\s*([a-zA-Z]+)?/.exec(s);if(g)return toGrams(parseFloat(g[1]),(g[2]||"g").toLowerCase());return null;}
