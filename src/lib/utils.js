@@ -1,13 +1,14 @@
-// LootLedger — pure utility functions.
+// LootLedger — utility functions.
 // Mechanically extracted from src/App.tsx during Phase 2 step 2.
 // No semantic changes; signatures preserved exactly.
 //
-// All exports below are pure functions with no React, DOM, or
-// storage dependencies. peekInv() and makeInv() (invoice-number
-// generation) depend on the localStorage wrapper `store` and stay
-// in src/App.tsx until Phase 2 step 4 extracts storage; they will
-// move at that point (likely into storage.js, or a dedicated
-// invoice module).
+// Most exports are pure (no React, DOM, or storage). The two
+// invoice-number helpers at the bottom (peekInv / makeInv) depend
+// on the localStorage wrapper at src/lib/storage.js — they migrated
+// here in Phase 2 step 4b to live alongside invDay (the date prefix
+// they consume).
+
+import {store} from "./storage.js";
 
 // Defensive sanitisers — guard all data from users, servers, APIs.
 export const sN=n=>(n==null||isNaN(n)||!isFinite(n))?0:Number(n);
@@ -35,8 +36,15 @@ export const nowISO=()=>new Date().toISOString();
 export const todayStr=()=>nowISO().slice(0,10);
 
 // Invoice-number date prefix (DDMMYY).
-// peekInv() and makeInv() that use this stay in App.tsx (depend on `store`).
 export const invDay=()=>{const d=new Date();return String(d.getDate()).padStart(2,"0")+String(d.getMonth()+1).padStart(2,"0")+String(d.getFullYear()).slice(-2);};
+
+// Invoice-number generation. peekInv computes the next number without
+// consuming it (used for the txNo display while a transaction is being
+// built); makeInv increments and persists, returning the consumed
+// number when the transaction is committed. Both keyed off invDay so
+// the counter resets at midnight.
+export function peekInv(){const t=invDay(),r=store.get("invday",{d:"",n:0});return t+((r.d===t?r.n:0)+1);}
+export function makeInv(){const t=invDay();let r=store.get("invday",{d:"",n:0});if(r.d!==t)r={d:t,n:0};r.n++;store.set("invday",r);return t+r.n;}
 
 // Bluetooth scale parsing.
 // Standard BLE Weight Scale Service binary format + Nordic UART ASCII.

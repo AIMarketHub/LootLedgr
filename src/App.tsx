@@ -2,7 +2,7 @@
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
-import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,peekInv,makeInv,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store} from "./lib/storage.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
@@ -42,9 +42,6 @@ function runMigration(){
   }catch(_){}
 }
 runMigration();
-
-function peekInv(){const t=invDay(),r=store.get("invday",{d:"",n:0});return t+((r.d===t?r.n:0)+1);}
-function makeInv(){const t=invDay();let r=store.get("invday",{d:"",n:0});if(r.d!==t)r={d:t,n:0};r.n++;store.set("invday",r);return t+r.n;}
 
 const c={
   card:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,boxShadow:"6px 6px 19px rgba(0,0,0,0.18),3px 3px 0 rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.07)",...x}),
