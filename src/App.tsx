@@ -484,6 +484,15 @@ export default function Loot(){
 
   const unlockApp=()=>{if(appPinInput===settings.staffPin){setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}else pop("Incorrect PIN","err");};
   const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
+  // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
+  //   Today policeHold is binary. Per state law it has a 21-day default
+  //   life with a single 21-day reissue (total 42). Replace this toggle
+  //   with a modal capturing date received, expiry (auto +21d), and
+  //   notice reference number. Stock card displays days remaining. The
+  //   dashboard surfaces a banner at day-18, day-21 (expiring), day-42
+  //   (reissue gone — sale unlocked unless court order recorded).
+  //   Lands as a self-contained follow-up commit after Phase 2 modular
+  //   split completes (touches stock schema + StockCard + dashboard).
   const togglePoliceHold=(id,val)=>setStock(p=>p.map(s=>s.id===id?{...s,policeHold:val}:s));
   const purge=()=>{const ex=(txList||[]).filter(t=>isExpired7yr(t.deleteAfter)),es=(stock||[]).filter(s=>isExpired7yr(s.deleteAfter));ex.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));pop(ex.length+es.length>0?"Purged "+ex.length+" tx + "+es.length+" stock items.":"Nothing to purge yet.","ok");};
   const dlTx=tx=>{const u=URL.createObjectURL(new Blob([makeTxt(tx)],{type:"text/plain"})),a=document.createElement("a");a.href=u;a.download=tx.id+"_"+sS(tx.client&&tx.client.fullName||"client").replace(/[^a-zA-Z0-9]/g,"_")+".txt";a.click();URL.revokeObjectURL(u);const ph=tx.photoKey?store.get(tx.photoKey,{}):{idPhoto:tx.idPhoto,itemPhotos:tx.itemPhotos};if(ph.idPhoto)setTimeout(()=>{const a2=document.createElement("a");a2.href=ph.idPhoto;a2.download=tx.id+"_id.jpg";a2.click();},300);if(ph.itemPhotos)Object.values(ph.itemPhotos).filter(Boolean).forEach((d,i)=>setTimeout(()=>{const a3=document.createElement("a");a3.href=d;a3.download=tx.id+"_item"+i+".jpg";a3.click();},(i+2)*300));};
@@ -622,6 +631,13 @@ export default function Loot(){
                   </div>
                 </div>
               )}
+              {/* TODO (briefing §9 Gap 7) — TTR day-7 / day-9 escalation. The TTR
+                  filing deadline is 10 business days from the transaction date.
+                  Escalate this banner when any pending TTR is older than 7 days
+                  (warn) or 9 days (urgent). Compute days-since-tx per pending
+                  entry, surface the worst-case in the banner, and add a click-
+                  through to the filtered History view. Land alongside the
+                  Phase 2 dashboard extraction. */}
               {(txList||[]).some(t=>t.ttrStatus==="PENDING")&&<div style={c.bnr("block")}>🔴 AUSTRAC TTR PENDING — {(txList||[]).filter(t=>t.ttrStatus==="PENDING").length} transaction(s) require filing at austrac.gov.au/online</div>}
               <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
                 <button style={c.btn(T.gold,T.bg,{flex:2,minWidth:160,padding:"13px 0",fontSize:12})} onClick={()=>{resetTx();setScreen("newTx");}}>＋ New Transaction</button>

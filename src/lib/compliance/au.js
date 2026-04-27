@@ -7,11 +7,80 @@
 // (briefing Section 6.4). It is registered in ./index.js, which is
 // the import entry point for the rest of the app.
 //
-// Known untouched bug carried forward from App.tsx (briefing
-// Section 18.3): calcUnitPrice has no carat-mode branch for
-// mode==="sell". Fall-through uses (purity||1) which defaults to 1
-// (24ct equivalent). Decision deferred to Phase 2 step 3c gap
-// audit — DO NOT silently fix during mechanical extraction.
+// === COMPLIANCE VERIFICATION SUMMARY (briefing §9, Phase 2 step 3c) ===
+// Verification pass completed 2026-04-28 against App.tsx + this module.
+//
+//  Gap 1 — Rolling 30-day structuring detection: MISSING
+//          checkCompliance evaluates single transactions; no history
+//          lookup. Deferred — needs schema decision (vendor match by
+//          name+phone vs Phase 2.7 client_id) and threshold config
+//          (legal docs prescribe 80% / 100% of TTR). See TODO in
+//          checkCompliance below.
+//
+//  Gap 2 — Linked-transaction detection: MISSING
+//          No same-day same-client banner. Deferred — same-shape work
+//          as Gap 1 (history-aware lookup at client step). See TODO in
+//          checkCompliance below.
+//
+//  Gap 3 — Enhanced CDD at $10k cash: PARTIALLY PRESENT → fixed in
+//          step 3c. App.tsx:749 has sourceOfFunds gated on TTR flag;
+//          sourceOfWealth field added in step 3c (briefing DOC2 §2.6).
+//
+//  Gap 4 — Per-item storage location: PARTIALLY PRESENT → fixed in
+//          step 3c. Captured at App.tsx:877 (required at staff step),
+//          flows to stock records (App.tsx:381). Storage column added
+//          to genPoliceReport CSV in step 3c (briefing §21A: police
+//          must locate items on demand).
+//
+//  Gap 5 — Tipping-off audit (SMR confidentiality): PRESENT.
+//          See dedicated audit block below.
+//
+//  Gap 6 — Override audit trail: MISSING. PIN modal at App.tsx:367
+//          accepts and proceeds with no log entry. Deferred — full
+//          implementation requires Phase 3 (per-user identity);
+//          briefing §9 explicitly says "data structure should be in
+//          place from Phase 2" but no schema decision yet. See TODO
+//          in checkCompliance below.
+//
+//  Gap 7 — TTR day-7 / day-9 reminder alerts: PARTIALLY PRESENT.
+//          App.tsx:625 has a static "TTR pending" banner with count;
+//          no day-based escalation. Deferred — small dashboard tweak,
+//          will land alongside the dashboard extraction (Phase 2 later
+//          step). See TODO in App.tsx near the existing banner.
+//
+//  Gap 8 — Police notice 21-day countdown: PARTIALLY PRESENT.
+//          policeHold is a binary boolean (App.tsx:487); no
+//          noticeDate, no expiryDate, no day-18 alert. Deferred —
+//          new fields + modal + countdown UI is a self-contained
+//          feature, lands as a follow-up commit after Phase 2 modular
+//          split completes. See TODO in App.tsx near togglePoliceHold.
+//
+//  Gap 9 — Retention semantics (7-year photos): PRESENT.
+//          App.tsx:380/381 set deleteAfter via sevenYrsFrom; purge at
+//          App.tsx:488 uses isExpired7yr; photos linked through
+//          photoKey are deleted alongside the transaction. No 3-month
+//          deletion logic anywhere — the wrong founding rule did not
+//          regress.
+//
+// === TIPPING-OFF AUDIT (briefing §9 Gap 5, last verified 2026-04-28) ===
+// Walked every code path that produces customer-visible output.
+// Confirmed clean of SMR / TTR / flag references in:
+//   - makeReceiptFn (this file): no SMR/TTR/flag fields written.
+//   - sendSquareSell (App.tsx:387):  line items only; no compliance fields.
+//   - sendSquareBuy  (App.tsx:392):  vendor note + metadata; no SMR.
+//   - sendShopifySell (App.tsx:404): tags="loot-ledgr-sale"; no SMR.
+//   - sendShopifyBuy  (App.tsx:408): tags="vendor-purchase,loot-ledgr"; no SMR.
+//   - Generic webhookUrl push (App.tsx:481): event/invoice/items/total/
+//     payment/net only — no SMR, ttrRequired, ttrStatus, or flags.
+//   - Xero: no per-transaction push exists yet (test connection only at
+//     App.tsx:1348). Re-audit when Xero send is implemented.
+// Intentionally INCLUDE SMR (staff / police only, not customer):
+//   - makeTxt (this file): full record; .txt download is the staff/
+//     backup artefact, never handed to a customer.
+//   - genPoliceReport (this file): SMR column — police are entitled.
+//   - Accounting export "COMPLIANCE LOG" sheet (App.tsx:469): owner-
+//     only export, never reaches customer.
+// Re-run this audit before any new external-integration code lands.
 
 import {sN,sS,fmt2,fmtAUD,fmtDate} from "../utils.js";
 import {TROY_OZ,GOLD_P,SILV_P} from "../constants.js";
@@ -38,6 +107,20 @@ export const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS
 
 // === Compliance / pricing / reporting functions ============================
 
+// TODO (briefing §9 Gap 1) — Rolling 30-day structuring detection.
+//   Add second arg `txHistory` here. Filter to same vendor (name+phone
+//   pre-Phase 2.7, client_id post-Phase 2.7) over the last 30 days.
+//   Sum cash totals; flag at 80% of CASH_TTR (warn) and 100% (block).
+// TODO (briefing §9 Gap 2) — Linked-transaction detection.
+//   Same-day-same-client lookup at the client step (App.tsx step 3),
+//   not here. This function gets the history; App.tsx surfaces the
+//   notice with a "review previous transaction" link.
+// TODO (briefing §9 Gap 6) — Override audit trail.
+//   When a `block` flag is overridden via the PIN flow (App.tsx:367),
+//   the override needs logging (who, when, reason ≥20 chars). Schema
+//   not yet decided — likely an `overrides` Supabase table or a sub-
+//   record on the transaction. Lands fully in Phase 3 (auth + roles);
+//   data shape can land earlier if a small schema change suffices.
 export function checkCompliance(items,payment,ttrEnabled=true){
   const isCash=payment==="cash";
   const buys=(items||[]).filter(i=>i.mode==="buy");
