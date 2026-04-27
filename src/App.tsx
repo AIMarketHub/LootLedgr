@@ -3,16 +3,11 @@
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {store} from "./lib/storage.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
-
-const store={
-  get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
-  set:(k,v)=>{try{localStorage.setItem("gf_"+k,JSON.stringify(v));}catch(_){}},
-  del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(_){}},
-};
 
 const SB_URL=import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
