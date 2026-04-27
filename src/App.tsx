@@ -763,6 +763,7 @@ export default function Loot(){
                         <F label="ID Expiry" type="date" value={client.idExpiry} onChange={v=>setClient(p=>({...p,idExpiry:v}))}/>
                       </div>
                       {compliance.flags.some(f=>f.key==="ttr")&&<F label="Source of Funds" required value={client.sourceOfFunds} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))}/>}
+                      {compliance.flags.some(f=>f.key==="ttr")&&<F label="Source of Wealth" required value={client.sourceOfWealth} onChange={v=>setClient(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>}
                       <div style={{...c.g2(12),marginTop:8}}>
                         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.pepCheck} onChange={e=>setStaff(p=>({...p,pepCheck:e.target.checked}))}/>PEP Check — Seller is NOT a PEP</label>
                         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.tfsCheck} onChange={e=>setStaff(p=>({...p,tfsCheck:e.target.checked}))}/>TFS Check — NOT on Sanctions List (dfat.gov.au)</label>
