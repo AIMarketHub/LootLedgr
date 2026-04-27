@@ -353,7 +353,7 @@ export default function Loot(){
   const makeReceipt=tx=>makeReceiptFn(tx,settings);
   const todayTxData=useMemo(()=>(txList||[]).filter(t=>t.date&&t.date.slice(0,10)===nowISO().slice(0,10)),[txList]);
   const todayTx=()=>todayTxData;
-  const compliance=useMemo(()=>checkCompliance(txItems,txPay,settings.ttrEnabled!==false),[txItems,txPay,settings.ttrEnabled]);
+  const compliance=useMemo(()=>checkCompliance(txItems,txPay,settings.ttrEnabled!==false,settings.cashHardBlockAbove),[txItems,txPay,settings.ttrEnabled,settings.cashHardBlockAbove]);
   const buyTotal=(txItems||[]).filter(i=>i.mode==="buy").reduce((s,i)=>s+sN(i.price),0);
   const sellTotal=(txItems||[]).filter(i=>i.mode==="sell").reduce((s,i)=>s+sN(i.price),0);
   const net=sellTotal-buyTotal;
@@ -366,7 +366,7 @@ export default function Loot(){
   const handleAddItem=()=>{if(!addProd||!addCalc){pop("Enter quantity or price.","warn");return;}setTxItems(p=>[...p,{id:uid(),mode:addMode,product:addProd,qty:addQtyN||1,unitPrice:addUnit,price:addCalc,note:addNote,holdUntil:addMode==="buy"?addHours(nowISO(),THRESH.HOLD_HOURS):null,policeHold:false}]);setAddQty("");setAddCustom("");setAddNote("");pop("Added: "+sS(addProd.label),"ok");};
   const submitPin=()=>{if(!settings.staffPin){pop("No manager PIN set. Set one in Settings → Business.","warn");setPinModal(null);return;}if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}else{pop("Incorrect PIN.","err");setPinVal("");}};
   const handleToCompliance=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
-  const handleToClient=()=>{if(compliance.requiresKYC&&!kycDone){pop("KYC must be completed — AUSTRAC hard block.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
+  const handleToClient=()=>{if(compliance.requiresKYC&&!kycDone){pop("KYC must be completed — AUSTRAC hard block.","err");return;}if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
 
   const finalize=()=>{
     if(!client.fullName||!client.dob||!client.address||!client.idType||!client.idNumber){pop("Client form incomplete.","err");return;}
@@ -1262,7 +1262,9 @@ export default function Loot(){
             </div>],
             ["compliance","📋 Compliance — TTR",<div style={{paddingBottom:14}}>
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={settings.ttrEnabled!==false} onChange={e=>setSettings(p=>({...p,ttrEnabled:e.target.checked}))}/>Enable TTR check at $10,000 cash threshold</label>
-              <div style={{fontSize:10,color:T.muted,marginTop:8}}>Disabling TTR check does NOT remove your legal obligation to file Threshold Transaction Reports with AUSTRAC. Only disable if your business is exempt.</div>
+              <div style={{fontSize:10,color:T.muted,marginTop:8,marginBottom:14}}>Disabling TTR check does NOT remove your legal obligation to file Threshold Transaction Reports with AUSTRAC. Only disable if your business is exempt.</div>
+              <F label="Refuse cash transactions at or above (AUD)" type="number" value={settings.cashHardBlockAbove==null?"":String(settings.cashHardBlockAbove)} onChange={v=>setSettings(p=>({...p,cashHardBlockAbove:v===""?null:parseFloat(v)}))} placeholder="Leave blank for no extra block"/>
+              <div style={{fontSize:10,color:T.muted,marginTop:6}}>Stricter than the legal minimum. When set, the system refuses cash payment for any transaction whose buy total is at or above this amount, regardless of bullion or TTR status. Leave blank to fall back to AUSTRAC thresholds only ($2k warn, $5k bullion CDD, $10k TTR).</div>
             </div>],
             ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
               <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>

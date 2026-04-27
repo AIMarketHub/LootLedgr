@@ -121,7 +121,7 @@ export const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS
 //   not yet decided — likely an `overrides` Supabase table or a sub-
 //   record on the transaction. Lands fully in Phase 3 (auth + roles);
 //   data shape can land earlier if a small schema change suffices.
-export function checkCompliance(items,payment,ttrEnabled=true){
+export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove=null){
   const isCash=payment==="cash";
   const buys=(items||[]).filter(i=>i.mode==="buy");
   const total=buys.reduce((s,i)=>s+sN(i.price),0);
@@ -134,6 +134,13 @@ export function checkCompliance(items,payment,ttrEnabled=true){
     flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory."});
   if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)
     flags.push({level:"block",key:"ttr",msg:"🔴 $"+fmt2(anyCash)+" cash — AUSTRAC HARD BLOCK: KYC/CDD + TTR required within 10 business days."});
+  // Shop-level configurable cash hard-block (Phase 2 step 3c). Stricter
+  // than legal minimums; dealer sets a numeric ceiling (or leaves blank
+  // for no extra block). Stacks with bullionCDD and TTR — does NOT
+  // require KYC because it is a flat refusal of the cash payment.
+  const shopHardBlock=sN(cashHardBlockAbove);
+  if(isCash&&shopHardBlock>0&&total>=shopHardBlock)
+    flags.push({level:"block",key:"cash_shop_hardblock",msg:"🔴 $"+fmt2(total)+" cash — exceeds shop hard limit of $"+fmt2(shopHardBlock)+". Refuse cash payment for this transaction."});
   return{flags,total,bullionCash,anyCash,requiresKYC:bullionCash>=THRESH.BULLION_CDD||(ttrEnabled&&anyCash>=THRESH.CASH_TTR)};
 }
 
