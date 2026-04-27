@@ -141,7 +141,15 @@ export function calcUnitPrice(p,gSpot,sSpot,mode="buy"){
   if(!p||!gSpot||!sSpot)return null;
   const isG=p.cat==="Gold",perG=(isG?gSpot:sSpot)/TROY_OZ,perOz=isG?gSpot:sSpot;
   const mult=mode==="buy"?p.buyMult:p.sellMult;
-  if(mode==="buy"&&p.buyMode==="carat"&&p.carat)return(perG/24)*p.carat*p.buyMult;
+  // Carat-mode branch fires for both buy and sell (briefing §18.3 fix,
+  // Phase 2 step 3c). saveProd in App.tsx sets buyMode:"carat" whenever
+  // carat is entered, and the qf form clears purity in that case — so a
+  // catalog item can legitimately have carat without purity. Without
+  // this branch firing on sell, fall-through used (purity||1) and
+  // mis-priced sell as 24ct gold. Multiplier is mode-correct via `mult`;
+  // mult==null skip preserves the original null-safety on the fall-
+  // through and tightens the previous NaN-on-buy edge case.
+  if(p.buyMode==="carat"&&p.carat&&mult!=null)return(perG/24)*p.carat*mult;
   if(mult==null)return null;
   if(p.weightG&&p.purity)return perG*p.purity*p.weightG*mult;
   if(p.unit==="oz")return perOz*(p.purity||1)*mult;
