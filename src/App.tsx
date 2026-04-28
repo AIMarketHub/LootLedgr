@@ -19,6 +19,7 @@ import NewTx from "./screens/NewTx.jsx";
 import BackupRestore from "./modals/BackupRestore.jsx";
 import EOD from "./modals/EOD.jsx";
 import Vendors from "./modals/Vendors.jsx";
+import PoliceReport from "./modals/PoliceReport.jsx";
 
 export default function Loot(){
   const[screen,setScreen]=useState("dashboard");
@@ -799,31 +800,7 @@ export default function Loot(){
           </div>
         </Modal>}
 
-        {showPolice&&<Modal title="🚔 Police Report Generator" onClose={()=>setShowPolice(false)} wide>
-          {(()=>{
-            const[dateFrom,setDateFrom]=React.useState(new Date(Date.now()-7*86400000).toISOString().slice(0,10));
-            const[dateTo,setDateTo]=React.useState(new Date().toISOString().slice(0,10));
-            const[suspicious,setSuspicious]=React.useState(false);
-            const sc=settings.state||"VIC";const st=STATE_INFO[sc]||STATE_INFO.VIC;
-            return <div>
-              <div style={{...c.card({padding:12}),marginBottom:14}}>
-                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>State: {st.name}</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Governing Act: {st.act}</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:4}}>Hold Period: {st.hold}</div>
-                <div style={{fontSize:11,color:T.muted}}>{st.note}</div>
-              </div>
-              <div style={c.g2(10)}>
-                <F label="From" type="date" value={dateFrom} onChange={setDateFrom}/>
-                <F label="To" type="date" value={dateTo} onChange={setDateTo}/>
-              </div>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={suspicious} onChange={e=>setSuspicious(e.target.checked)}/>Only include SMR-flagged transactions</label>
-              <div style={{display:"flex",gap:10}}>
-                <button style={c.btn(T.gold,T.bg)} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);dlFile(csv,"police-report-"+todayStr()+".csv","text/csv");pop("Police report downloaded.","ok");}}>⬇ Download Report CSV</button>
-                <button style={c.bsm()} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);const subject="Secondhand Dealer Transaction Report — "+sS(settings.businessName);window.location.href="mailto:"+(settings.policeEmail||st.defaultEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent("Please find attached the transaction register.\n\nBusiness: "+sS(settings.businessName)+"\nABN: "+sS(settings.abn)+"\nLicence: "+sS(settings.dealerLicenceNo));pop("Email client opened.","ok");}}>✉ Email to Station</button>
-              </div>
-            </div>;
-          })()}
-        </Modal>}
+        {showPolice&&<PoliceReport settings={settings} txList={txList} dlFile={dlFile} pop={pop} setShowPolice={setShowPolice}/>}
 
         {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={dlAccounting} setShowEOD={setShowEOD}/>}
 
