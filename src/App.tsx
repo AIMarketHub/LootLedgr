@@ -7,11 +7,7 @@ import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 import {LIGHT,T,c} from "./theme.js";
-import Modal from "./components/ui/Modal.jsx";
-import {F,SF} from "./components/ui/FormFields.jsx";
-import Notif from "./components/ui/Notif.jsx";
-import HoldTimer from "./components/ui/HoldTimer.jsx";
-import AIGhost from "./components/ui/AIGhost.jsx";
+import {Modal,F,SF,Notif,HoldTimer,AIGhost} from "./components/ui";
 
 function TxPhotoManager({selTx,store,setTxList,setSelTx}){
   const phKey=selTx.photoKey||("photos_"+selTx.id);
