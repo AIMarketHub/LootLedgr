@@ -8,6 +8,7 @@ import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,s
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 import {LIGHT,T,c} from "./theme.js";
 import Modal from "./components/ui/Modal.jsx";
+import {F,SF} from "./components/ui/FormFields.jsx";
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
@@ -15,14 +16,6 @@ function HoldTimer({holdUntil,policeHold}){
   if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
   if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
   return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
-}
-function F({label,value,onChange,type="text",placeholder,required,readOnly,note,as}){
-  const lbl=<label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label>;
-  const val=value==null?"":value;
-  return <div style={{marginBottom:14}}>{lbl}{as==="textarea"?<textarea style={{...c.inp(),height:80,resize:"vertical"}} value={val} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>:<input style={c.inp({opacity:readOnly?0.6:1})} type={type} value={val} readOnly={readOnly} onChange={e=>onChange&&onChange(e.target.value)} placeholder={placeholder||""}/>}{note&&<div style={{fontSize:10,color:T.muted,marginTop:3}}>{note}</div>}</div>;
-}
-function SF({label,value,onChange,options,required}){
-  return <div style={{marginBottom:14}}><label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label><select style={{...c.sel(),width:"100%"}} value={value||""} onChange={e=>onChange(e.target.value)}>{(options||[]).map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>;
 }
 function Notif({msg,type,onClose}){
   if(!msg)return null;
