@@ -16,6 +16,7 @@ import History from "./screens/History.jsx";
 import Prices from "./screens/Prices.jsx";
 import Clients from "./screens/Clients.jsx";
 import NewTx from "./screens/NewTx.jsx";
+import BackupRestore from "./modals/BackupRestore.jsx";
 
 export default function Loot(){
   const[screen,setScreen]=useState("dashboard");
@@ -907,18 +908,7 @@ export default function Loot(){
           </div>
         </Modal>}
 
-        {showBackup&&<Modal title="💾 Backup & Restore" onClose={()=>setShowBackup(false)}>
-          <div style={{marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Download Backup</div>
-            <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Includes all transactions, stock, catalog, vendors, staff, blacklist, and frozen snapshot. Does not include photos or logo.</div>
-            <button style={c.btn(T.gold,T.bg)} onClick={dlBackup}>⬇ Download Backup ({(txList||[]).length} tx, {(stock||[]).length} stock)</button>
-          </div>
-          <div style={{borderTop:"1px solid "+T.border,paddingTop:14}}>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Restore from Backup</div>
-            <div style={{...c.bnr("warn"),marginBottom:10}}>⚠ Restoring will overwrite your current data. Download a fresh backup first.</div>
-            <label style={{...c.btn(T.border,T.text),display:"inline-block",cursor:"pointer"}}>📂 Choose Backup File<input type="file" accept=".json,application/json" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;restoreBackup(f);setShowBackup(false);}}/></label>
-          </div>
-        </Modal>}
+        {showBackup&&<BackupRestore txList={txList} stock={stock} dlBackup={dlBackup} restoreBackup={restoreBackup} setShowBackup={setShowBackup}/>}
 
         {logoPinMode&&<div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setLogoPinMode(false)}>
           <div style={{...c.card({padding:24}),maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
