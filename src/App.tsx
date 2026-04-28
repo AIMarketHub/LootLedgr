@@ -9,26 +9,7 @@ import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltF
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,SF,Notif,HoldTimer,AIGhost} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
-
-function TxPhotoManager({selTx,store,setTxList,setSelTx}){
-  const phKey=selTx.photoKey||("photos_"+selTx.id);
-  const localPh=store.get(phKey,{idPhoto:null,itemPhotos:{}});
-  const ph={idPhoto:selTx.photo||localPh.idPhoto||null,itemPhotos:{...localPh.itemPhotos,...(selTx.itemPhotos||{})}};
-  const imgs=Object.entries(ph.itemPhotos||{});
-  const save=updated=>{store.set(phKey,updated);const hasPh=!!(updated.idPhoto||Object.keys(updated.itemPhotos||{}).length);setTxList(prev=>prev.map(t=>t.id===selTx.id?{...t,hasPhotos:hasPh,photoKey:phKey}:t));setSelTx(prev=>({...prev,hasPhotos:hasPh,photoKey:phKey}));};
-  return <div>
-    <div style={{marginBottom:12}}>
-      <div style={{fontSize:11,color:T.muted,marginBottom:6}}>ID / KYC Photo</div>
-      {ph.idPhoto?<div style={c.row(10)}><img src={ph.idPhoto} alt="ID" style={{width:80,height:80,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/><button style={c.bsm(T.redBg,T.red)} onClick={()=>save({...ph,idPhoto:null})}>Remove</button></div> :
-      <label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>Add ID Photo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,idPhoto:d}));r.readAsDataURL(f);e.target.value="";  }}/></label>}
-    </div>
-    <div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Item Photos ({imgs.length})</div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>{imgs.map(([key,src])=><div key={key} style={{position:"relative"}}><img src={src} alt="item" style={{width:72,height:72,objectFit:"cover",borderRadius:6,border:"1px solid "+T.border}}/><button onClick={()=>{const n={...ph,itemPhotos:{...ph.itemPhotos}};delete n.itemPhotos[key];save(n);}} style={{position:"absolute",top:-4,right:-4,background:T.red,color:"#fff",border:"none",borderRadius:"50%",width:18,height:18,fontSize:11,cursor:"pointer",padding:0,lineHeight:"18px",textAlign:"center"}}>x</button></div>)}</div>
-      <label style={{background:T.surface,border:"1px solid "+T.border,borderRadius:4,padding:"8px 14px",fontSize:12,cursor:"pointer",display:"inline-block",color:T.muted}}>Add Item Photo<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();const k="img_"+Date.now();r.onload=ev=>checkPhotoSize(ev.target.result,d=>save({...ph,itemPhotos:{...(ph.itemPhotos||{}),[k]:d}}));r.readAsDataURL(f);e.target.value="";  }}/></label>
-    </div>
-  </div>;
-}
+import TxPhotoManager from "./components/TxPhotoManager.jsx";
 
 export default function Loot(){
   const[screen,setScreen]=useState("dashboard");
