@@ -37,7 +37,10 @@ import {APP_VERSION,SEED_LOGO} from "./constants.js";
 
 const SB_URL=import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
-const SHOP_ID="default";
+// Exported (Phase 2.7.2) so src/lib/clients.js can scope its REST
+// queries to the same shop. Phase 3 swaps this for a per-user /
+// per-tenant id read from the auth session.
+export const SHOP_ID="default";
 
 export const store={
   get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
