@@ -7,6 +7,7 @@ import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 import {LIGHT,T,c} from "./theme.js";
+import Modal from "./components/ui/Modal.jsx";
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
@@ -14,14 +15,6 @@ function HoldTimer({holdUntil,policeHold}){
   if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
   if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
   return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
-}
-function Modal({title,onClose,wide,children}){
-  return <div style={{position:"fixed",inset:0,background:"#000000d0",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={onClose}>
-    <div style={{...c.card({padding:24,maxWidth:wide?980:580,width:"100%",maxHeight:"93vh",overflowY:"auto"})}} onClick={e=>e.stopPropagation()}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:20,alignItems:"center"}}><span style={{fontSize:15,fontWeight:"bold",color:T.white}}>{title}</span><button style={c.bsm()} onClick={onClose}>✕ Close</button></div>
-      {children}
-    </div>
-  </div>;
 }
 function F({label,value,onChange,type="text",placeholder,required,readOnly,note,as}){
   const lbl=<label style={c.lbl}>{label}{required&&<span style={{color:T.red}}> *</span>}</label>;
