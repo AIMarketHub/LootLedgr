@@ -9,6 +9,7 @@ import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltF
 import {LIGHT,T,c} from "./theme.js";
 import Modal from "./components/ui/Modal.jsx";
 import {F,SF} from "./components/ui/FormFields.jsx";
+import Notif from "./components/ui/Notif.jsx";
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
@@ -16,11 +17,6 @@ function HoldTimer({holdUntil,policeHold}){
   if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
   if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
   return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
-}
-function Notif({msg,type,onClose}){
-  if(!msg)return null;
-  const col=type==="ok"?T.green:type==="warn"?T.orange:T.red;
-  return <div style={{position:"fixed",bottom:70,right:16,zIndex:2000,background:T.card,border:"1px solid "+col,borderRadius:8,padding:"12px 18px",fontSize:13,color:col,maxWidth:340,boxShadow:"0 4px 20px #00000080"}}>{msg}<button style={{...c.bsm(T.border),marginLeft:12,fontSize:10}} onClick={onClose}>✕</button></div>;
 }
 function AIGhost({settings,label}){
   if(!settings||!settings.aiAgentEnabled)return null;
