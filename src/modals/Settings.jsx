@@ -26,7 +26,7 @@
 // decomposition can happen as a Phase 9 polish pass if it pays
 // off in readability or shared behaviour with other settings UIs.
 
-import React from "react";
+import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {sS,fmtAUD} from "../lib/utils.js";
 import {APP_VERSION} from "../lib/constants.js";
@@ -34,6 +34,8 @@ import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import {THRESH} from "../lib/compliance/index.js";
+import {clients} from "../lib/clients.js";
+import {analyzeMigrationTargets,runTestDataMigration} from "../lib/clientsMigration.js";
 import {Modal,F,SF} from "../components/ui";
 
 // Tighten-only validator for the Compliance Thresholds section.
@@ -61,10 +63,26 @@ export default function Settings({
   contrast,setContrast,fontSize,setFontSize,simp,setSimp,
   scaleStatus,scaleDevice,connectScale,disconnectScale,
   pop,
-  setTxList,setStock,purge,spotLog,blacklist,setBlacklist,
+  txList,setTxList,setStock,purge,spotLog,blacklist,setBlacklist,
   settingsOpen,toggleSection,
   setShowSet,setAppUnlocked,
 }){
+  // Phase 2.7.12 — test-data migration state. Loaded eagerly when
+  // the Settings modal mounts so the Danger Zone status line is
+  // accurate as soon as the user scrolls down.
+  const[migStats,setMigStats]=useState(null);
+  const[migLoading,setMigLoading]=useState(false);
+  const[migBusy,setMigBusy]=useState(false);
+  const refreshMigStats=async()=>{
+    setMigLoading(true);
+    try{
+      const cs=await clients.list();
+      setMigStats(analyzeMigrationTargets(txList,cs));
+    }catch(_){
+      setMigStats(null);
+    }finally{setMigLoading(false);}
+  };
+  useEffect(()=>{refreshMigStats();/* eslint-disable-next-line */},[]);
   return <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
     {[
       ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
@@ -226,6 +244,38 @@ export default function Settings({
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
         <button style={c.bsm(T.redBg,T.red)} onClick={()=>{if(window.confirm&&!window.confirm("Clear all transactions and stock? This cannot be undone."))return;setTxList([]);setStock([]);pop("All data cleared.","warn");}}>🗑 Clear All Data</button>
         <button style={c.bsm(T.border,T.muted)} onClick={purge}>🧹 Purge Expired (7yr)</button>
+      </div>
+
+      {/* Phase 2.7.12 — one-time test-data migration. Idempotent;
+          does nothing when migStats.pending === 0. The status line
+          recomputes after each run via refreshMigStats(). */}
+      <div style={{marginTop:18,paddingTop:14,borderTop:"1px solid "+T.border}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:6}}>🔗 Client-record migration (one-time)</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:10,minHeight:16}}>
+          {migLoading?"Computing…":!migStats?"Stats unavailable.":migStats.pending===0?"✓ All transactions linked to client records.":(migStats.pending+" transaction"+(migStats.pending===1?"":"s")+" awaiting migration · "+migStats.newClientsToCreate+" new client record"+(migStats.newClientsToCreate===1?"":"s")+" to create.")}
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <button
+            style={c.bsm(T.goldBg,T.gold)}
+            disabled={migBusy||migLoading||!migStats||migStats.pending===0}
+            onClick={async()=>{
+              if(!migStats||migStats.pending===0)return;
+              if(typeof window!=="undefined"&&window.confirm&&!window.confirm("Run the one-time test-transaction migration? Creates client records for unmigrated transactions and links them. Idempotent — safe to re-run."))return;
+              setMigBusy(true);
+              try{
+                const r=await runTestDataMigration({txList,setTxList});
+                const msg="Migrated: "+r.linked+" tx linked, "+r.created+" client"+(r.created===1?"":"s")+" created"+(r.alreadyLinked?", "+r.alreadyLinked+" already linked":"")+(r.skipped?", "+r.skipped+" skipped (no idNumber)":"")+(r.errors.length?", "+r.errors.length+" errors":"")+".";
+                pop(msg,r.errors.length?"warn":"ok");
+                await refreshMigStats();
+              }catch(e){
+                pop("Migration failed: "+sS(e&&e.message),"err");
+              }finally{setMigBusy(false);}
+            }}
+          >
+            {migBusy?"Migrating…":"Migrate test transactions to client records (one-time)"}
+          </button>
+          <button style={c.bsm()} disabled={migLoading||migBusy} onClick={refreshMigStats}>↺ Refresh stats</button>
+        </div>
       </div>
       <div style={{marginTop:14}}>
         <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Spot Price History (last 90)</div>

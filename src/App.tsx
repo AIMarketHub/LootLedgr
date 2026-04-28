@@ -577,7 +577,7 @@ export default function Loot(){
           scaleStatus={scaleStatus} scaleDevice={scaleDevice}
           connectScale={connectScale} disconnectScale={disconnectScale}
           pop={pop}
-          setTxList={setTxList} setStock={setStock} purge={purge}
+          txList={txList} setTxList={setTxList} setStock={setStock} purge={purge}
           spotLog={spotLog} blacklist={blacklist} setBlacklist={setBlacklist}
           settingsOpen={settingsOpen} toggleSection={toggleSection}
           setShowSet={setShowSet} setAppUnlocked={setAppUnlocked}
