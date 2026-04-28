@@ -6,28 +6,7 @@ import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,is
 import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
-
-const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
-var T=LIGHT;
-
-const c={
-  card:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,boxShadow:"6px 6px 19px rgba(0,0,0,0.18),3px 3px 0 rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.07)",...x}),
-  inp:(x={})=>({background:T.surface,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:13,padding:"9px 12px",outline:"none",width:"100%",boxSizing:"border-box",...x}),
-  sel:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:6,color:T.text,fontFamily:T.ff,fontSize:12,padding:"8px 12px",outline:"none",...x}),
-  btn:(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:6,padding:"14px 28px",fontFamily:T.ff,fontSize:14,fontWeight:"bold",letterSpacing:"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"}),
-  bsm:(bg=T.border,col=T.text)=>({background:bg,color:col,border:"none",borderRadius:5,padding:"10px 18px",fontFamily:T.ff,fontSize:13,fontWeight:"600",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"3px 3px 10px rgba(0,0,0,0.18)"}),
-  lbl:{fontSize:10,color:T.muted,letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:5,display:"block"},
-  row:(g=12)=>({display:"flex",alignItems:"center",gap:g}),
-  g2:(g=16)=>({display:"grid",gridTemplateColumns:"1fr 1fr",gap:g}),
-  g3:(g=12)=>({display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:g}),
-  g4:(g=13)=>({display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:g}),
-  th:{padding:"8px 12px",fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"left",borderBottom:"1px solid "+T.border,background:T.surface},
-  td:(x={})=>({padding:"9px 12px",fontSize:12,borderBottom:"1px solid "+T.border+"22",verticalAlign:"middle",...x}),
-  dot:(col)=>({width:10,height:10,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"99",flexShrink:0,display:"inline-block"}),
-  badge:(col,bg)=>({display:"inline-block",padding:"2px 7px",borderRadius:4,fontSize:10,fontWeight:"bold",color:col,background:bg||col+"22"}),
-  bnr:(lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6};},
-  shead:(g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver}),
-};
+import {LIGHT,T,c} from "./theme.js";
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
@@ -197,8 +176,16 @@ export default function Loot(){
   const MANUAL_TTL=5*60*1000; // 5 min manual override — API resumes quickly
   const isManualActive=()=>(Date.now()-manualTs.current)<MANUAL_TTL;
 
-  T=LIGHT;
-  if(contrast!==0){const cv=contrast;T=Object.assign({},T,{border:"rgba(0,0,0,"+(cv>0?(0.12+cv*0.075):(0.12+cv*0.02))+")",muted:cv>0?"#"+Math.max(0,0x73-cv*18).toString(16).padStart(2,"0").repeat(3):"#737373",text:cv>0?"#000":"#"+Math.max(0x11,0x11+Math.round(cv*8)).toString(16).padStart(2,"0").repeat(3),gold:cv>0?"#7a5200":"#9C7A00"});}
+  // T is the live theme object (exported from theme.js as a clone of
+  // LIGHT). Reset it to baseline LIGHT, then overlay contrast tweaks
+  // in place — Object.assign on the imported T mutates the same
+  // object the c style helpers close over, so they pick up the new
+  // values on the next read. (Originally `T = LIGHT` and
+  // `T = Object.assign({}, T, {…})` reassignments; cross-module
+  // reassignment isn't possible, so the in-place mutation pattern
+  // replaces it. End-state property values are identical.)
+  Object.assign(T,LIGHT);
+  if(contrast!==0){const cv=contrast;Object.assign(T,{border:"rgba(0,0,0,"+(cv>0?(0.12+cv*0.075):(0.12+cv*0.02))+")",muted:cv>0?"#"+Math.max(0,0x73-cv*18).toString(16).padStart(2,"0").repeat(3):"#737373",text:cv>0?"#000":"#"+Math.max(0x11,0x11+Math.round(cv*8)).toString(16).padStart(2,"0").repeat(3),gold:cv>0?"#7a5200":"#9C7A00"});}
   const S=simp;
   Object.assign(c,{
     btn:(bg=T.gold,col="#080c09",x={})=>({background:bg,color:col,border:"none",borderRadius:S?8:6,padding:S?"14px 24px":"14px 28px",fontFamily:T.ff,fontSize:S?15:14,fontWeight:"bold",letterSpacing:S?"0.06em":"0.08em",textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",...x,boxShadow:"4px 4px 14px rgba(0,0,0,0.22)"}),
