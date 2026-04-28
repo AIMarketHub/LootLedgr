@@ -11,12 +11,7 @@ import Modal from "./components/ui/Modal.jsx";
 import {F,SF} from "./components/ui/FormFields.jsx";
 import Notif from "./components/ui/Notif.jsx";
 import HoldTimer from "./components/ui/HoldTimer.jsx";
-
-function AIGhost({settings,label}){
-  if(!settings||!settings.aiAgentEnabled)return null;
-  const col=settings.aiAgentLevel>=2?"#F59E0B":"#3B82F6";
-  return <div title={sS(settings.aiAgentName||"AI")+" — "+label} style={{display:"inline-flex",alignItems:"center",gap:4,opacity:0.55,marginLeft:6}}><span style={{width:6,height:6,borderRadius:"50%",background:col,boxShadow:"0 0 6px "+col,display:"inline-block"}}/><span style={{fontSize:9,color:col,fontFamily:"monospace"}}>{settings.aiAgentName||"AI"}</span></div>;
-}
+import AIGhost from "./components/ui/AIGhost.jsx";
 
 function TxPhotoManager({selTx,store,setTxList,setSelTx}){
   const phKey=selTx.photoKey||("photos_"+selTx.id);
