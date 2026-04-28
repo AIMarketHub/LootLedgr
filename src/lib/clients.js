@@ -25,8 +25,29 @@
 // This module supplies the predicate; the modal lives in the UI.
 
 import {sbFetch,SHOP_ID} from "./storage.js";
+import {fmtDate} from "./utils.js";
 
 const ts=()=>new Date().toISOString();
+
+// === Display helpers ========================================================
+//
+// 30-day display rule for lastTxAt (Phase 2.7 spec, "DISPLAY RULES"):
+// the underlying value is always stored (used for retention, sorting,
+// analytics) but we only SHOW the date when it's within the last 30
+// days. Older or missing → return empty string so the caller can omit
+// the row entirely or render a placeholder. Sorting still uses the
+// raw lastTxAt regardless of what's displayed.
+
+const THIRTY_DAYS_MS=30*86400000;
+
+export function formatLastVisit(client){
+  const lastTxAt=client&&client.lastTxAt;
+  if(!lastTxAt)return "";
+  const dt=new Date(lastTxAt);
+  if(isNaN(dt.getTime()))return "";
+  if(Date.now()-dt.getTime()>THIRTY_DAYS_MS)return "";
+  return fmtDate(lastTxAt);
+}
 
 // Unwrap a row from {id, shop_id, data, updated_at} into a flat
 // client object. The id and updated_at come along for the ride;
