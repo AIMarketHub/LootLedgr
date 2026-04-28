@@ -1,25 +1,39 @@
 // LootLedger — NewTx screen.
-// Mechanically extracted from src/App.tsx during Phase 2 step 9b
-// (briefing §7.3). No semantic changes; markup preserved verbatim.
+// Phase 2.7.9a — flow REORDERED per the Phase 2.7 spec:
 //
-// The 6-step compliance transaction flow:
-//   step 1 — Basket    (catalog or quick-item entry, basket table)
-//   step 2 — Compliance (flags, KYC form when triggered, SMR flag)
-//   step 3 — Client    (privacy ack, declaration, ID, signature)
-//   step 4 — Staff     (ID-sighted, KYC checks, 168hr hold + storage)
-//   step 5 — Payment   (cash/EFTPOS/card/bank/crypto + record-in)
-//   step 6 — Done      (summary + finalize)
+//   step 1 — Basket           (catalog or quick-item entry, basket table)
+//   step 2 — Price + Payment  (was previously step 5)
+//   step 3 — Conditional      (only the fields getRequiredFields()
+//            Compliance        returns + flags banner + SMR flag)
+//   step 4 — Client            (privacy ack, declaration, ID,
+//                                signature; ClientSearch + photo-
+//                                first integration arrives in 2.7.9b)
+//   step 5 — Staff             (ID-sighted + 168hr hold + storage —
+//                                KYC fields stripped from this step,
+//                                they're now in step 3)
+//   step 6 — Done              (summary + finalize)
 //
-// This is the largest extraction in Phase 2 (briefing §7.3 step 9b
-// flags it explicitly; "take it slow"). All state and callbacks
-// flow in via props from App.tsx — the component is pure render.
+// Step 3 reads getRequiredFields(tx, settings) (added in 2.7.8) to
+// decide which compliance fields to render. With dealer-side
+// threshold tightening from 2.7.4b, fields appear earlier than the
+// AUSTRAC defaults. With nothing tightened and a sub-threshold tx,
+// step 3 may show no fields at all — just a "no extra fields
+// required" notice.
 //
-// The basket-table renderer (formerly the App.tsx-local
-// `basketTable` const) lives inside this component since it's only
-// used here. The basket-row inline-edit state (adjId / adjVal)
-// stays in App.tsx for now (per "only add, never remove") and
-// flows through props; a future cleanup could lift it into
-// NewTx-local state.
+// Compliance step-3 fields write to the CLIENT object per the
+// Phase 2.7 client schema (pepCheck/tfsCheck/riskRating/
+// sourceOfFunds/sourceOfWealth all live on the client record).
+// The old flow stored pep/tfs on staff (boolean + result variants);
+// the new flow consolidates onto client. Old tx records keep their
+// staff-side values; new ones write to client. Defensive readers
+// (receipt, police report) tolerate both shapes.
+//
+// 2.7.9b will integrate ClientSearch + IdPhotoCapture into step 4
+// and wire finalize() for client linking + auto-create. This
+// commit is purely the reorder + getRequiredFields integration.
+//
+// The basket-row inline-edit state (adjId / adjVal) and the
+// existing photo-input ref (fileRef) stay where they are.
 
 import React from "react";
 import {T,c} from "../theme.js";
@@ -27,17 +41,17 @@ import {F,SF,HoldTimer} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
 import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
-import {PRIVACY_NOTICE,THRESH} from "../lib/compliance/index.js";
+import {PRIVACY_NOTICE,THRESH,getRequiredFields} from "../lib/compliance/index.js";
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
 
+const STEP_LABELS=["Basket","Price+Payment","Compliance","Client","Staff","Done"];
+
 export default function NewTx({
-  // step / item state
   txStep,setTxStep,
   txItems,setTxItems,
   txPay,setTxPay,
   txNo,
   buyTotal,sellTotal,net,
-  // compliance + identity
   compliance,
   kycDone,setKycDone,
   privAck,setPrivAck,
@@ -46,29 +60,30 @@ export default function NewTx({
   itemPhotos,setItemPhotos,
   client,setClient,
   staff,setStaff,
-  // basket inline edit
   adjId,setAdjId,adjVal,setAdjVal,
-  // add-item form (catalog mode)
   addId,setAddId,
   addQty,setAddQty,
   addCustom,setAddCustom,
   addNote,setAddNote,
   addMode,setAddMode,
   addProd,addUnit,addQtyN,addCalc,
-  // add-item form (quick mode)
   quickMode,setQuickMode,
   qf,setQF,
   qmMode,setQMMode,
-  // ambient
   catalog,settings,scaleStatus,scaleLive,fileRef,
-  // helpers
   handleAddItem,handleToCompliance,handleToClient,
   resetTx,finalize,
   pop,
-  // navigation
   setShowFlag,setShowCat,setScreen,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
+
+  // Phase 2.7.8 — drives step 3's conditional rendering. Reads
+  // settings overrides (cashKycThreshold, bullionCddThreshold,
+  // sourceOfFundsCashThreshold, sourceOfWealthCashThreshold) and
+  // falls back to regional defaults when null.
+  const requiredFields=getRequiredFields({payment:txPay,buyTotal,items:txItems},settings);
+
   const basketTable = txItems.length > 0 ? (
     <div style={c.card({padding:0,overflow:"hidden",marginBottom:14})}>
       <div style={c.shead(true)}>Basket — {txItems.length} item(s)</div>
@@ -116,10 +131,13 @@ export default function NewTx({
 
   return <div>
     <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:4,marginBottom:18}}>
-      {["Basket","Compliance","Client","Staff","Payment","Done"].map((s,i)=>{const done=txStep>i+1,active=txStep===i+1;return <div key={s} style={{display:"flex",alignItems:"center"}}><div style={{padding:"5px 12px",borderRadius:4,fontSize:10,fontWeight:"bold",letterSpacing:"0.08em",background:active?T.gold:done?T.greenBg:T.surface,color:active?T.bg:done?T.green:T.muted,border:"1px solid "+(active?T.gold:done?T.green:T.border)}}>{done?"✓ ":""}{s}</div>{i<5&&<div style={{width:12,height:1,background:T.border}}/>}</div>;})}
+      {STEP_LABELS.map((s,i)=>{const done=txStep>i+1,active=txStep===i+1;return <div key={s} style={{display:"flex",alignItems:"center"}}><div style={{padding:"5px 12px",borderRadius:4,fontSize:10,fontWeight:"bold",letterSpacing:"0.08em",background:active?T.gold:done?T.greenBg:T.surface,color:active?T.bg:done?T.green:T.muted,border:"1px solid "+(active?T.gold:done?T.green:T.border)}}>{done?"✓ ":""}{s}</div>{i<5&&<div style={{width:12,height:1,background:T.border}}/>}</div>;})}
     </div>
     {scaleStatus==="connected"&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",borderRadius:7,background:T.surface,border:"1px solid "+(scaleLive?T.gold:T.border),marginBottom:12}}><span style={{fontSize:16}}>⚖</span><span style={{fontSize:10,color:T.muted,flex:1}}>Scale</span><span style={{fontSize:16,fontWeight:"bold",color:scaleLive?T.gold:T.muted}}>{scaleLive?fmtSW(scaleLive):"Place item on scale…"}</span>{scaleLive&&<span style={{fontSize:9,color:T.gold}}>● LIVE</span>}</div>}
 
+    {/* ===================================================================
+        STEP 1 — BASKET (unchanged from prior NewTx.jsx)
+        =================================================================== */}
     {txStep===1&&(
       <div>
         <div style={{marginBottom:14}}><div style={{fontSize:13,fontWeight:"bold",color:T.white}}>Invoice #<span style={{color:T.gold}}>{txNo}</span></div></div>
@@ -192,55 +210,119 @@ export default function NewTx({
         </div>
         {basketTable}
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Compliance →</button>
+          <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Payment →</button>
           <button style={c.bsm()} onClick={resetTx}>Reset</button>
         </div>
       </div>
     )}
 
+    {/* ===================================================================
+        STEP 2 — PRICE + PAYMENT (was step 5 in the old flow)
+        Picking the payment method here unlocks the cash gates that
+        fire at step 2 → step 3 (handleToClient still gates the cash
+        hardblock + $2k cash-warn PIN; Phase 2.7.9a updated it to
+        drop the kycDone gate since KYC fields are now in step 3).
+        =================================================================== */}
     {txStep===2&&(
       <div>
-        <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
-        {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
-        {compliance.requiresKYC&&!kycDone&&(
-          <div style={c.card({padding:18,marginTop:14,borderColor:T.red+"55"})}>
-            <div style={{fontSize:12,fontWeight:"bold",color:T.red,marginBottom:14}}>🔴 AUSTRAC KYC/CDD — All fields mandatory</div>
-            <div style={c.g2(10)}>
-              <F label="Full Legal Name" required value={client.fullName} onChange={v=>setClient(p=>({...p,fullName:v}))}/>
-              <F label="Date of Birth" required type="date" value={client.dob} onChange={v=>setClient(p=>({...p,dob:v}))}/>
-              <F label="Residential Address" required value={client.address} onChange={v=>setClient(p=>({...p,address:v}))}/>
-              <F label="Phone" value={client.phone} onChange={v=>setClient(p=>({...p,phone:v}))}/>
-              <SF label="ID Type" required value={client.idType} onChange={v=>setClient(p=>({...p,idType:v}))} options={ID_OPTIONS}/>
-              <F label="ID Number" required value={client.idNumber} onChange={v=>setClient(p=>({...p,idNumber:v}))}/>
-              <F label="Issuing State" value={client.idState} onChange={v=>setClient(p=>({...p,idState:v}))}/>
-              <F label="ID Expiry" type="date" value={client.idExpiry} onChange={v=>setClient(p=>({...p,idExpiry:v}))}/>
-            </div>
-            {compliance.flags.some(f=>f.key==="ttr")&&<F label="Source of Funds" required value={client.sourceOfFunds} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))}/>}
-            {compliance.flags.some(f=>f.key==="ttr")&&<F label="Source of Wealth" required value={client.sourceOfWealth} onChange={v=>setClient(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>}
-            <div style={{...c.g2(12),marginTop:8}}>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.pepCheck} onChange={e=>setStaff(p=>({...p,pepCheck:e.target.checked}))}/>PEP Check — Seller is NOT a PEP</label>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={!!staff.tfsCheck} onChange={e=>setStaff(p=>({...p,tfsCheck:e.target.checked}))}/>TFS Check — NOT on Sanctions List (dfat.gov.au)</label>
-            </div>
-            <div style={{marginTop:10}}>
-              <label style={c.lbl}>Risk Rating</label>
-              <select style={c.sel()} value={staff.riskRating||""} onChange={e=>setStaff(p=>({...p,riskRating:e.target.value}))}><option value="">— Select —</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
-            </div>
-            <button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{if(!client.fullName||!client.dob||!client.idType||!client.idNumber){pop("Fill all required KYC fields.","err");return;}if(!staff.pepCheck||!staff.tfsCheck){pop("Complete PEP and TFS checks.","err");return;}if(!staff.riskRating){pop("Assign risk rating.","err");return;}setKycDone(true);pop("KYC completed.","ok");}}>✓ Mark KYC Complete</button>
+        <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>Price + Payment</div>
+        <div style={c.card({padding:16,marginBottom:14})}>
+          <label style={c.lbl}>Payment Method</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
+            {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[])].map(opt=>(
+              <button key={opt.v} onClick={()=>setTxPay(opt.v)} style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
+                <span style={{fontSize:24}}>{opt.icon}</span><span style={{fontWeight:"bold"}}>{opt.label}</span>
+              </button>
+            ))}
           </div>
-        )}
-        {(kycDone||!compliance.requiresKYC)&&<div style={{...c.bnr("info"),marginTop:8}}>✓ Compliance check passed.</div>}
-        <div style={{display:"flex",gap:10,marginTop:10}}>
-          <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag SMR (internal)</button>
-          <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
         </div>
-        <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button style={c.btn(T.gold)} onClick={handleToClient}>Next: Client Form →</button>
+        <div style={{...c.card({padding:14}),marginBottom:14,textAlign:"center"}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{net>=0?"Amount to collect from client":"Amount to pay client"}</div>
+          <div style={{fontSize:28,fontWeight:"bold",color:net>=0?T.gold:T.green}}>{fmtAUD(Math.abs(net))}</div>
+          <div style={{display:"flex",gap:14,justifyContent:"center",marginTop:8,fontSize:11,color:T.muted,flexWrap:"wrap"}}>
+            {buyTotal>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(buyTotal)}</strong></span>}
+            {sellTotal>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(sellTotal)}</strong></span>}
+          </div>
+        </div>
+        {txPay==="eftpos"&&net>0&&<div style={c.card({padding:16,marginBottom:10})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
+          <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{pop("Sending "+fmtAUD(net)+" to terminal…","ok");const r=await sendEftpos(settings,net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Send {fmtAUD(net)} to Terminal</button>
+          <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>✓ Confirm Manually</button>
+        </div>}
+        {txPay==="cash"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button></div>}
+        {txPay==="card"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button style={{...c.btn(T.gold,T.bg),flex:1}} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}try{const r=await sendSquareSell(settings,(txItems||[]).filter(i=>i.mode==="sell"));pop(r.msg,r.level||(r.ok?"ok":"err"));}catch(e){pop("Square: "+e.message,"err");}}}>⬡ Square Checkout</button>
+            <button style={{...c.btn(T.border,T.text),flex:1}} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}try{const r=await sendShopifySell(settings,txNo,(txItems||[]).filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify Order</button>
+          </div>
+          <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
+        </div>}
+        {txPay==="bank"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>🏦 Client transfers {fmtAUD(net)} to your account.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Bank transfer noted.","ok")}>✓ Transfer Noted</button></div>}
+        {txPay==="crypto"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto Payment</div>
+          {(()=>{const COINS=[{k:"BTC",l:"Bitcoin",w:settings.walletBTC},{k:"ETH",l:"Ethereum",w:settings.walletETH},{k:"BNB",l:"Binance",w:settings.walletBNB},{k:"XRP",l:"Ripple",w:settings.walletXRP},{k:"SOL",l:"Solana",w:settings.walletSOL}].filter(x=>x.w);if(!COINS.length)return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;return COINS.map(coin=><div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}><div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div><div style={{fontFamily:"monospace",fontSize:10,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div><button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button></div>);})()}
+          <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
+        </div>}
+        {net<0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {sS(txPay).toUpperCase()}.</div>{txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(settings,-net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button></div>}
+        {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}
+        <div style={c.card({padding:12,marginBottom:14})}>
+          <div style={{fontSize:10,color:T.muted,marginBottom:8}}>RECORD IN</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button style={c.bsm(settings.squareToken?T.goldBg:T.surface,settings.squareToken?T.gold:T.muted)} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendSquareBuy(settings,txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Square: "+e.message,"err");}if(sells.length)try{const r=await sendSquareSell(settings,sells);pop(r.msg,r.level||(r.ok?"ok":"err"));}catch(e){pop("Square sell: "+e.message,"err");}}}>⬡ Square</button>
+            <button style={c.bsm(settings.shopifyDomain?T.goldBg:T.surface,settings.shopifyDomain?T.gold:T.muted)} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendShopifyBuy(settings,txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}if(sells.length)try{const r=await sendShopifySell(settings,txNo,sells,client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify</button>
+            <button style={c.bsm(settings.xeroToken?T.goldBg:T.surface,settings.xeroToken?T.gold:T.muted)} onClick={()=>pop("Xero: configure webhook in Settings.","warn")}>📒 Xero</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={c.btn(T.gold)} onClick={handleToClient}>Next: Compliance →</button>
           <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
         </div>
       </div>
     )}
 
+    {/* ===================================================================
+        STEP 3 — CONDITIONAL COMPLIANCE (Phase 2.7 spec)
+        Renders the AUSTRAC flag banners (statutory; from
+        checkCompliance) plus only the fields getRequiredFields
+        returns for the current tx + settings. With dealer-side
+        threshold tightening, fields can light up earlier than the
+        AUSTRAC defaults. With nothing tightened and a small tx,
+        this step may have no fields at all — just a notice.
+        =================================================================== */}
     {txStep===3&&(
+      <div>
+        <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
+        {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
+        {requiredFields.length===0&&<div style={{...c.bnr("info"),marginTop:8}}>✓ No additional compliance fields required for this transaction.</div>}
+        {requiredFields.length>0&&(
+          <div style={c.card({padding:16,marginTop:14})}>
+            <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>REQUIRED COMPLIANCE FIELDS</div>
+            {requiredFields.includes("pepCheck")&&<SF label="PEP Check" value={client.pepCheck||""} onChange={v=>setClient(p=>({...p,pepCheck:v}))} options={[{value:"",label:"— Select —"},{value:"no",label:"No — Not a PEP"},{value:"yes",label:"PEP — refer to compliance officer"}]}/>}
+            {requiredFields.includes("tfsCheck")&&<SF label="TFS Check (dfat.gov.au sanctions)" value={client.tfsCheck||""} onChange={v=>setClient(p=>({...p,tfsCheck:v}))} options={[{value:"",label:"— Select —"},{value:"clear",label:"Clear — not on list"},{value:"match",label:"MATCH — escalate"}]}/>}
+            {requiredFields.includes("riskRating")&&<SF label="Risk Rating" value={client.riskRating||""} onChange={v=>setClient(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>}
+            {requiredFields.includes("sourceOfFunds")&&<F label="Source of Funds" value={client.sourceOfFunds||""} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))} placeholder="e.g. wages, sale of asset, inheritance"/>}
+            {requiredFields.includes("sourceOfWealth")&&<F label="Source of Wealth" value={client.sourceOfWealth||""} onChange={v=>setClient(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>}
+          </div>
+        )}
+        <div style={{display:"flex",gap:10,marginTop:10}}>
+          <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag SMR (internal)</button>
+          <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:16}}>
+          <button style={c.btn(T.gold)} onClick={()=>setTxStep(4)}>Next: Client →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
+        </div>
+      </div>
+    )}
+
+    {/* ===================================================================
+        STEP 4 — CLIENT (was step 3 in the old flow)
+        Privacy ack, declaration, ID details, signature. ClientSearch
+        + IdPhotoCapture integration arrives in 2.7.9b — for now the
+        existing in-form photo capture stays.
+        =================================================================== */}
+    {txStep===4&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client Declaration Form</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
@@ -308,13 +390,19 @@ export default function NewTx({
           <F label="Date" type="date" required value={client.signatureDate||new Date().toISOString().slice(0,10)} onChange={v=>setClient(p=>({...p,signatureDate:v}))}/>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Staff Section →</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
+          <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(5);}}>Next: Staff Section →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
         </div>
       </div>
     )}
 
-    {txStep===4&&(
+    {/* ===================================================================
+        STEP 5 — STAFF (was step 4; KYC subsection removed)
+        ID-sighted confirmation + 168-hour safety hold + storage
+        location. KYC fields (PEP/TFS/risk) moved to step 3 in the
+        new flow.
+        =================================================================== */}
+    {txStep===5&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Staff Compliance Section</div>
         <div style={c.card({padding:16,marginBottom:14})}>
@@ -328,15 +416,6 @@ export default function NewTx({
             <strong style={{color:T.orange}}>✓ I confirm I have physically sighted the identification document presented</strong>
           </label>
         </div>
-        {compliance.requiresKYC&&(
-          <div style={c.card({padding:16,marginBottom:14})}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 6 — KYC CHECKS <span style={{color:T.red}}>★ REQUIRED</span></div>
-            {kycDone&&<div style={c.bnr("info")}>✓ KYC completed in Compliance step.</div>}
-            <SF label="PEP Check" required value={staff.pepResult} onChange={v=>setStaff(p=>({...p,pepResult:v}))} options={[{value:"",label:"— Select —"},{value:"no",label:"No — Not a PEP"},{value:"yes",label:"PEP — refer to compliance officer"}]}/>
-            <SF label="TFS Check — dfat.gov.au/sanctions" required value={staff.tfsResult} onChange={v=>setStaff(p=>({...p,tfsResult:v}))} options={[{value:"",label:"— Select —"},{value:"clear",label:"Clear — not on list"},{value:"match",label:"MATCH — escalate immediately"}]}/>
-            <SF label="Risk Rating" required value={staff.riskRating} onChange={v=>setStaff(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>
-          </div>
-        )}
         <div style={c.card({padding:16,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 7 — 168-HOUR SAFETY HOLD</div>
           <div style={c.bnr("warn")}>Automatic 168-hour Safety Hold applies to all bought items.</div>
@@ -347,63 +426,15 @@ export default function NewTx({
           <F label="Storage Location (bay / safe / tray)" required value={staff.storageLocation} onChange={v=>setStaff(p=>({...p,storageLocation:v}))} placeholder="e.g. Safe A, Tray 3"/>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.green,T.bg)} onClick={()=>setTxStep(5)}>Next: Payment →</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
+          <button style={c.btn(T.green,T.bg)} onClick={()=>setTxStep(6)}>Next: Finalise →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(4)}>← Back</button>
         </div>
       </div>
     )}
 
-    {txStep===5&&(
-      <div>
-        <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>Payment</div>
-        <div style={c.card({padding:16,marginBottom:14})}>
-          <label style={c.lbl}>Payment Method</label>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
-            {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[])].map(opt=>(
-              <button key={opt.v} onClick={()=>setTxPay(opt.v)} style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
-                <span style={{fontSize:24}}>{opt.icon}</span><span style={{fontWeight:"bold"}}>{opt.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{...c.card({padding:14}),marginBottom:14,textAlign:"center"}}>
-          <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{net>=0?"Amount to collect from client":"Amount to pay client"}</div>
-          <div style={{fontSize:28,fontWeight:"bold",color:net>=0?T.gold:T.green}}>{fmtAUD(Math.abs(net))}</div>
-        </div>
-        {txPay==="eftpos"&&net>0&&<div style={c.card({padding:16,marginBottom:10})}>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
-          <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{pop("Sending "+fmtAUD(net)+" to terminal…","ok");const r=await sendEftpos(settings,net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Send {fmtAUD(net)} to Terminal</button>
-          <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>✓ Confirm Manually</button>
-        </div>}
-        {txPay==="cash"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button></div>}
-        {txPay==="card"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button style={{...c.btn(T.gold,T.bg),flex:1}} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}try{const r=await sendSquareSell(settings,(txItems||[]).filter(i=>i.mode==="sell"));pop(r.msg,r.level||(r.ok?"ok":"err"));}catch(e){pop("Square: "+e.message,"err");}}}>⬡ Square Checkout</button>
-            <button style={{...c.btn(T.border,T.text),flex:1}} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}try{const r=await sendShopifySell(settings,txNo,(txItems||[]).filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify Order</button>
-          </div>
-          <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
-        </div>}
-        {txPay==="bank"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>🏦 Client transfers {fmtAUD(net)} to your account.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Bank transfer noted.","ok")}>✓ Transfer Noted</button></div>}
-        {txPay==="crypto"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto Payment</div>
-          {(()=>{const COINS=[{k:"BTC",l:"Bitcoin",w:settings.walletBTC},{k:"ETH",l:"Ethereum",w:settings.walletETH},{k:"BNB",l:"Binance",w:settings.walletBNB},{k:"XRP",l:"Ripple",w:settings.walletXRP},{k:"SOL",l:"Solana",w:settings.walletSOL}].filter(x=>x.w);if(!COINS.length)return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;return COINS.map(coin=><div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}><div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div><div style={{fontFamily:"monospace",fontSize:10,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div><button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button></div>);})()}
-          <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
-        </div>}
-        {net<0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {sS(txPay).toUpperCase()}.</div>{txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(settings,-net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button></div>}
-        {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}
-        <div style={c.card({padding:12,marginBottom:14})}>
-          <div style={{fontSize:10,color:T.muted,marginBottom:8}}>RECORD IN</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button style={c.bsm(settings.squareToken?T.goldBg:T.surface,settings.squareToken?T.gold:T.muted)} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendSquareBuy(settings,txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Square: "+e.message,"err");}if(sells.length)try{const r=await sendSquareSell(settings,sells);pop(r.msg,r.level||(r.ok?"ok":"err"));}catch(e){pop("Square sell: "+e.message,"err");}}}>⬡ Square</button>
-            <button style={c.bsm(settings.shopifyDomain?T.goldBg:T.surface,settings.shopifyDomain?T.gold:T.muted)} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");if(buys.length)try{const r=await sendShopifyBuy(settings,txNo,buys,buyTotal,client.fullName,txPay);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}if(sells.length)try{const r=await sendShopifySell(settings,txNo,sells,client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify</button>
-            <button style={c.bsm(settings.xeroToken?T.goldBg:T.surface,settings.xeroToken?T.gold:T.muted)} onClick={()=>pop("Xero: configure webhook in Settings.","warn")}>📒 Xero</button>
-          </div>
-        </div>
-        <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={()=>setTxStep(6)}>Next: Finalise →</button>
-      </div>
-    )}
-
+    {/* ===================================================================
+        STEP 6 — DONE (unchanged)
+        =================================================================== */}
     {txStep===6&&(
       <div>
         <div style={c.card({padding:16,marginBottom:14,borderLeft:"4px solid "+T.gold})}>
@@ -420,7 +451,7 @@ export default function NewTx({
         </div>
         <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}} onClick={finalize}>✓ Complete Transaction</button>
         <div style={{display:"flex",gap:10}}>
-          <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>setTxStep(5)}>← Back to Payment</button>
+          <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>setTxStep(5)}>← Back to Staff</button>
           <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>{resetTx();setScreen("dashboard");}}>✕ Cancel</button>
         </div>
       </div>
