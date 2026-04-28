@@ -68,6 +68,37 @@ export function getMissingMandatoryFields(client){
 
 export const isClientMandatoryComplete=c=>getMissingMandatoryFields(c).length===0;
 
+// === Client-record field whitelist ==========================================
+//
+// Used by NewTx finalize to strip per-transaction-only keys
+// (selling, signature, signatureDate, itemNotes, idState, idExpiry,
+// etc.) from the form state before persisting to the clients table.
+// The transaction's tx.client snapshot still carries everything;
+// the persistent client record only stores the canonical schema.
+//
+// Spec note: idState and idExpiry were explicitly dropped from the
+// Phase 2.7 client schema. They're rendered in the NewTx step 4
+// form for backward compatibility with existing tx.client data
+// shape but are NOT persisted in the clients table.
+
+export const CLIENT_RECORD_FIELDS=[
+  "fullName","dob","address","phone","email",
+  "idType","idNumber","idPhoto",
+  "pepCheck","tfsCheck","riskRating",
+  "sourceOfFunds","sourceOfWealth",
+  "internalNotes","blacklisted",
+  "createdAt","lastTxAt","txCount","isTest","deleteAfter",
+];
+
+export function pickClientRecordFields(form){
+  if(!form)return{};
+  const out={};
+  for(const k of CLIENT_RECORD_FIELDS){
+    if(form[k]!==undefined)out[k]=form[k];
+  }
+  return out;
+}
+
 // === Search =================================================================
 
 // Five-field search per Phase 2.7 spec: substring match,

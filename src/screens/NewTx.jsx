@@ -43,6 +43,8 @@ import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
 import {PRIVACY_NOTICE,THRESH,getRequiredFields} from "../lib/compliance/index.js";
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
+import ClientSearch from "../components/ClientSearch.jsx";
+import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
 
 const STEP_LABELS=["Basket","Price+Payment","Compliance","Client","Staff","Done"];
 
@@ -75,6 +77,9 @@ export default function NewTx({
   resetTx,finalize,
   pop,
   setShowFlag,setShowCat,setScreen,
+  // Phase 2.7.9b — client linking + step-4 sub-state machine
+  selectedClientId,setSelectedClientId,
+  clientStep,setClientStep,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
 
@@ -317,15 +322,72 @@ export default function NewTx({
     )}
 
     {/* ===================================================================
-        STEP 4 — CLIENT (was step 3 in the old flow)
-        Privacy ack, declaration, ID details, signature. ClientSearch
-        + IdPhotoCapture integration arrives in 2.7.9b — for now the
-        existing in-form photo capture stays.
+        STEP 4 — CLIENT (Phase 2.7.9b: ClientSearch + IdPhotoCapture
+        integrated alongside the legacy declaration form)
+
+        clientStep "search"   → ClientSearch input + popups
+        clientStep "new"      → IdPhotoCapture (until photo set), then
+                                fall through to the form below
+        clientStep "existing" → form pre-populated from selected client;
+                                a "Choose different client" button at
+                                the top resets state to "search"
+
+        Form rendering (the entire Privacy / Declaration / Sections
+        1-4 / Signature block) is shared between "existing" and
+        "new + photo captured" modes. The form is fully editable;
+        finalize() handles client-record updates / auto-create per
+        spec (no in-form Edit toggle for now — read-only-with-toggle
+        deferred; flagged in commit message).
         =================================================================== */}
     {txStep===4&&(
       <div>
-        <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client Declaration Form</div>
+        <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
+
+        {clientStep==="search"&&<div style={c.card({padding:14,marginBottom:14})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>FIND OR CREATE CLIENT</div>
+          <ClientSearch
+            autoFocus
+            onSelect={cl=>{
+              setClient({...cl});
+              setSelectedClientId(cl.id);
+              setClientStep("existing");
+              if(cl.idPhoto)setPhoto(cl.idPhoto);
+              pop("Loaded "+sS(cl.fullName)+".","ok");
+            }}
+            onCreateNew={()=>{
+              setSelectedClientId(null);
+              setClient({});
+              setPhoto(null);
+              setClientStep("new");
+            }}
+          />
+          <div style={{display:"flex",gap:10,marginTop:14}}>
+            <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
+          </div>
+        </div>}
+
+        {clientStep==="new"&&!photo&&<div style={c.card({padding:14,marginBottom:14})}>
+          <IdPhotoCapture
+            settings={settings}
+            pop={pop}
+            onCapture={(p,fields)=>{
+              setPhoto(p);
+              setClient(prev=>({...prev,...(fields||{})}));
+            }}
+            onCancel={()=>{
+              setClientStep("search");
+              setClient({});
+              setSelectedClientId(null);
+            }}
+          />
+        </div>}
+
+        {(clientStep==="existing"||(clientStep==="new"&&photo))&&<>
+        {clientStep==="existing"&&<div style={{...c.bnr("info"),marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{flex:1}}>✓ Loaded existing client. Edits below update the client record on transaction completion.</span>
+          <button style={c.bsm(T.border,T.muted)} onClick={()=>{setClientStep("search");setClient({});setPhoto(null);setSelectedClientId(null);}}>Choose different client</button>
+        </div>}
         <div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,color:T.blue,fontWeight:"bold",marginBottom:8}}>PRIVACY NOTICE</div>
           <pre style={{fontSize:10,color:T.muted,whiteSpace:"pre-wrap",fontFamily:T.ff,margin:0}}>{PRIVACY_NOTICE(settings.businessName,settings.abn)}</pre>
@@ -393,6 +455,7 @@ export default function NewTx({
           <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(5);}}>Next: Staff Section →</button>
           <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
         </div>
+        </>}
       </div>
     )}
 

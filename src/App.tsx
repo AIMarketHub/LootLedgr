@@ -5,7 +5,8 @@ import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SV
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,isExpired7yr,nowISO,todayStr,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
-import {THRESH,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt} from "./lib/compliance/index.js";
+import {THRESH,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
+import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
@@ -39,6 +40,14 @@ export default function Loot(){
   const[txPay,setTxPay]=useState("cash");
   const[txNo,setTxNo]=useState(()=>peekInv());
   const[client,setClient]=useState({});
+  // Phase 2.7.9b — links the in-progress transaction to a persistent
+  // client record. Set when staff selects an existing client via the
+  // step-4 ClientSearch popup; remains null until then. resetTx
+  // clears it. clientStep drives step 4's internal state machine
+  // (search input → existing-client form OR new-client photo-first
+  // flow → new-client form).
+  const[selectedClientId,setSelectedClientId]=useState(null);
+  const[clientStep,setClientStep]=useState("search");
   const[staff,setStaff]=useState({});
   const[kycDone,setKycDone]=useState(false);
   const[privAck,setPrivAck]=useState(false);
@@ -259,16 +268,60 @@ export default function Loot(){
   // hardblock and $2k cash-warn PIN gates still apply.
   const handleToClient=()=>{if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
 
-  const finalize=()=>{
+  // Phase 2.7.9b — async because we resolve the client linkage
+  // (update existing or create new) before assembling the tx.
+  // Failures during client linkage are swallowed: the
+  // orphan-clientId rule (memory: project_phase_2_7_decisions.md)
+  // says transactions can stand alone with the client snapshot in
+  // tx.client even if no live client record exists. So a Supabase
+  // hiccup at finalize doesn't block the tx; clientId may be null.
+  const finalize=async()=>{
     if(!client.fullName||!client.dob||!client.address||!client.idType||!client.idNumber){pop("Client form incomplete.","err");return;}
     if(!idSighted){pop("Staff must confirm ID sighted.","err");return;}
     if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}
     const now=nowISO(),realInv=makeInv();
+
+    // Resolve client linkage. Three paths:
+    //   1. selectedClientId set        → update existing client
+    //                                     (txCount++, lastTxAt=now)
+    //   2. no selectedClientId, but
+    //      idNumber set                → dedupe by idNumber: if a
+    //                                     client matches, update it;
+    //                                     otherwise create new
+    //   3. no selectedClientId, no
+    //      idNumber                    → no client record; tx
+    //                                     proceeds with clientId=null
+    let clientId=selectedClientId;
+    const recordFields=pickClientRecordFields({...client,idPhoto:photo||client.idPhoto||null});
+    if(clientId){
+      try{
+        await clients.update(clientId,{...recordFields,txCount:(client.txCount||0)+1,lastTxAt:now});
+      }catch(_){/* orphan-clientId acceptable */}
+    }else if(client.idNumber){
+      try{
+        const r=await findOrCreateByIdNumber({...recordFields,createdAt:now,lastTxAt:now,txCount:1});
+        if(r&&r.client){
+          clientId=r.client.id;
+          if(!r.created){
+            // Found via idNumber dedupe — bump txCount on the
+            // matched record so the lastTxAt + count stay fresh.
+            try{await clients.update(clientId,{txCount:(r.client.txCount||0)+1,lastTxAt:now});}catch(_){}
+          }
+        }
+      }catch(_){/* orphan-clientId acceptable */}
+    }
+
+    // Phase 2.7.9b — kycDone now computed from getRequiredFields
+    // (was a user-toggled boolean in the old flow). Empty required-
+    // field set or all required fields filled → kycDone=true.
+    const reqFields=getRequiredFields({payment:txPay,buyTotal,items:txItems},settings);
+    const computedKycDone=reqFields.length===0||reqFields.every(k=>{const v=client[k];return v!=null&&String(v).trim()!=="";});
+
     const phData={idPhoto:compliance.requiresKYC?photo:null,itemPhotos};
     const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length);
     const photoKey=hasPh?"photos_"+realInv:null;
     if(hasPh)store.set(photoKey,phData);
-    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:compliance.flags.some(f=>f.key==="ttr"),ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:compliance.flags.some(f=>f.key==="ttr"),ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
     setTxNo(peekInv());setTxStep(6);
@@ -326,7 +379,7 @@ export default function Loot(){
   const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledgr-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
   const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
   const unlockApp=()=>{if(appPinInput===settings.staffPin){setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}else pop("Incorrect PIN","err");};
-  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
+  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
   // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
   //   Today policeHold is binary. Per state law it has a 21-day default
   //   life with a single 21-day reissue (total 42). Replace this toggle
@@ -424,6 +477,8 @@ export default function Loot(){
             resetTx={resetTx} finalize={finalize}
             pop={pop}
             setShowFlag={setShowFlag} setShowCat={setShowCat} setScreen={setScreen}
+            selectedClientId={selectedClientId} setSelectedClientId={setSelectedClientId}
+            clientStep={clientStep} setClientStep={setClientStep}
           />}
 
           {screen==="stock"&&<Stock
