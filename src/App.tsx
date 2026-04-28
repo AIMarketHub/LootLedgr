@@ -4,6 +4,7 @@ import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,peekInv,makeInv,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
+import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
@@ -337,39 +338,7 @@ export default function Loot(){
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
     setTxNo(peekInv());setTxStep(6);
-    pushIntegrations(tx).catch(()=>{});
-  };
-
-  const sendSquareSell=async()=>{
-    if(!settings.squareToken||!settings.squareLoc){pop("Configure Square in Settings.","warn");return;}
-    const sells=(txItems||[]).filter(i=>i.mode==="sell");if(!sells.length){pop("No sell items.","warn");return;}
-    try{const r=await fetch("https://connect.squareup.com/v2/online-checkout/payment-links",{method:"POST",headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},body:JSON.stringify({idempotency_key:uid(),checkout_options:{redirect_url:settings.squareRedirect||window.location.href},order:{location_id:settings.squareLoc,line_items:sells.map(i=>({name:("[SALE] "+sS(i.product&&i.product.label)).slice(0,500),quantity:"1",base_price_money:{amount:Math.round(sN(i.price)*100),currency:"AUD"}}))}})});const d=await r.json();if(d.payment_link&&d.payment_link.url){window.open(d.payment_link.url,"_blank");pop("Square checkout opened.","ok");}else pop("Square error: "+sS(d.errors&&d.errors[0]&&d.errors[0].detail||"Unknown"),"err");}catch(e){pop("Square sell: "+e.message,"err");}
-  };
-  const sendSquareBuy=async(invNo,buyItems,totalAmt,clientName,payMethod)=>{
-    if(!settings.squareToken||!settings.squareLoc)return{ok:false,msg:"Square not configured"};
-    try{
-      const hdrs={"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken};
-      const _or=await fetch("https://connect.squareup.com/v2/orders",{method:"POST",headers:hdrs,body:JSON.stringify({idempotency_key:"buy-"+invNo,order:{location_id:settings.squareLoc,reference_id:"LL-BUY-"+invNo,note:"VENDOR PURCHASE | Loot #"+invNo+" | "+sS(clientName||"Walk-in"),line_items:(buyItems||[]).map(i=>({name:("[PURCHASE] "+sS(i.product&&i.product.label)).slice(0,500),quantity:"1",note:sS(i.note),base_price_money:{amount:Math.round(sN(i.price)*100),currency:"AUD"}})),metadata:{transaction_type:"vendor_purchase",invoice:invNo,supplier:sS(clientName)}}})});const od=await _or.json();
-      if(!od.order)return{ok:false,msg:"Square order error: "+sS(od.errors&&od.errors[0]&&od.errors[0].detail)};
-      const srcId=payMethod==="cash"?"CASH":"EXTERNAL";
-      const pd=await(await fetch("https://connect.squareup.com/v2/payments",{method:"POST",headers:hdrs,body:JSON.stringify({idempotency_key:"pay-"+invNo,source_id:srcId,order_id:od.order.id,location_id:settings.squareLoc,amount_money:{amount:Math.round(sN(totalAmt)*100),currency:"AUD"},note:"Vendor purchase #"+invNo,external_details:srcId==="EXTERNAL"?{type:"OTHER",source:"Loot Ledgr"}:undefined})})).json();
-      if(pd.payment&&(pd.payment.status==="COMPLETED"||pd.payment.status==="APPROVED"))return{ok:true,msg:"Square vendor expense recorded"};
-      return{ok:false,msg:"Square payment error: "+sS(pd.errors&&pd.errors[0]&&pd.errors[0].detail)};
-    }catch(e){return{ok:false,msg:"Square buy: "+e.message};}
-  };
-  const sendShopifySell=async(invNo,sellItems,clientName)=>{
-    if(!settings.shopifyDomain||!settings.shopifyToken)return{ok:false,msg:"Shopify not configured"};
-    try{const _sr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/orders.json",{method:"POST",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},body:JSON.stringify({order:{financial_status:"paid",tags:"loot-ledgr-sale",note:"Loot #"+invNo+(clientName?" | "+clientName:""),line_items:(sellItems||[]).map(i=>({title:sS(i.product&&i.product.label).slice(0,500),quantity:1,price:sN(i.price).toFixed(2)}))}})}); const d=await _sr.json();return d.order?{ok:true,msg:"Shopify sale "+sS(d.order.name)+" created"}:{ok:false,msg:"Shopify sell: "+JSON.stringify(d.errors||d)};}catch(e){return{ok:false,msg:"Shopify sell: "+e.message};}
-  };
-  const sendShopifyBuy=async(invNo,buyItems,totalAmt,clientName,payMethod)=>{
-    if(!settings.shopifyDomain||!settings.shopifyToken)return{ok:false,msg:"Shopify not configured"};
-    try{const _dr=await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders.json",{method:"POST",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken},body:JSON.stringify({draft_order:{tags:"vendor-purchase,loot-ledgr",note:"VENDOR PURCHASE | Loot #"+invNo+" | "+sS(clientName||"Walk-in"),note_attributes:[{name:"transaction_type",value:"vendor_purchase"},{name:"invoice",value:invNo},{name:"supplier",value:sS(clientName)}],line_items:(buyItems||[]).map(i=>({title:("[PURCHASE] "+sS(i.product&&i.product.label)).slice(0,500),price:sN(i.price).toFixed(2),quantity:1,requires_shipping:false}))}})}); const dd=await _dr.json();if(!dd.draft_order)return{ok:false,msg:"Shopify draft: "+JSON.stringify(dd.errors||dd)};await fetch("https://"+settings.shopifyDomain+"/admin/api/2024-01/draft_orders/"+dd.draft_order.id+"/complete.json",{method:"PUT",headers:{"Content-Type":"application/json","X-Shopify-Access-Token":settings.shopifyToken}});return{ok:true,msg:"Shopify vendor "+sS(dd.draft_order.name)};}catch(e){return{ok:false,msg:"Shopify buy: "+e.message};}
-  };
-  const sendEftpos=async(amountAUD)=>{
-    const provider=settings.eftposProvider||"none";
-    if(provider==="square"){if(!settings.squareToken||!settings.squareTerminalId)return{ok:false,msg:"Square terminal not configured."};try{const r=await(await fetch("https://connect.squareup.com/v2/terminals/checkouts",{method:"POST",headers:{"Content-Type":"application/json","Square-Version":"2024-11-20","Authorization":"Bearer "+settings.squareToken},body:JSON.stringify({idempotency_key:uid(),checkout:{amount_money:{amount:Math.round(sN(amountAUD)*100),currency:"AUD"},device_options:{device_id:settings.squareTerminalId,skip_receipt_screen:false},payment_options:{autocomplete:true}}})})).json();if(r.checkout&&r.checkout.id){pop("Payment sent to terminal…","ok");await new Promise(res=>setTimeout(res,8000));const sd=await(await fetch("https://connect.squareup.com/v2/terminals/checkouts/"+r.checkout.id,{headers:{"Authorization":"Bearer "+settings.squareToken,"Square-Version":"2024-11-20"}})).json();if(sd.checkout&&sd.checkout.status==="COMPLETED")return{ok:true,msg:"EFTPOS approved"};if(sd.checkout&&sd.checkout.status==="CANCELED")return{ok:false,msg:"Payment cancelled on terminal"};return{ok:false,msg:"Terminal status: "+sS(sd.checkout&&sd.checkout.status)};}return{ok:false,msg:"Square terminal error: "+sS(r.errors&&r.errors[0]&&r.errors[0].detail)};}catch(e){return{ok:false,msg:"Square terminal: "+e.message};}}
-    if(provider==="linkly"){const base=settings.linklyBaseUrl||"http://localhost:4242";try{const r=await(await fetch(base+"/api/v1/transaction",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({TxnType:"P",AmtPurchase:Math.round(sN(amountAUD)*100),AmtCash:0,TxnRef:uid().slice(0,16),CurrencyCode:"AUD",CutReceipt:"0",PurchaseAnalysisData:{}})})).json();const rp=r.Response||r;if(rp.Success||rp.ResponseCode==="00")return{ok:true,msg:"EFTPOS approved. Auth: "+sS(rp.AuthCode||"—")};return{ok:false,msg:"EFTPOS declined: "+sS(rp.ResponseText||rp.ResponseCode)};}catch(e){return{ok:false,msg:e.message&&e.message.includes("fetch")?"Cannot reach Linkly. Is PC-EFTPOS running?":"Linkly: "+e.message};}}
-    return{ok:false,msg:"No EFTPOS provider configured in Settings → Integrations."};
+    pushIntegrations(settings,tx).then(msgs=>{if(msgs&&msgs.length)pop(msgs.join(" | ").slice(0,200),"ok");}).catch(()=>{});
   };
 
   const connectScale=async()=>{
@@ -390,14 +359,6 @@ export default function Loot(){
   };
   const disconnectScale=()=>{if(scaleDevice&&scaleDevice.gatt&&scaleDevice.gatt.connected){try{scaleDevice.gatt.disconnect();}catch(_){}}setScaleStatus("off");setScaleDevice(null);setScaleLive(null);};
 
-  const sendDuressSMS=async(contact,msg)=>{
-    const p=settings.smsProvider||"sms_uri";
-    const jP=(url,b)=>fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
-    if(p==="textbelt"){try{const d=await(await jP("https://textbelt.com/text",{phone:contact,message:msg,key:settings.textbeltKey||"textbelt"})).json();return d.success?{ok:true,msg:"Sent via Textbelt"}:{ok:false,msg:"Textbelt: "+sS(d.error||"quota exceeded")};}catch(e){return{ok:false,msg:"Textbelt: "+e.message};}}
-    if(p==="webhook"){if(!settings.duressWebhookUrl)return{ok:false,msg:"Webhook URL not configured"};try{const r=await jP(settings.duressWebhookUrl,{type:"DURESS_ALERT",message:msg,contact,contacts:[contact],address:sS(settings.address),business:sS(settings.businessName),timestamp:nowISO()});return r.ok?{ok:true,msg:"Sent via webhook"}:{ok:false,msg:"Webhook error: "+r.status};}catch(e){return{ok:false,msg:"Webhook: "+e.message};}}
-    if(p==="twilio_fn"){if(!settings.twilioFnUrl)return{ok:false,msg:"Twilio Function URL not configured"};try{const r=await fetch(settings.twilioFnUrl,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:"contact="+encodeURIComponent(contact)+"&message="+encodeURIComponent(msg)});const d=await r.json().catch(()=>({}));return d.sent||r.ok?{ok:true,msg:"Sent via Twilio"}:{ok:false,msg:"Twilio error"};}catch(e){return{ok:false,msg:"Twilio: "+e.message};}}
-    window.open("sms:"+contact+"?body="+encodeURIComponent(msg));return{ok:true,msg:"SMS app opened for "+contact};
-  };
   const triggerDuress=async()=>{
     setDuressActive(true);
     let loc=sS(settings.address||settings.businessName||"Address not set");
@@ -405,7 +366,7 @@ export default function Loot(){
     catch(_){try{const d=await(await fetch("https://ipapi.co/json/")).json();if(d.city)loc=sS(settings.address||"Our address")+" (approx "+d.city+", "+d.region+")";}catch(_){}}
     const msg="URGENT — Robbery/aggression at our shop. Call 000 immediately. Address: "+loc;
     const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);
-    let sent=0;for(const contact of contacts){const r=await sendDuressSMS(contact,msg);if(r.ok)sent++;}
+    let sent=0;for(const contact of contacts){const r=await sendDuressSMS(settings,contact,msg);if(r.ok)sent++;}
     pop("🚨 DURESS — "+sent+"/"+contacts.length+" contacts alerted. Call 000 NOW.","warn");
     setTimeout(()=>setDuressActive(false),5*60*1000);
   };
@@ -430,14 +391,6 @@ export default function Loot(){
 
   const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledgr-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
   const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
-  const pushIntegrations=async(tx)=>{
-    const msgs=[],buys=(tx.items||[]).filter(i=>i.mode==="buy"),sells=(tx.items||[]).filter(i=>i.mode==="sell");
-    if(settings.squareToken&&settings.squareLoc&&buys.length&&tx.buyTotal>0){const r=await sendSquareBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);msgs.push("Square: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}
-    if(settings.shopifyDomain&&settings.shopifyToken){if(buys.length&&tx.buyTotal>0){const r=await sendShopifyBuy(tx.id,buys,tx.buyTotal,tx.client&&tx.client.fullName,tx.payment);msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}if(sells.length&&tx.sellTotal>0){const r=await sendShopifySell(tx.id,sells,tx.client&&tx.client.fullName);msgs.push("Shopify: "+(r.ok?"✓ "+r.msg:"✗ "+r.msg));}}
-    if(settings.webhookUrl){try{await fetch(settings.webhookUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({event:"transaction",invoice:tx.id,date:tx.date,buy:{items:buys.map(i=>({label:sS(i.product&&i.product.label),price:i.price})),total:tx.buyTotal},sell:{items:sells.map(i=>({label:sS(i.product&&i.product.label),price:i.price})),total:tx.sellTotal},payment:tx.payment,net:tx.net})});msgs.push("Webhook: ✓ pushed");}catch(e){msgs.push("Webhook: ✗ "+e.message);}}
-    if(msgs.length)pop(msgs.join(" | ").slice(0,200),"ok");
-  };
-
   const unlockApp=()=>{if(appPinInput===settings.staffPin){setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}else pop("Incorrect PIN","err");};
   const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
   // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
@@ -875,15 +828,15 @@ export default function Loot(){
                   </div>
                   {txPay==="eftpos"&&net>0&&<div style={c.card({padding:16,marginBottom:10})}>
                     <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:8}}>🖥 EFTPOS Terminal</div>
-                    <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{pop("Sending "+fmtAUD(net)+" to terminal…","ok");const r=await sendEftpos(net);pop(r.msg,r.ok?"ok":"err");}}>🖥 Send {fmtAUD(net)} to Terminal</button>
+                    <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{pop("Sending "+fmtAUD(net)+" to terminal…","ok");const r=await sendEftpos(settings,net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Send {fmtAUD(net)} to Terminal</button>
                     <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Manual EFTPOS confirmed.","ok")}>✓ Confirm Manually</button>
                   </div>}
                   {txPay==="cash"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("info")}>💵 Collect {fmtAUD(net)} cash from client.</div><button style={{...c.btn(T.green,T.bg),marginTop:10,width:"100%"}} onClick={()=>pop("Cash received.","ok")}>✓ Cash Received</button></div>}
                   {txPay==="card"&&net>=0&&<div style={c.card({padding:16,marginBottom:10})}>
                     <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:8}}>💳 Card — Online Checkout</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button style={{...c.btn(T.gold,T.bg),flex:1}} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}try{await sendSquareSell();}catch(e){pop("Square: "+e.message,"err");}}}>⬡ Square Checkout</button>
-                      <button style={{...c.btn(T.border,T.text),flex:1}} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}try{const r=await sendShopifySell(txNo,(txItems||[]).filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify Order</button>
+                      <button style={{...c.btn(T.gold,T.bg),flex:1}} onClick={async()=>{if(!settings.squareToken){pop("Square not configured.","warn");return;}try{const r=await sendSquareSell(settings,(txItems||[]).filter(i=>i.mode==="sell"));pop(r.msg,r.level||(r.ok?"ok":"err"));}catch(e){pop("Square: "+e.message,"err");}}}>⬡ Square Checkout</button>
+                      <button style={{...c.btn(T.border,T.text),flex:1}} onClick={async()=>{if(!settings.shopifyDomain){pop("Shopify not configured.","warn");return;}try{const r=await sendShopifySell(settings,txNo,(txItems||[]).filter(i=>i.mode==="sell"),client.fullName);pop(r.ok?"✓ "+r.msg:"✗ "+r.msg,r.ok?"ok":"err");}catch(e){pop("Shopify: "+e.message,"err");}}}>🛍 Shopify Order</button>
                     </div>
                     <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Card payment confirmed.","ok")}>✓ Confirm Manually</button>
                   </div>}
