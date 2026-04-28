@@ -10,14 +10,8 @@ import {LIGHT,T,c} from "./theme.js";
 import Modal from "./components/ui/Modal.jsx";
 import {F,SF} from "./components/ui/FormFields.jsx";
 import Notif from "./components/ui/Notif.jsx";
+import HoldTimer from "./components/ui/HoldTimer.jsx";
 
-function HoldTimer({holdUntil,policeHold}){
-  const[,tick]=useState(0);
-  useEffect(()=>{const t=setInterval(()=>tick(p=>p+1),30000);return()=>clearInterval(t);},[]);
-  if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
-  if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
-  return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
-}
 function AIGhost({settings,label}){
   if(!settings||!settings.aiAgentEnabled)return null;
   const col=settings.aiAgentLevel>=2?"#F59E0B":"#3B82F6";
