@@ -12,6 +12,12 @@ export const TROY_OZ=31.1035;
 // App build version. Surfaced in backups and the API diagnostics modal.
 export const APP_VERSION="5";
 
+// Seed logo embedded as an SVG data URI. Used by:
+//   - storage.js → runMigration (one-shot logoLib seed)
+//   - App.tsx logoLib useEffect + header fallback img
+// Inline SVG so the asset has zero network cost and survives offline.
+export const SEED_LOGO="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23c9a84c'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='28' font-family='serif' fill='%23080c09'%3ELL%3C/text%3E%3C/svg%3E";
+
 // Gold purity by carat stamp. Decimal fraction of pure gold.
 export const GOLD_P={"24ct":1,"23ct":0.9583,"22ct":0.9167,"21ct":0.875,"20ct":0.8333,"18ct":0.75,"14ct":0.5833,"10ct":0.4167,"9ct":0.375};
 // Silver purity by stamp. Decimal fraction of pure silver.

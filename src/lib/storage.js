@@ -24,6 +24,16 @@
 // `checkPhotoSize` is a thin pass-through today; it exists so a real
 // resize/compress step can be added later without changing call
 // sites that already wrap photo reads in this guard.
+//
+// `runMigration` runs once on module load (the import side effect at
+// the bottom of this file). It seeds the default logo on first run
+// and clears localStorage on app-version bumps. Idempotent — safe to
+// call any number of times.
+//
+// `initTxList` is the boot-time hydration helper that re-attaches
+// inline photos to transactions whose photoKey was saved separately.
+
+import {APP_VERSION,SEED_LOGO} from "./constants.js";
 
 const SB_URL=import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
@@ -54,3 +64,16 @@ export const sb={
 };
 
 export const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};
+
+export function runMigration(){
+  try{
+    try{const lib=JSON.parse(localStorage.getItem("gf_logoLib")||"[]");if(!lib.length){localStorage.setItem("gf_logoLib",JSON.stringify([{id:"default-logo",data:SEED_LOGO,isLogo:true}]));const s=JSON.parse(localStorage.getItem("gf_settings")||"{}");localStorage.setItem("gf_settings",JSON.stringify({...s,logoImg:SEED_LOGO}));}}catch(_){}
+    if(localStorage.getItem("gf_version")===APP_VERSION)return;
+    const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k)keys.push(k);}
+    keys.forEach(k=>localStorage.removeItem(k));
+    localStorage.setItem("gf_version",APP_VERSION);
+  }catch(_){}
+}
+runMigration();
+
+export function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}

@@ -1,26 +1,13 @@
 // LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
-import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
+import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,peekInv,makeInv,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
-import {store,sb,checkPhotoSize} from "./lib/storage.js";
+import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
-
-const SEED_LOGO="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23c9a84c'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='28' font-family='serif' fill='%23080c09'%3ELL%3C/text%3E%3C/svg%3E";
-
-function runMigration(){
-  try{
-    try{const lib=JSON.parse(localStorage.getItem("gf_logoLib")||"[]");if(!lib.length){localStorage.setItem("gf_logoLib",JSON.stringify([{id:"default-logo",data:SEED_LOGO,isLogo:true}]));const s=JSON.parse(localStorage.getItem("gf_settings")||"{}");localStorage.setItem("gf_settings",JSON.stringify({...s,logoImg:SEED_LOGO}));}}catch(_){}
-    if(localStorage.getItem("gf_version")===APP_VERSION)return;
-    const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k)keys.push(k);}
-    keys.forEach(k=>localStorage.removeItem(k));
-    localStorage.setItem("gf_version",APP_VERSION);
-  }catch(_){}
-}
-runMigration();
 
 const c={
   card:(x={})=>({background:T.card,border:"1px solid "+T.border,borderRadius:10,boxShadow:"6px 6px 19px rgba(0,0,0,0.18),3px 3px 0 rgba(0,0,0,0.06),inset 0 1px 0 rgba(255,255,255,0.07)",...x}),
@@ -40,8 +27,6 @@ const c={
   bnr:(lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6};},
   shead:(g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver}),
 };
-
-function initTxList(){const raw=store.get("txList",[]);return(Array.isArray(raw)?raw:[]).map(t=>{if(t.photoKey&&!t.photo&&(!t.itemPhotos||!Object.keys(t.itemPhotos||{}).length)){const ph=store.get(t.photoKey,null);if(ph)return{...t,photo:ph.idPhoto||null,itemPhotos:ph.itemPhotos||{}};}return t;});}
 
 function HoldTimer({holdUntil,policeHold}){
   const[,tick]=useState(0);
