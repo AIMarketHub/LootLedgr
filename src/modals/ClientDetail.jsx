@@ -179,6 +179,22 @@ export default function ClientDetail({client,onSave,onClose,pop}){
         </div>}
       </div>
 
+      {/* Phase 2.7.11 — blacklist override history. Collapsed by
+          default; <details>/<summary> handles the toggle without
+          extra state. Hidden entirely when no overrides recorded. */}
+      {Array.isArray(client.blacklistOverrides)&&client.blacklistOverrides.length>0&&<details style={{marginBottom:14}}>
+        <summary style={{cursor:"pointer",fontSize:11,color:T.muted,padding:"6px 0",letterSpacing:"0.05em"}}>⛔ BLACKLIST OVERRIDE HISTORY ({client.blacklistOverrides.length})</summary>
+        <div style={{...c.card({padding:10}),marginTop:8}}>
+          {client.blacklistOverrides.map((o,i)=>(
+            <div key={i} style={{padding:"6px 0",borderBottom:i<client.blacklistOverrides.length-1?"1px solid "+T.border+"44":"none",fontSize:11,color:T.muted}}>
+              <div style={{color:T.text}}>{o.timestamp?new Date(o.timestamp).toLocaleString("en-AU"):"—"}</div>
+              {o.staffId&&<div>Staff: {sS(o.staffId)}</div>}
+              {o.reason&&<div>Reason: {sS(o.reason)}</div>}
+            </div>
+          ))}
+        </div>
+      </details>}
+
       {/* Actions */}
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         {editing?<>

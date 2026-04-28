@@ -26,6 +26,7 @@ import {T,c} from "../theme.js";
 import {sN,sS,fmtAUD,fmtDate,todayStr,nowISO} from "../lib/utils.js";
 import {F} from "../components/ui";
 import {clients,formatLastVisit,SEARCH_FIELDS} from "../lib/clients.js";
+import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 import ClientDetail from "../modals/ClientDetail.jsx";
 
 export default function Clients({
@@ -35,6 +36,8 @@ export default function Clients({
   isBlacklistedName,setBlacklist,
   setCliNoteId,setCliNoteVal,
   pop,
+  // Phase 2.7.11 — blacklist soft-block gate plumbing
+  setPinModal,setPinVal,activeStaff,
 }){
   const[mode,setMode]=useState("clients");
   const[sortDir,setSortDir]=useState("desc");
@@ -60,9 +63,22 @@ export default function Clients({
     setLoading(true);
     try{
       const cl=await clients.getById(tx.clientId);
-      if(cl)setSelectedClient(cl);
-      else pop&&pop("Client record not found (orphan link).","warn");
+      if(cl){
+        requireBlacklistOverride({
+          client:cl,
+          callbacks:{pop,setPinModal,setPinVal,activeStaff},
+          onApproved:()=>setSelectedClient(cl),
+        });
+      }else pop&&pop("Client record not found (orphan link).","warn");
     }finally{setLoading(false);}
+  };
+
+  const openClient=cl=>{
+    requireBlacklistOverride({
+      client:cl,
+      callbacks:{pop,setPinModal,setPinVal,activeStaff},
+      onApproved:()=>setSelectedClient(cl),
+    });
   };
 
   const filteredClients=useMemo(()=>{
@@ -119,7 +135,7 @@ export default function Clients({
       {filteredClients.length===0&&<div style={{...c.card({padding:24}),textAlign:"center",color:T.muted}}>{loading?"Loading…":clientsData.length===0?"No clients yet. They'll appear here as transactions are completed.":"No clients match this search."}</div>}
       {filteredClients.map(cl=>{
         const lv=formatLastVisit(cl);
-        return <div key={cl.id} role="button" tabIndex={0} style={{...c.card({padding:12}),marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:12}} onClick={()=>setSelectedClient(cl)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" ")setSelectedClient(cl);}}>
+        return <div key={cl.id} role="button" tabIndex={0} style={{...c.card({padding:12}),marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:12}} onClick={()=>openClient(cl)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" ")openClient(cl);}}>
           {cl.idPhoto?<img src={cl.idPhoto} alt="" style={{width:48,height:48,borderRadius:"50%",objectFit:"cover",border:"1px solid "+T.border,flexShrink:0}}/>:<div style={{width:48,height:48,borderRadius:"50%",background:T.surface,border:"1px solid "+T.border,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:T.muted,fontSize:18}}>👤</div>}
           <div style={{flex:1,minWidth:0}}>
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>

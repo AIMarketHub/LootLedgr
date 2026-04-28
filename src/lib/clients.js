@@ -185,6 +185,26 @@ export const clients={
   },
 };
 
+// === Blacklist override audit ==============================================
+//
+// Phase 2.7.11. Append-only JSONB array on the client record.
+// Each entry: {timestamp, staffId, reason}. No dedicated
+// audit_log table; Phase 9 (auth) introduces a proper one.
+//
+// Called from src/lib/blacklistGate.js after the manager-PIN gate
+// succeeds. Failures here propagate so the caller can pop a warn
+// and proceed (the gate's onApproved still fires — losing the
+// audit row is bad but not a hard block on the override).
+
+export async function recordBlacklistOverride(clientId,entry){
+  if(!clientId||!entry)return null;
+  const existing=await clients.getById(clientId);
+  if(!existing)return null;
+  const overrides=Array.isArray(existing.blacklistOverrides)?existing.blacklistOverrides:[];
+  overrides.push(entry);
+  return await clients.update(clientId,{blacklistOverrides:overrides});
+}
+
 // === Dedupe by idNumber =====================================================
 //
 // Used by:

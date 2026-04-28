@@ -479,6 +479,7 @@ export default function Loot(){
             setShowFlag={setShowFlag} setShowCat={setShowCat} setScreen={setScreen}
             selectedClientId={selectedClientId} setSelectedClientId={setSelectedClientId}
             clientStep={clientStep} setClientStep={setClientStep}
+            setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
           />}
 
           {screen==="stock"&&<Stock
@@ -495,6 +496,7 @@ export default function Loot(){
             isBlacklistedName={isBlacklistedName} setBlacklist={setBlacklist}
             setCliNoteId={setCliNoteId} setCliNoteVal={setCliNoteVal}
             pop={pop}
+            setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
           />}
 
           {screen==="history"&&<History

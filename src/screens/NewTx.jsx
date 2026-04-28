@@ -45,6 +45,7 @@ import {PRIVACY_NOTICE,THRESH,getRequiredFields} from "../lib/compliance/index.j
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
 import ClientSearch from "../components/ClientSearch.jsx";
 import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
+import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 
 const STEP_LABELS=["Basket","Price+Payment","Compliance","Client","Staff","Done"];
 
@@ -80,6 +81,9 @@ export default function NewTx({
   // Phase 2.7.9b — client linking + step-4 sub-state machine
   selectedClientId,setSelectedClientId,
   clientStep,setClientStep,
+  // Phase 2.7.11 — blacklist soft-block gate (reuses the existing
+  // setPinModal pattern; activeStaff drives audit-entry staffId).
+  setPinModal,setPinVal,activeStaff,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
 
@@ -349,11 +353,17 @@ export default function NewTx({
           <ClientSearch
             autoFocus
             onSelect={cl=>{
-              setClient({...cl});
-              setSelectedClientId(cl.id);
-              setClientStep("existing");
-              if(cl.idPhoto)setPhoto(cl.idPhoto);
-              pop("Loaded "+sS(cl.fullName)+".","ok");
+              requireBlacklistOverride({
+                client:cl,
+                callbacks:{pop,setPinModal,setPinVal,activeStaff},
+                onApproved:()=>{
+                  setClient({...cl});
+                  setSelectedClientId(cl.id);
+                  setClientStep("existing");
+                  if(cl.idPhoto)setPhoto(cl.idPhoto);
+                  pop("Loaded "+sS(cl.fullName)+".","ok");
+                },
+              });
             }}
             onCreateNew={()=>{
               setSelectedClientId(null);
