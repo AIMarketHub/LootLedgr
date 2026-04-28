@@ -33,7 +33,25 @@ import {APP_VERSION} from "../lib/constants.js";
 import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
+import {THRESH} from "../lib/compliance/index.js";
 import {Modal,F,SF} from "../components/ui";
+
+// Tighten-only validator for the Compliance Thresholds section.
+// Returns an onChange handler that rejects values above the legal
+// minimum with the spec'd toast message; accepts blank (null = use
+// regional default) and any numeric ≤ legalMin.
+function makeTightenHandler(setSettings,pop,key,legalMin){
+  return v=>{
+    if(v===""||v==null){setSettings(p=>({...p,[key]:null}));return;}
+    const n=parseFloat(v);
+    if(isNaN(n)||n<0){setSettings(p=>({...p,[key]:null}));return;}
+    if(n>legalMin){
+      pop("Cannot loosen below legal minimum: $"+legalMin.toLocaleString(),"warn");
+      return; // input snaps back to last accepted value (controlled F)
+    }
+    setSettings(p=>({...p,[key]:n}));
+  };
+}
 
 const ABTN={width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"};
 
@@ -123,6 +141,17 @@ export default function Settings({
         <div style={{fontSize:10,color:T.muted,marginTop:8,marginBottom:14}}>Disabling TTR check does NOT remove your legal obligation to file Threshold Transaction Reports with AUSTRAC. Only disable if your business is exempt.</div>
         <F label="Refuse cash transactions at or above (AUD)" type="number" value={settings.cashHardBlockAbove==null?"":String(settings.cashHardBlockAbove)} onChange={v=>setSettings(p=>({...p,cashHardBlockAbove:v===""?null:parseFloat(v)}))} placeholder="Leave blank for no extra block"/>
         <div style={{fontSize:10,color:T.muted,marginTop:6}}>Stricter than the legal minimum. When set, the system refuses cash payment for any transaction whose buy total is at or above this amount, regardless of bullion or TTR status. Leave blank to fall back to AUSTRAC thresholds only ($2k warn, $5k bullion CDD, $10k TTR).</div>
+      </div>],
+      ["compliancethresholds","📋 Compliance Thresholds",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:10,color:T.muted,marginBottom:12}}>Phase 2.7 — override the legal trigger thresholds for the conditional compliance fields shown in the New Transaction flow. You can only TIGHTEN (lower the dollar value to demand checks earlier) — values above the legal minimum are rejected.</div>
+        <F label="Tighten cash KYC trigger to:" type="number" value={settings.cashKycThreshold==null?"":String(settings.cashKycThreshold)} onChange={makeTightenHandler(setSettings,pop,"cashKycThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} — leave blank to use this. Triggers PEP / TFS / Risk-rating checks.</div>
+        <F label="Tighten bullion CDD trigger to:" type="number" value={settings.bullionCddThreshold==null?"":String(settings.bullionCddThreshold)} onChange={makeTightenHandler(setSettings,pop,"bullionCddThreshold",THRESH.BULLION_CDD)} placeholder="Leave blank to use default"/>
+        <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.BULLION_CDD.toLocaleString()} — leave blank to use this. Triggers PEP / TFS / Risk-rating checks on bullion buys.</div>
+        <F label="Tighten Source-of-Funds trigger to:" type="number" value={settings.sourceOfFundsCashThreshold==null?"":String(settings.sourceOfFundsCashThreshold)} onChange={makeTightenHandler(setSettings,pop,"sourceOfFundsCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
+        <F label="Tighten Source-of-Wealth trigger to:" type="number" value={settings.sourceOfWealthCashThreshold==null?"":String(settings.sourceOfWealthCashThreshold)} onChange={makeTightenHandler(setSettings,pop,"sourceOfWealthCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:6}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
       </div>],
       ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
