@@ -1,13 +1,13 @@
 // LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
-import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
-import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,peekInv,makeInv,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
+import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,isExpired7yr,nowISO,todayStr,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
-import {sendSquareSell,sendSquareBuy,sendShopifySell,sendShopifyBuy,sendEftpos,sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
-import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
+import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
+import {THRESH,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt} from "./lib/compliance/index.js";
 import {LIGHT,T,c} from "./theme.js";
-import {Modal,F,SF,Notif,HoldTimer,AIGhost} from "./components/ui";
+import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
 import TxPhotoManager from "./components/TxPhotoManager.jsx";
 import Dashboard from "./screens/Dashboard.jsx";
@@ -341,53 +341,6 @@ export default function Loot(){
 
   const locked=settings.requirePin&&!appUnlocked;
   const NAV=[{id:"dashboard",icon:"⬡",label:"Dashboard"},{id:"newTx",icon:"＋",label:"New Tx"},{id:"stock",icon:"◈",label:"Stock"},{id:"history",icon:"☰",label:"History"},{id:"prices",icon:"⚖",label:"Prices"},{id:"clients",icon:"👤",label:"Clients"}];
-  const ABTN={width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"};
-
-  const basketTable = txItems.length > 0 ? (
-                <div style={c.card({padding:0,overflow:"hidden",marginBottom:14})}>
-                  <div style={c.shead(true)}>Basket — {txItems.length} item(s)</div>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr>{["Mode","Item","Price","📷","Hold","Flags",""].map(h=><th key={h} style={c.th}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {txItems.map((it,i)=>(
-                        <tr key={it.id} style={{background:i%2?"#ffffff04":"transparent"}}>
-                          <td style={c.td()}><span style={c.badge(it.mode==="buy"?T.green:T.gold)}>{it.mode.toUpperCase()}</span>{it.isQuick&&<span style={{...c.badge(T.blue,T.blueBg),marginLeft:4,fontSize:9}}>Q</span>}</td>
-                          <td style={c.td({color:T.white})}>{it.product&&it.product.label}{it.note&&<div style={{fontSize:10,color:T.muted}}>{it.note}</div>}</td>
-                          <td style={c.td()}>
-                            <div style={{fontWeight:"bold",color:it.mode==="buy"?T.green:T.gold}}>{fmtAUD(it.price)}</div>
-                            {adjId===it.id ?
-                              <div style={{display:"flex",gap:4,marginTop:3,alignItems:"center"}}>
-                                <input style={c.inp({width:68,padding:"3px 7px",fontSize:11})} type="number" value={adjVal} onChange={e=>setAdjVal(e.target.value)} autoFocus/>
-                                <button style={c.bsm(T.greenBg,T.green)} onClick={()=>{const v=Math.max(0,sN(adjVal));if(!v){pop("Enter valid price.","warn");return;}setTxItems(p=>p.map(x=>x.id===adjId?{...x,price:v,negotiated:true}:x));setAdjId(null);setAdjVal("");}}>✓</button>
-                                <button style={c.bsm()} onClick={()=>setAdjId(null)}>✕</button>
-                              </div> :
-                              <button style={{background:"transparent",border:"none",color:T.muted,cursor:"pointer",fontSize:9,padding:"2px 4px"}} onClick={()=>{setAdjId(it.id);setAdjVal(String(it.price));}}>✎</button>}
-                          </td>
-                          <td style={c.td()}>
-                            {itemPhotos[it.id] ?
-                              <button style={c.bsm(T.redBg,T.red)} onClick={()=>setItemPhotos(p=>{const n={...p};delete n[it.id];return n;})}>🗑</button> :
-                              <label style={{...c.bsm(T.border,T.muted),display:"inline-block",cursor:"pointer",padding:"5px 9px",fontSize:11}}>📷<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const iid=it.id;const r=new FileReader();r.onload=ev=>checkPhotoSize(ev.target.result,d=>setItemPhotos(p=>({...p,[iid]:d})));r.readAsDataURL(f);e.target.value="";}}/></label>}
-                          </td>
-                          <td style={c.td()}>{it.holdUntil?<HoldTimer holdUntil={it.holdUntil} policeHold={false}/>:<span style={{color:T.muted}}>—</span>}</td>
-                          <td style={c.td()}>
-                            <div style={{display:"flex",gap:4}}>
-                              <button title="Suspicious" style={c.bsm(it.suspicious?T.orangeBg:T.border,it.suspicious?T.orange:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,suspicious:!x.suspicious}:x))}>🚩</button>
-                              {it.mode==="buy"&&<button title="Police hold" style={c.bsm(it.policeHold?T.redBg:T.border,it.policeHold?T.red:T.muted)} onClick={()=>setTxItems(p=>p.map(x=>x.id===it.id?{...x,policeHold:!x.policeHold}:x))}>🚔</button>}
-                            </div>
-                          </td>
-                          <td style={c.td()}><button style={c.bsm(T.redBg,T.red)} onClick={()=>setTxItems(p=>p.filter(x=>x.id!==it.id))}>✕</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div style={{padding:"10px 14px",background:T.surface,display:"flex",justifyContent:"flex-end",gap:16,flexWrap:"wrap"}}>
-                    {buyTotal>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(buyTotal)}</strong></span>}
-                    {sellTotal>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(sellTotal)}</strong></span>}
-                    <span>Net: <strong style={{color:net>=0?T.gold:T.green}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</strong></span>
-                  </div>
-                </div>
-
-  ) : null;
 
   return (
     <div style={{fontFamily:T.ff,background:T.bg,minHeight:"100vh",color:T.text,paddingBottom:60,boxSizing:"border-box",fontSize:S?16:13,lineHeight:S?"1.6":"1.4"}}>
