@@ -1,0 +1,182 @@
+// LootLedger — Settings modal.
+// Mechanically extracted from src/App.tsx during Phase 2 step 10a
+// (briefing §7.3). No semantic changes; markup preserved verbatim.
+//
+// The largest modal in the app. Nine accordion sections plus a
+// danger zone:
+//   📡 Spot Feed (API keys + thresholds + status)
+//   🏪 Business Details (name, ABN, licence, police email, state)
+//   🎨 Appearance (contrast, font size, simplified view)
+//   ⚖ Bluetooth Scale (connect / disconnect, protocol, unit)
+//   🔒 Security (PIN gate, session timeout)
+//   🆘 Police Help — Duress Alerts (provider, key/URL, contacts)
+//   📋 Compliance — TTR (toggle + cash hard-block above N)
+//   ₿ Cryptocurrency Payments (toggle + wallets)
+//   🤖 AI Agent (toggle + name / URL / level — placeholder UI)
+//   🔗 Integrations (EFTPOS, Square, Shopify, generic webhook)
+// + Danger Zone: clear all data, purge expired (7-year),
+//   spot-price history, blacklist, app version footer.
+//
+// `ABTN` (the accordion-button style) lived at App.tsx top-level
+// because it was only used inside this modal — moved here.
+//
+// Briefing §7.3 step 10a flagged this modal as a candidate for
+// sub-stepping (each accordion panel could become its own
+// component). Phase 2 keeps it as one extraction; further
+// decomposition can happen as a Phase 9 polish pass if it pays
+// off in readability or shared behaviour with other settings UIs.
+
+import React from "react";
+import {T,c} from "../theme.js";
+import {sS,fmtAUD} from "../lib/utils.js";
+import {APP_VERSION} from "../lib/constants.js";
+import {store} from "../lib/storage.js";
+import {sendDuressSMS} from "../lib/integrations.js";
+import {Modal,F,SF} from "../components/ui";
+
+const ABTN={width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"};
+
+export default function Settings({
+  settings,setSettings,
+  spotStatus,spotSource,manualTs,MANUAL_TTL,apiError,setApiError,forceResumeAPI,
+  contrast,setContrast,fontSize,setFontSize,simp,setSimp,
+  scaleStatus,scaleDevice,connectScale,disconnectScale,
+  pop,
+  setTxList,setStock,purge,spotLog,blacklist,setBlacklist,
+  settingsOpen,toggleSection,
+  setShowSet,setAppUnlocked,
+}){
+  return <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
+    {[
+      ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override in Prices tab is valid for 60 min.</div>
+        <div style={c.g2(10)}>
+          <F label="1. GoldAPI.io key (primary)" value={settings.goldApiKey} onChange={v=>setSettings(p=>({...p,goldApiKey:v}))} placeholder="goldapi-xxxxxxxx"/>
+          <F label="2. Metals-API key (fallback)" value={settings.metalsApiKey||""} onChange={v=>setSettings(p=>({...p,metalsApiKey:v}))} placeholder="from metals-api.com"/>
+          <F label="3. Metals.Dev key (fallback)" value={settings.metalsDevKey||""} onChange={v=>setSettings(p=>({...p,metalsDevKey:v}))} placeholder="from metals.dev"/>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:10}}>
+          <div style={{flex:1}}><label style={c.lbl}>Gold alert ≥ (AUD/oz)</label><input style={c.inp()} type="number" placeholder="e.g. 5000" value={settings.goldAlert||""} onChange={e=>setSettings(p=>({...p,goldAlert:e.target.value||null}))}/></div>
+          <div style={{flex:1}}><label style={c.lbl}>Silver alert ≥ (AUD/oz)</label><input style={c.inp()} type="number" placeholder="e.g. 60" value={settings.silverAlert||""} onChange={e=>setSettings(p=>({...p,silverAlert:e.target.value||null}))}/></div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,padding:"10px 12px",borderRadius:6,background:T.surface}}>
+          <span style={{fontSize:11,flex:1,color:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:T.orange}}>{spotStatus==="live"?"🟢 Live — "+spotSource:spotStatus==="manual"?(()=>{const m=Math.max(0,Math.ceil((MANUAL_TTL-(Date.now()-manualTs.current))/60000));return "🟡 Manual — "+m+" min remaining";})():"🟠 No API feed"}</span>
+          <button style={c.btn(spotStatus==="manual"?T.gold:T.border,spotStatus==="manual"?T.bg:T.muted,{fontSize:11,padding:"7px 16px"})} onClick={forceResumeAPI}>↺ {spotStatus==="manual"?"Resume API":"Refresh"}</button>
+        {apiError&&<div style={{background:"#2a0a0a",border:"1px solid #cc3333",borderRadius:6,padding:"10px 14px",marginTop:8,fontSize:12,color:"#ff6666",wordBreak:"break-word"}}><strong>API Error:</strong> {apiError}<button style={{marginLeft:10,background:"none",border:"none",color:"#ff6666",cursor:"pointer",fontSize:11}} onClick={()=>setApiError("")}>✕</button></div>}
+        </div>
+      </div>],
+      ["business","🏪 Business Details",<div style={{paddingBottom:14}}>
+        <div style={c.g2(10)}>
+          <F label="Business Name" value={settings.businessName} onChange={v=>setSettings(p=>({...p,businessName:v}))}/>
+          <F label="ABN" value={settings.abn} onChange={v=>setSettings(p=>({...p,abn:v}))}/>
+          <F label="Address" value={settings.address} onChange={v=>setSettings(p=>({...p,address:v}))}/>
+          <F label="Phone" value={settings.phone} onChange={v=>setSettings(p=>({...p,phone:v}))}/>
+          <F label="Staff / Manager PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))}/>
+          <F label="Dealer Licence No" value={settings.dealerLicenceNo||""} onChange={v=>setSettings(p=>({...p,dealerLicenceNo:v}))} placeholder="e.g. SHD1234"/>
+          <F label="Police Station Name" value={settings.policeStation||""} onChange={v=>setSettings(p=>({...p,policeStation:v}))} placeholder="e.g. Ballarat Police Station"/>
+          <F label="Police Station Email" value={settings.policeEmail||""} onChange={v=>setSettings(p=>({...p,policeEmail:v}))} placeholder="ballaratcid@police.vic.gov.au"/>
+          <SF label="State / Territory" value={settings.state||"VIC"} onChange={v=>setSettings(p=>({...p,state:v}))} options={["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(x=>({value:x,label:x}))}/>
+        </div>
+      </div>],
+      ["appearance","🎨 Appearance",<div style={{paddingBottom:14}}>
+        <div style={{marginBottom:16}}>
+          <label style={c.lbl}>Contrast: {contrast>0?"+":""}{contrast}</label>
+          <input type="range" min="-5" max="5" step="1" value={contrast} onChange={e=>setContrast(Number(e.target.value))} style={{width:"100%"}}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label style={c.lbl}>Font Size: {fontSize}px</label>
+          <input type="range" min="12" max="24" step="1" value={fontSize} onChange={e=>setFontSize(Number(e.target.value))} style={{width:"100%"}}/>
+        </div>
+        <div style={{marginBottom:16}}>
+          <label style={c.lbl}>Simplified View</label>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={simp} onChange={e=>setSimp(e.target.checked)}/>Larger text, simplified controls</label>
+        </div>
+      </div>],
+      ["scale","⚖ Bluetooth Scale",<div style={{paddingBottom:14}}>
+        <div style={{display:"flex",gap:10,marginBottom:14}}>
+          {scaleStatus==="connected"?<button style={c.btn(T.red,T.white)} onClick={disconnectScale}>Disconnect Scale</button>:<button style={c.btn(T.gold,T.bg)} onClick={connectScale}>Connect Scale</button>}
+          <span style={{fontSize:11,color:scaleStatus==="connected"?T.green:T.muted,padding:"8px 0"}}>{scaleStatus==="connected"?"● "+sS(scaleDevice&&scaleDevice.name||"Connected"):scaleStatus==="connecting"?"Connecting…":"Not connected"}</span>
+        </div>
+        <SF label="Protocol" value={settings.scaleProtocol||"auto"} onChange={v=>setSettings(p=>({...p,scaleProtocol:v}))} options={[{value:"auto",label:"Auto-detect (try both)"},{value:"standard",label:"Standard BLE Weight Scale"},{value:"nordic_uart",label:"Nordic UART (NUS)"},{value:"custom",label:"Custom UUID"}]}/>
+        {settings.scaleProtocol==="custom"&&<div style={c.g2(10)}><F label="Service UUID" value={settings.scaleCustomServiceUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomServiceUUID:v}))}/><F label="Characteristic UUID" value={settings.scaleCustomCharUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomCharUUID:v}))}/></div>}
+        <SF label="Display Unit" value={settings.scaleUnit||"g"} onChange={v=>setSettings(p=>({...p,scaleUnit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"ozt",label:"Troy oz (ozt)"},{value:"oz",label:"Avoirdupois oz"}]}/>
+      </div>],
+      ["security","🔒 Security",<div style={{paddingBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>setSettings(p=>({...p,requirePin:e.target.checked}))}/>Require PIN to open app</label>
+        <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
+      </div>],
+      ["policehelp","🆘 Police Help — Duress Alerts",<div style={{paddingBottom:14}}>
+        <div style={c.bnr("warn")}>The POLICE HELP button on the dashboard sends silent SMS alerts to all configured contacts. Never disclose this to potential offenders.</div>
+        <SF label="SMS Provider" value={settings.smsProvider||"sms_uri"} onChange={v=>setSettings(p=>({...p,smsProvider:v}))} options={[{value:"textbelt",label:"Textbelt (1 free/day, then paid)"},{value:"webhook",label:"Webhook (Make / Zapier)"},{value:"twilio_fn",label:"Twilio Function"},{value:"sms_uri",label:"SMS App (opens on device)"}]}/>
+        {settings.smsProvider==="textbelt"&&<F label="Textbelt API Key" value={settings.textbeltKey||"textbelt"} onChange={v=>setSettings(p=>({...p,textbeltKey:v}))} note="'textbelt' = 1 free SMS/day. Buy a key at textbelt.com for more."/>}
+        {settings.smsProvider==="webhook"&&<F label="Webhook URL" value={settings.duressWebhookUrl||""} onChange={v=>setSettings(p=>({...p,duressWebhookUrl:v}))} placeholder="https://hook.make.com/…"/>}
+        {settings.smsProvider==="twilio_fn"&&<F label="Twilio Function URL" value={settings.twilioFnUrl||""} onChange={v=>setSettings(p=>({...p,twilioFnUrl:v}))} placeholder="https://…twil.io/…"/>}
+        <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginTop:14,marginBottom:8}}>Emergency Contacts (up to 10)</div>
+        <div style={c.g2(8)}>
+          {[1,2,3,4,5,6,7,8,9,10].map(n=><F key={n} label={"Contact "+n} value={settings["duressContact"+n]||""} onChange={v=>setSettings(p=>({...p,["duressContact"+n]:v}))} placeholder="+61400000000"/>)}
+        </div>
+        <button style={c.btn(T.border,T.text,{fontSize:11,marginTop:10})} onClick={async()=>{const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);if(!contacts.length){pop("No contacts configured.","warn");return;}const r=await sendDuressSMS(settings,contacts[0],"LOOT LEDGR — Test alert from duress system. If received, system is working.");pop(r.msg,r.ok?"ok":"err");}}>Test SMS to Contact 1</button>
+      </div>],
+      ["compliance","📋 Compliance — TTR",<div style={{paddingBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={settings.ttrEnabled!==false} onChange={e=>setSettings(p=>({...p,ttrEnabled:e.target.checked}))}/>Enable TTR check at $10,000 cash threshold</label>
+        <div style={{fontSize:10,color:T.muted,marginTop:8,marginBottom:14}}>Disabling TTR check does NOT remove your legal obligation to file Threshold Transaction Reports with AUSTRAC. Only disable if your business is exempt.</div>
+        <F label="Refuse cash transactions at or above (AUD)" type="number" value={settings.cashHardBlockAbove==null?"":String(settings.cashHardBlockAbove)} onChange={v=>setSettings(p=>({...p,cashHardBlockAbove:v===""?null:parseFloat(v)}))} placeholder="Leave blank for no extra block"/>
+        <div style={{fontSize:10,color:T.muted,marginTop:6}}>Stricter than the legal minimum. When set, the system refuses cash payment for any transaction whose buy total is at or above this amount, regardless of bullion or TTR status. Leave blank to fall back to AUSTRAC thresholds only ($2k warn, $5k bullion CDD, $10k TTR).</div>
+      </div>],
+      ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
+        {settings.cryptoEnabled&&<div style={c.g2(10)}>
+          {[{k:"walletBTC",l:"Bitcoin (BTC)"},{k:"walletETH",l:"Ethereum (ETH)"},{k:"walletBNB",l:"Binance BEP-2 (BNB)"},{k:"walletXRP",l:"Ripple (XRP)"},{k:"walletSOL",l:"Solana (SOL)"}].map(w=><F key={w.k} label={w.l} value={settings[w.k]||""} onChange={v=>setSettings(p=>({...p,[w.k]:v}))} placeholder="Wallet address…"/>)}
+        </div>}
+      </div>],
+      ["ai","🤖 AI Agent",<div style={{paddingBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.aiAgentEnabled} onChange={e=>setSettings(p=>({...p,aiAgentEnabled:e.target.checked}))}/>Enable AI Agent indicator</label>
+        {settings.aiAgentEnabled&&<div style={c.g2(10)}>
+          <F label="Agent Name" value={settings.aiAgentName||"Sophiie"} onChange={v=>setSettings(p=>({...p,aiAgentName:v}))}/>
+          <F label="Agent URL" value={settings.aiAgentUrl||""} onChange={v=>setSettings(p=>({...p,aiAgentUrl:v}))} placeholder="https://…"/>
+          <SF label="Level" value={String(settings.aiAgentLevel||1)} onChange={v=>setSettings(p=>({...p,aiAgentLevel:parseInt(v)}))} options={[{value:"1",label:"1 — Listening (blue)"},{value:"2",label:"2 — Autonomous (amber)"}]}/>
+        </div>}
+      </div>],
+      ["integrations","🔗 Integrations",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>EFTPOS Terminal</div>
+        <SF label="Provider" value={settings.eftposProvider||"none"} onChange={v=>setSettings(p=>({...p,eftposProvider:v}))} options={[{value:"none",label:"None / Manual"},{value:"square",label:"Square Terminal"},{value:"linkly",label:"Linkly / PC-EFTPOS"}]}/>
+        {settings.eftposProvider==="square"&&<F label="Square Terminal Device ID" value={settings.squareTerminalId||""} onChange={v=>setSettings(p=>({...p,squareTerminalId:v}))}/>}
+        {settings.eftposProvider==="linkly"&&<F label="Linkly Base URL" value={settings.linklyBaseUrl||"http://localhost:4242"} onChange={v=>setSettings(p=>({...p,linklyBaseUrl:v}))}/>}
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Square API</div>
+        <div style={c.g2(10)}>
+          <F label="Access Token" type="password" value={settings.squareToken||""} onChange={v=>setSettings(p=>({...p,squareToken:v}))} placeholder="EAAAl…"/>
+          <F label="Location ID" value={settings.squareLoc||""} onChange={v=>setSettings(p=>({...p,squareLoc:v}))}/>
+          <F label="Redirect URL (after checkout)" value={settings.squareRedirect||""} onChange={v=>setSettings(p=>({...p,squareRedirect:v}))} placeholder="https://lootledgr.netlify.app"/>
+        </div>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Shopify</div>
+        <div style={c.g2(10)}>
+          <F label="Store Domain" value={settings.shopifyDomain||""} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))} placeholder="yourstore.myshopify.com"/>
+          <F label="Admin API Token" type="password" value={settings.shopifyToken||""} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
+        </div>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Webhook</div>
+        <F label="Webhook URL (POST on every transaction)" value={settings.webhookUrl||""} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hook.make.com/…"/>
+      </div>],
+    ].map(([key,title,content])=>(
+      <div key={key} style={{borderBottom:"1px solid "+T.border}}>
+        <button style={ABTN} onClick={()=>toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
+        {settingsOpen[key]&&content}
+      </div>
+    ))}
+    <div style={{marginTop:14,borderTop:"2px solid "+T.border,paddingTop:14}}>
+      <div style={{fontSize:11,fontWeight:"bold",color:T.red,marginBottom:10}}>⚠ Danger Zone</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button style={c.bsm(T.redBg,T.red)} onClick={()=>{if(window.confirm&&!window.confirm("Clear all transactions and stock? This cannot be undone."))return;setTxList([]);setStock([]);pop("All data cleared.","warn");}}>🗑 Clear All Data</button>
+        <button style={c.bsm(T.border,T.muted)} onClick={purge}>🧹 Purge Expired (7yr)</button>
+      </div>
+      <div style={{marginTop:14}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Spot Price History (last 90)</div>
+        {(spotLog||[]).slice(0,10).map((e,i)=><div key={i} style={{fontSize:10,color:T.muted,marginBottom:2}}>{sS(e.t).slice(0,16)} Au {fmtAUD(e.g)} Ag {fmtAUD(e.s)} [{sS(e.src)}]</div>)}
+      </div>
+      <div style={{marginTop:14}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Blacklist ({(blacklist||[]).length})</div>
+        {(blacklist||[]).map((b,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,marginBottom:4}}><span>{sS(b.name)}</span><button style={c.bsm(T.border,T.muted)} onClick={()=>setBlacklist(p=>p.filter((_,j)=>j!==i))}>Remove</button></div>)}
+      </div>
+      <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledgr v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
+    </div>
+  </Modal>;
+}
