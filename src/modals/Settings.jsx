@@ -32,6 +32,7 @@ import {sS,fmtAUD} from "../lib/utils.js";
 import {APP_VERSION} from "../lib/constants.js";
 import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
+import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import {Modal,F,SF} from "../components/ui";
 
 const ABTN={width:"100%",background:"none",border:"none",padding:"12px 0",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",color:T.gold,fontWeight:"bold",fontSize:12,letterSpacing:"0.06em",textAlign:"left"};
@@ -135,6 +136,35 @@ export default function Settings({
           <F label="Agent Name" value={settings.aiAgentName||"Sophiie"} onChange={v=>setSettings(p=>({...p,aiAgentName:v}))}/>
           <F label="Agent URL" value={settings.aiAgentUrl||""} onChange={v=>setSettings(p=>({...p,aiAgentUrl:v}))} placeholder="https://…"/>
           <SF label="Level" value={String(settings.aiAgentLevel||1)} onChange={v=>setSettings(p=>({...p,aiAgentLevel:parseInt(v)}))} options={[{value:"1",label:"1 — Listening (blue)"},{value:"2",label:"2 — Autonomous (amber)"}]}/>
+        </div>}
+      </div>],
+      ["idautofill","🪪 ID Autofill Provider",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Phase 2.7 — extracts KYC fields from a captured ID photo so staff don't retype. Provider stubs are fully wired but not yet implemented; pick "None" to keep autofill off until a provider body lands.</div>
+        <SF label="Provider" value={settings.idAutofillProvider||"none"} onChange={v=>setSettings(p=>({...p,idAutofillProvider:v}))} options={[{value:"none",label:"None (default)"},{value:"googleVision",label:"Google Vision API"},{value:"awsTextract",label:"AWS Textract"},{value:"tesseract",label:"Tesseract.js (on-device)"},{value:"llmVision",label:"LLM with vision"}]}/>
+        {settings.idAutofillProvider==="googleVision"&&<div>
+          <div style={{...c.bnr("warn"),marginBottom:10}}>{PROVIDERS.googleVision.privacyNotice}</div>
+          <F label="API Key" type="password" value={settings.googleVisionApiKey||""} onChange={v=>setSettings(p=>({...p,googleVisionApiKey:v}))}/>
+          <F label="Project ID (optional)" value={settings.googleVisionProjectId||""} onChange={v=>setSettings(p=>({...p,googleVisionProjectId:v}))}/>
+          <button style={c.bsm()} onClick={async()=>{const r=await probeProvider("googleVision",settings);pop(r.msg,r.ok?"ok":"warn");}}>Test Connection</button>
+        </div>}
+        {settings.idAutofillProvider==="awsTextract"&&<div>
+          <div style={{...c.bnr("warn"),marginBottom:10}}>{PROVIDERS.awsTextract.privacyNotice}</div>
+          <F label="Access Key" type="password" value={settings.awsTextractAccessKey||""} onChange={v=>setSettings(p=>({...p,awsTextractAccessKey:v}))}/>
+          <F label="Secret Key" type="password" value={settings.awsTextractSecretKey||""} onChange={v=>setSettings(p=>({...p,awsTextractSecretKey:v}))}/>
+          <F label="Region" value={settings.awsTextractRegion||""} onChange={v=>setSettings(p=>({...p,awsTextractRegion:v}))} placeholder="e.g. ap-southeast-2"/>
+          <button style={c.bsm()} onClick={async()=>{const r=await probeProvider("awsTextract",settings);pop(r.msg,r.ok?"ok":"warn");}}>Test Connection</button>
+        </div>}
+        {settings.idAutofillProvider==="tesseract"&&<div>
+          <div style={{...c.bnr("info"),marginBottom:10}}>{PROVIDERS.tesseract.privacyNotice}</div>
+          <button style={c.bsm()} onClick={async()=>{const r=await probeProvider("tesseract",settings);pop(r.msg,r.ok?"ok":"warn");}}>Test Connection</button>
+        </div>}
+        {settings.idAutofillProvider==="llmVision"&&<div>
+          <div style={{...c.bnr("warn"),marginBottom:10}}>{PROVIDERS.llmVision.privacyNotice}</div>
+          <SF label="LLM Sub-provider" value={settings.llmVisionSubProvider||"anthropic"} onChange={v=>setSettings(p=>({...p,llmVisionSubProvider:v}))} options={[{value:"anthropic",label:"Anthropic Claude"},{value:"openai",label:"OpenAI GPT-4V"},{value:"other",label:"Other (BYO endpoint)"}]}/>
+          <F label="API Key" type="password" value={settings.llmVisionApiKey||""} onChange={v=>setSettings(p=>({...p,llmVisionApiKey:v}))}/>
+          <F label="Model" value={settings.llmVisionModel||""} onChange={v=>setSettings(p=>({...p,llmVisionModel:v}))} placeholder="e.g. claude-opus-4-7"/>
+          {settings.llmVisionSubProvider==="other"&&<F label="Endpoint URL" value={settings.llmVisionEndpoint||""} onChange={v=>setSettings(p=>({...p,llmVisionEndpoint:v}))} placeholder="https://…"/>}
+          <button style={c.bsm()} onClick={async()=>{const r=await probeProvider("llmVision",settings);pop(r.msg,r.ok?"ok":"warn");}}>Test Connection</button>
         </div>}
       </div>],
       ["integrations","🔗 Integrations",<div style={{paddingBottom:14}}>
