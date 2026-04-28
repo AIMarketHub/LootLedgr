@@ -20,6 +20,7 @@ import BackupRestore from "./modals/BackupRestore.jsx";
 import EOD from "./modals/EOD.jsx";
 import Vendors from "./modals/Vendors.jsx";
 import PoliceReport from "./modals/PoliceReport.jsx";
+import Staff from "./modals/Staff.jsx";
 
 export default function Loot(){
   const[screen,setScreen]=useState("dashboard");
@@ -811,26 +812,12 @@ export default function Loot(){
           pop={pop} setShowVendors={setShowVendors}
         />}
 
-        {showStaff&&<Modal title="👥 Staff" onClose={()=>setShowStaff(false)}>
-          <div style={{marginBottom:14}}>
-            <div style={c.g2(10)}>
-              <F label="Staff Name" required value={staffForm.name||""} onChange={v=>setStaffForm(p=>({...p,name:v}))}/>
-              <F label="Role" value={staffForm.role||""} onChange={v=>setStaffForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
-            </div>
-            <button style={c.btn(T.gold)} onClick={()=>{if(!staffForm.name){pop("Name required.","warn");return;}setStaffList(p=>[...p,{...staffForm,id:uid()}]);setStaffForm({});pop("Staff member added.","ok");}}>Add Staff Member</button>
-          </div>
-          <div style={{marginBottom:14}}>
-            <label style={c.lbl}>Active Staff Member</label>
-            <select style={{...c.sel(),width:"100%"}} value={activeStaff} onChange={e=>setActiveStaff(e.target.value)}>
-              <option value="">— None selected —</option>
-              {(staffList||[]).map(s=><option key={s.id} value={s.id}>{sS(s.name)}{s.role?" ("+s.role+")":""}</option>)}
-            </select>
-          </div>
-          {(staffList||[]).map(s=><div key={s.id} style={{...c.card({padding:12}),marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div><div style={{fontWeight:"bold",color:T.white}}>{sS(s.name)}</div><div style={{fontSize:11,color:T.muted}}>{sS(s.role)}</div></div>
-            <button style={c.bsm(T.redBg,T.red)} onClick={()=>setStaffList(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
-          </div>)}
-        </Modal>}
+        {showStaff&&<Staff
+          staffList={staffList} setStaffList={setStaffList}
+          staffForm={staffForm} setStaffForm={setStaffForm}
+          activeStaff={activeStaff} setActiveStaff={setActiveStaff}
+          pop={pop} setShowStaff={setShowStaff}
+        />}
 
         {cliNoteId&&<Modal title="📝 Client Note" onClose={()=>setCliNoteId(null)}>
           <F label="Note (internal — not shown to client)" value={cliNoteVal} onChange={setCliNoteVal} as="textarea"/>
