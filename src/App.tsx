@@ -3,32 +3,11 @@
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,GOLD_P,SILV_P,DEFAULT_SETTINGS,ID_OPTIONS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,fmtHold,sevenYrsFrom,isExpired7yr,nowISO,todayStr,invDay,peekInv,makeInv,toGrams,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
-import {store} from "./lib/storage.js";
+import {store,sb,checkPhotoSize} from "./lib/storage.js";
 import {THRESH,STATE_INFO,PRIVACY_NOTICE,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,genPoliceReport} from "./lib/compliance/index.js";
 
 const LIGHT={bg:"#F5F4F0",surface:"#FFF",card:"#FFF",border:"rgba(0,0,0,0.12)",gold:"#9C7A00",goldLight:"#C9A520",goldDim:"#E8C840",goldBg:"#FEFBEE",silver:"#4A7A78",silverDim:"#7AB0AC",silverBg:"#EEF5F4",green:"#9C7A00",greenDim:"#C9A520",greenBg:"#FEFBEE",readyGreen:"#22c55e",readyGreenBg:"#F0FDF4",orange:"#F97316",orangeDim:"#F97316",orangeBg:"#FFF7ED",red:"#EF4444",redDim:"#EF4444",redBg:"#FEF2F2",blue:"#9C7A00",blueBg:"#FEFBEE",text:"#111",textDim:"#3A3A3A",muted:"#737373",white:"#111",ff:"'Inter',-apple-system,sans-serif"};
 var T=LIGHT;
-
-const SB_URL=import.meta.env.VITE_SUPABASE_URL;
-const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
-const SHOP_ID="default";
-const sbFetch=async(path,opts={})=>{try{const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});if(!r.ok)return null;const t=await r.text();return t?JSON.parse(t):null;}catch(_){return null;}};
-const ts=()=>new Date().toISOString();
-const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(tbl==="settings"?"shop_id":"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
-const sb={
-  saveTx:async tx=>upsSB("transactions",{id:tx.id,shop_id:SHOP_ID,data:tx,updated_at:ts()}),
-  loadTxList:async()=>{const r=await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");return r?r.map(x=>x.data):null;},
-  deleteTx:async id=>sbFetch("transactions?id=eq."+id,{method:"DELETE"}),
-  saveStock:async item=>upsSB("stock",{id:item.id,shop_id:SHOP_ID,data:item,updated_at:ts()}),
-  loadStock:async()=>{const r=await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");return r?r.map(x=>x.data):null;},
-  deleteStock:async id=>sbFetch("stock?id=eq."+id,{method:"DELETE"}),
-  saveSettings:async s=>upsSB("settings",{shop_id:SHOP_ID,data:s,updated_at:ts()}),
-  loadSettings:async()=>{const r=await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
-  saveCatalog:async cat=>upsSB("catalog",{id:"catalog_"+SHOP_ID,shop_id:SHOP_ID,data:cat,updated_at:ts()}),
-  loadCatalog:async()=>{const r=await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
-};
-
-const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};
 
 const SEED_LOGO="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23c9a84c'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='28' font-family='serif' fill='%23080c09'%3ELL%3C/text%3E%3C/svg%3E";
 
