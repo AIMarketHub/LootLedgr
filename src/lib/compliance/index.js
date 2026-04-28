@@ -40,6 +40,7 @@ export const THRESH=_active.THRESH;
 export const STATE_INFO=_active.STATE_INFO;
 export const PRIVACY_NOTICE=_active.PRIVACY_NOTICE;
 export const checkCompliance=_active.checkCompliance;
+export const getRequiredFields=_active.getRequiredFields;
 export const calcUnitPrice=_active.calcUnitPrice;
 export const calcMeltFn=_active.calcMeltFn;
 export const makeReceiptFn=_active.makeReceiptFn;

@@ -144,6 +144,63 @@ export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove
   return{flags,total,bullionCash,anyCash,requiresKYC:bullionCash>=THRESH.BULLION_CDD||(ttrEnabled&&anyCash>=THRESH.CASH_TTR)};
 }
 
+// Phase 2.7.8 — getRequiredFields drives the conditional rendering
+// of compliance fields in the new NewTx step 3 (2.7.9). Returns
+// the list of field keys to render given the in-progress
+// transaction + the dealer's settings (which may carry tightened
+// threshold overrides from Phase 2.7.4b).
+//
+// Settings overrides honoured (each null = use regional default;
+// values above the legal default fall back to the default
+// defensively):
+//   cashKycThreshold              default THRESH.CASH_TTR    ($10k)
+//   bullionCddThreshold           default THRESH.BULLION_CDD ($5k)
+//   sourceOfFundsCashThreshold    default THRESH.CASH_TTR    ($10k)
+//   sourceOfWealthCashThreshold   default THRESH.CASH_TTR    ($10k)
+//
+// Field keys returned:
+//   pepCheck       — KYC-required tx
+//   tfsCheck       — KYC-required tx
+//   riskRating     — KYC-required tx
+//   sourceOfFunds  — cash ≥ sourceOfFundsCashThreshold
+//   sourceOfWealth — cash ≥ sourceOfWealthCashThreshold
+//
+// "KYC-required" =  bullionCash ≥ bullionCddThreshold
+//                   OR cashTotal ≥ cashKycThreshold
+//
+// checkCompliance() is intentionally NOT modified — its AUSTRAC
+// warning banners stay tied to the legal thresholds. The dealer's
+// tightened overrides only affect WHICH FIELDS APPEAR in step 3,
+// not the AUSTRAC verbiage. Field-trigger and statutory-banner
+// are different concerns.
+
+function readTighten(settings,key,legalMin){
+  const v=settings&&settings[key];
+  if(v==null)return legalMin;
+  const n=Number(v);
+  if(!isFinite(n)||n<=0)return legalMin;
+  if(n>legalMin)return legalMin;
+  return n;
+}
+
+export function getRequiredFields(tx,settings){
+  const isCash=(tx&&tx.payment)==="cash";
+  const items=(tx&&tx.items)||[];
+  const buyTotal=items.filter(i=>i&&i.mode==="buy").reduce((s,i)=>s+sN(i.price),0);
+  const cashTotal=isCash?buyTotal:0;
+  const bullionCash=isCash?items.filter(i=>i&&i.mode==="buy"&&i.product&&i.product.type==="bullion").reduce((s,i)=>s+sN(i.price),0):0;
+  const cashKyc=readTighten(settings,"cashKycThreshold",THRESH.CASH_TTR);
+  const bullionCdd=readTighten(settings,"bullionCddThreshold",THRESH.BULLION_CDD);
+  const sofMin=readTighten(settings,"sourceOfFundsCashThreshold",THRESH.CASH_TTR);
+  const sowMin=readTighten(settings,"sourceOfWealthCashThreshold",THRESH.CASH_TTR);
+  const kycRequired=bullionCash>=bullionCdd||cashTotal>=cashKyc;
+  const fields=[];
+  if(kycRequired)fields.push("pepCheck","tfsCheck","riskRating");
+  if(cashTotal>=sofMin)fields.push("sourceOfFunds");
+  if(cashTotal>=sowMin)fields.push("sourceOfWealth");
+  return fields;
+}
+
 export function calcUnitPrice(p,gSpot,sSpot,mode="buy"){
   if(!p||!gSpot||!sSpot)return null;
   const isG=p.cat==="Gold",perG=(isG?gSpot:sSpot)/TROY_OZ,perOz=isG?gSpot:sSpot;
@@ -240,6 +297,7 @@ const region={
   STATE_INFO,
   PRIVACY_NOTICE,
   checkCompliance,
+  getRequiredFields,
   calcUnitPrice,
   calcMeltFn,
   makeReceiptFn,

@@ -31,6 +31,10 @@ export function checkCompliance(items,payment){
   return{flags,total,bullionCash:0,anyCash:total,requiresKYC:total>=THRESH.BULLION_CDD};
 }
 
+// Fake required-fields list — always empty (no conditional fields
+// in the TEST region). Real region hooks in 2.7.9 NewTx step 3.
+export function getRequiredFields(){return[];}
+
 // Fake unit price — always $1.
 export function calcUnitPrice(){return 1;}
 
@@ -61,6 +65,7 @@ const region={
   STATE_INFO,
   PRIVACY_NOTICE,
   checkCompliance,
+  getRequiredFields,
   calcUnitPrice,
   calcMeltFn,
   makeReceiptFn,
