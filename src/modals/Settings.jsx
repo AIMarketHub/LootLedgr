@@ -421,7 +421,7 @@ export default function Settings({
   </Modal>}
   {changePinOpen&&<Modal title="🔄 Change Admin PIN" onClose={()=>!changePinBusy&&setChangePinOpen(false)}>
     <div style={{...c.bnr("info"),marginBottom:14}}>Setting a new Admin PIN re-encrypts the recovery passphrase under the new PIN. The passphrase itself does not change.</div>
-    <F label="New Admin PIN (4–12 digits)" type="password" value={newPin} onChange={setNewPin} required/>
+    <F label="New Admin PIN (4–12 digits)" type="password" value={newPin} onChange={setNewPin} required note="Use at least 6 digits for meaningful protection. 4 digits is brute-forceable."/>
     <F label="Confirm New PIN" type="password" value={newPinConfirm} onChange={setNewPinConfirm} required note={newPin&&newPinConfirm&&newPin!==newPinConfirm?"PINs do not match.":undefined}/>
     <div style={{display:"flex",gap:10,marginTop:10}}>
       <button style={c.btn(isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.gold:T.border,isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.bg:T.muted)} disabled={!(isValidPin(newPin)&&newPin===newPinConfirm)||changePinBusy} onClick={doChangePin}>{changePinBusy?"Re-encrypting…":"Save New PIN"}</button>

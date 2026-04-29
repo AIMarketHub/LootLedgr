@@ -82,7 +82,7 @@ export default function AdminPinSetup({setSettings,pop,onClose}){
 
     <div style={{...c.card({padding:14}),marginBottom:14}}>
       <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>1 · CHOOSE ADMIN PIN</div>
-      <F label="Admin PIN (4–12 digits)" type="password" value={pin} onChange={setPin} placeholder="••••" required/>
+      <F label="Admin PIN (4–12 digits)" type="password" value={pin} onChange={setPin} placeholder="••••" required note="Use at least 6 digits for meaningful protection. 4 digits is brute-forceable."/>
       <F label="Confirm Admin PIN" type="password" value={pinConfirm} onChange={setPinConfirm} placeholder="••••" required note={pin&&pinConfirm&&pin!==pinConfirm?"PINs do not match.":undefined}/>
     </div>
 

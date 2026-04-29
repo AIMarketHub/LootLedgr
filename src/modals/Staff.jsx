@@ -11,22 +11,23 @@
 // Per-staff PIN (added 2026-04-29 Phase 2.7 follow-up): stored on
 // the staff record but does NOT gate authentication yet. Phase 3
 // will read these values for the real auth layer. Until then the
-// field is purely compliance-tracking metadata. Validation: 4–6
+// field is purely compliance-tracking metadata. Validation: 4–12
 // digits or blank; non-digit input is rejected silently. Display
 // in the staff list is masked (•••• style) so the PIN never
-// appears in plain text.
+// appears in plain text. The 4–12 range matches the Admin PIN
+// policy app-wide.
 
 import React from "react";
 import {T,c} from "../theme.js";
 import {sS,uid} from "../lib/utils.js";
 import {Modal,F} from "../components/ui";
 
-// Trim, then accept only 4-6 digit strings or blank. Returns the
+// Trim, then accept only 4-12 digit strings or blank. Returns the
 // canonical value to store, or null if the input is rejected.
 function normalizePin(v){
   const s=(v==null?"":String(v)).trim();
   if(s==="")return "";
-  if(!/^\d{4,6}$/.test(s))return null;
+  if(!/^\d{4,12}$/.test(s))return null;
   return s;
 }
 
@@ -50,7 +51,7 @@ export default function Staff({
   const saveEditImpl=()=>{
     if(!editForm.name){pop("Name required.","warn");return;}
     const pin=normalizePin(editForm.pin);
-    if(pin===null){pop("PIN must be 4–6 digits, or blank.","warn");return;}
+    if(pin===null){pop("PIN must be 4–12 digits, or blank.","warn");return;}
     setStaffList(p=>p.map(x=>x.id===editId?{...x,name:editForm.name,role:editForm.role,pin}:x));
     cancelEdit();
     pop("Staff member updated.","ok");
@@ -59,7 +60,7 @@ export default function Staff({
   const addStaffImpl=()=>{
     if(!staffForm.name){pop("Name required.","warn");return;}
     const pin=normalizePin(staffForm.pin);
-    if(pin===null){pop("PIN must be 4–6 digits, or blank.","warn");return;}
+    if(pin===null){pop("PIN must be 4–12 digits, or blank.","warn");return;}
     setStaffList(p=>[...p,{...staffForm,pin,id:uid()}]);
     setStaffForm({});
     pop("Staff member added.","ok");
@@ -74,7 +75,7 @@ export default function Staff({
       <div style={c.g2(10)}>
         <F label="Staff Name" required value={staffForm.name||""} onChange={v=>setStaffForm(p=>({...p,name:v}))}/>
         <F label="Role" value={staffForm.role||""} onChange={v=>setStaffForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
-        <F label="PIN (4–6 digits)" type="password" value={staffForm.pin||""} onChange={v=>setStaffForm(p=>({...p,pin:v}))} placeholder="optional" note="Stored against this staff member. Phase 3 will use it for staff-level auth; for now it is recorded but not enforced."/>
+        <F label="PIN (4–12 digits)" type="password" value={staffForm.pin||""} onChange={v=>setStaffForm(p=>({...p,pin:v}))} placeholder="optional" note="Stored against this staff member. Phase 3 will use it for staff-level auth; for now it is recorded but not enforced."/>
       </div>
       <button style={c.btn(T.gold)} onClick={addStaff}>Add Staff Member</button>
     </div>
@@ -89,7 +90,7 @@ export default function Staff({
       <div style={c.g2(10)}>
         <F label="Staff Name" required value={editForm.name||""} onChange={v=>setEditForm(p=>({...p,name:v}))}/>
         <F label="Role" value={editForm.role||""} onChange={v=>setEditForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
-        <F label="PIN (4–6 digits)" type="password" value={editForm.pin||""} onChange={v=>setEditForm(p=>({...p,pin:v}))} placeholder="optional"/>
+        <F label="PIN (4–12 digits)" type="password" value={editForm.pin||""} onChange={v=>setEditForm(p=>({...p,pin:v}))} placeholder="optional"/>
       </div>
       <div style={{display:"flex",gap:8}}>
         <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={saveEdit}>Save</button>

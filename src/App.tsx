@@ -435,7 +435,7 @@ export default function Loot(){
             <div style={{fontSize:32,marginBottom:12}}>🔒</div>
             <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
             <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
-            <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={8} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
+            <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={12} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
             <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
             {settings.adminRecoveryPassphraseHash&&<button style={{background:"none",border:"none",color:T.muted,fontSize:11,marginTop:14,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setForgotPinOpen(true)}>Forgot PIN?</button>}
           </div>
