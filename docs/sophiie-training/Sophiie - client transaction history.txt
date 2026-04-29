@@ -1,0 +1,50 @@
+TOPIC: Per-client transaction history (inside the client record)
+WHEN TO USE: When staff is investigating a specific customer — verifying repeat-customer patterns, building an audit trail, resolving a dispute about a previous transaction, answering customer-service questions about what was bought or sold last time, or preparing the next transaction with context from earlier visits.
+
+PROCEDURE:
+  1. Open the Clients tab from the bottom navigation.
+  2. Find the customer in the list. The list is sorted by most-
+     recent-visit by default; the search box across the top
+     filters by name, ID number, phone, address or email.
+  3. Click the customer row. The Client Record modal opens.
+  4. Scroll past the photo and identity / compliance fields to
+     the "📜 TRANSACTION HISTORY (N)" section. The number in
+     brackets is how many transactions are linked to this client.
+  5. Each row shows: invoice number (Loot #), date, BUY / SELL
+     badges (mixed transactions show both), the first item plus
+     "(+N more)" if multi-item, the payment method, and the net
+     amount.
+  6. Click any row to open the full transaction detail modal —
+     the same one you get from the History screen's View button.
+     Closing that modal returns you to the client record.
+  7. The summary line below the list shows lifetime totals:
+     "Bought from this client: $X" (cash the shop paid out),
+     "Sold to this client: $Y" (cash the shop took in), plus the
+     dates of the first and last linked transactions.
+
+EDGE CASES:
+  - Old transactions from before Phase 2.7 client linkage may not
+    have a clientId. They appear in the global History screen but
+    NOT in this per-client list. Run the one-time migration in
+    Settings → Danger Zone if you want them aggregated.
+  - Voided transactions still appear here, with a VOIDED badge.
+    They are not removed — voiding is a marker, not a deletion.
+  - TTR-pending and SMR-flagged transactions are also surfaced via
+    coloured badges so the staff member can see compliance status
+    at a glance without opening the full record.
+
+COMMON MISTAKES:
+  - Looking for a specific customer's transactions in the History
+    screen and filtering by hand. Faster path: open the client,
+    scroll to Transaction History.
+  - Assuming an empty history means no business with this customer.
+    Check the global History screen with their name in the search
+    box — if matches appear there, the linkage migration may not
+    have been run yet.
+  - Using "Bought from this client" as a profit indicator. It is
+    cash out, not margin. Margin lives in EOD reports.
+
+RELATED TOPICS:
+  - "Sophiie - PIN recovery.txt" — companion training file.
+  - "Sophiie - AI Agent settings.txt" — companion training file.
+  - The History screen — for cross-customer views and CSV export.

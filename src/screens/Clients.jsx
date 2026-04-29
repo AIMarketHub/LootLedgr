@@ -41,6 +41,10 @@ export default function Clients({
   // Phase 2.7 follow-up batch 2 — Admin-PIN gate for destructive
   // ClientDetail actions (Edit toggle, Save, Erase photo).
   withAdminGate,
+  // Phase 2.7 follow-up — opens a tx in the App-level tx-detail
+  // modal when staff clicks a row inside ClientDetail's history
+  // section. Same setSelTx the History screen uses.
+  setSelTx,
 }){
   const[mode,setMode]=useState("clients");
   const[sortDir,setSortDir]=useState("desc");
@@ -193,10 +197,12 @@ export default function Clients({
 
     {selectedClient&&<ClientDetail
       client={selectedClient}
+      txList={txList}
       pop={pop}
       onSave={updated=>setSelectedClient(updated)}
       onClose={()=>{setSelectedClient(null);loadClients();}}
       withAdminGate={withAdminGate}
+      setSelTx={setSelTx}
     />}
   </div>;
 }

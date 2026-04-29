@@ -533,6 +533,7 @@ export default function Loot(){
             pop={pop}
             setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
             withAdminGate={withAdminGate}
+            setSelTx={setSelTx}
           />}
 
           {screen==="history"&&<History

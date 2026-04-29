@@ -24,11 +24,11 @@
 //     [Proceed] [Cancel]
 //   Cancel keeps edit state. Proceed saves the partial.
 
-import React,{useState} from "react";
+import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F,SF} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
-import {sS} from "../lib/utils.js";
+import {sN,sS,fmtAUD,fmtDate} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
 import {clients,getMissingMandatoryFields,formatLastVisit} from "../lib/clients.js";
 
@@ -39,7 +39,26 @@ function ReadField({label,value}){
   </div>;
 }
 
-export default function ClientDetail({client,onSave,onClose,pop,withAdminGate}){
+// Compact item-list summary for a transaction row. "Ring (+2 more)"
+// when multi-item; just the label when single. Falls back to "(no
+// items)" so empty-basket records still render.
+function itemSummary(tx){
+  const items=Array.isArray(tx&&tx.items)?tx.items:[];
+  if(!items.length)return "(no items)";
+  const head=sS(items[0]&&items[0].product&&items[0].product.label)||"(unlabelled)";
+  return items.length===1?head:head+" (+"+(items.length-1)+" more)";
+}
+
+// Returns the modes present on the items array — used to render
+// the BUY / SELL badges. A mixed transaction shows both badges.
+function modesOf(tx){
+  const items=Array.isArray(tx&&tx.items)?tx.items:[];
+  const has={buy:false,sell:false};
+  items.forEach(i=>{if(i&&i.mode==="buy")has.buy=true;if(i&&i.mode==="sell")has.sell=true;});
+  return has;
+}
+
+export default function ClientDetail({client,txList,onSave,onClose,pop,withAdminGate,setSelTx}){
   const[editing,setEditing]=useState(false);
   const[form,setForm]=useState({});
   const[showGate,setShowGate]=useState(false);
@@ -118,6 +137,36 @@ export default function ClientDetail({client,onSave,onClose,pop,withAdminGate}){
   const lastVisit=formatLastVisit(client);
   const missing=editing?getMissingMandatoryFields(form):[];
 
+  // Phase 2.7 follow-up — linked transactions. Filtered by clientId
+  // only (the orphan-clientId rule means tx.client snapshots without
+  // a clientId reference are not aggregated against this record;
+  // they show up in the History screen instead). Sorted descending
+  // by date so the most recent is first.
+  const linkedTxs=useMemo(()=>{
+    if(!client||!Array.isArray(txList))return [];
+    const list=txList.filter(t=>t&&t.clientId===client.id);
+    list.sort((a,b)=>{
+      const ad=a.date?new Date(a.date).getTime():0;
+      const bd=b.date?new Date(b.date).getTime():0;
+      return bd-ad;
+    });
+    return list;
+  },[txList,client&&client.id]);
+
+  // Lifetime totals — kept as two separate figures so neither
+  // direction is hidden inside a net. "Bought from this client" =
+  // sum of buyTotal across all their transactions (cash out from
+  // the shop). "Sold to this client" = sum of sellTotal (cash in).
+  const totals=useMemo(()=>{
+    let bought=0,sold=0;
+    linkedTxs.forEach(t=>{bought+=sN(t.buyTotal);sold+=sN(t.sellTotal);});
+    return{bought,sold};
+  },[linkedTxs]);
+  const firstTx=linkedTxs.length?linkedTxs[linkedTxs.length-1]:null;
+  const lastTx=linkedTxs.length?linkedTxs[0]:null;
+
+  const openTx=tx=>{if(typeof setSelTx==="function")setSelTx(tx);};
+
   return <>
     <Modal title="Client Record" onClose={onClose} wide>
       {/* Header */}
@@ -188,6 +237,50 @@ export default function ClientDetail({client,onSave,onClose,pop,withAdminGate}){
           <ReadField label="Source of Wealth" value={client.sourceOfWealth}/>
           {client.internalNotes&&<ReadField label="Internal Notes" value={client.internalNotes}/>}
         </div>}
+      </div>
+
+      {/* Phase 2.7 follow-up — linked transactions. Filtered by
+          tx.clientId === client.id (orphan tx.client snapshots
+          stay in the History screen). Click a row to open the
+          App-level tx-detail modal; that modal renders later in
+          App.tsx than ClientDetail so it stacks on top correctly. */}
+      <div style={{...c.card({padding:14}),marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+          <span>📜 TRANSACTION HISTORY{linkedTxs.length>0?" ("+linkedTxs.length+")":""}</span>
+        </div>
+        {linkedTxs.length===0?<div style={{fontSize:11,color:T.muted}}>No linked transactions yet.</div>:<>
+          {linkedTxs.map(tx=>{
+            const m=modesOf(tx);
+            const net=sN(tx.net);
+            const netColor=net>=0?T.gold:T.green;
+            const netLabel=net>=0?fmtAUD(net):"-"+fmtAUD(-net);
+            return <div key={tx.id} style={{...c.card({padding:10}),marginBottom:6,background:T.surface,cursor:typeof setSelTx==="function"?"pointer":"default",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}} onClick={()=>openTx(tx)}>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:3}}>
+                  <span style={{fontWeight:"bold",color:T.gold,fontSize:12}}>{sS(tx.id)}</span>
+                  <span style={{fontSize:10,color:T.muted}}>{fmtDate(tx.date)}</span>
+                  {m.buy&&<span style={c.badge(T.gold)}>BUY</span>}
+                  {m.sell&&<span style={c.badge(T.silver||T.muted)}>SELL</span>}
+                  {tx.voided&&<span style={c.badge(T.muted)}>VOIDED</span>}
+                  {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" FILED":" PENDING"}</span>}
+                  {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+                </div>
+                <div style={{fontSize:11,color:T.text,marginBottom:2}}>{itemSummary(tx)}</div>
+                <div style={{fontSize:10,color:T.muted}}>{sS(tx.payment).toUpperCase()||"—"}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:10,color:T.muted}}>Net</div>
+                <div style={{fontSize:13,fontWeight:"bold",color:netColor}}>{netLabel}</div>
+              </div>
+            </div>;
+          })}
+          <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+T.border,fontSize:11,color:T.muted,display:"flex",flexWrap:"wrap",gap:12}}>
+            <span><strong style={{color:T.green}}>Bought from this client:</strong> {fmtAUD(totals.bought)}</span>
+            <span><strong style={{color:T.gold}}>Sold to this client:</strong> {fmtAUD(totals.sold)}</span>
+            {firstTx&&<span>First: {fmtDate(firstTx.date)}</span>}
+            {lastTx&&firstTx!==lastTx&&<span>Last: {fmtDate(lastTx.date)}</span>}
+          </div>
+        </>}
       </div>
 
       {/* Phase 2.7.11 — blacklist override history. Collapsed by
