@@ -17,7 +17,18 @@ Scope when this ships:
 - **Induction-test transaction generator.** When a new staff member is added, the agent walks them through synthetic transactions (no real records touched) so they learn the flow before doing live ones. Test data is clearly flagged and never exits the dev-style sandbox.
 - Optional client-facing channel via the customer portal (Stage 8.1) — different system prompt, narrower scope, never sees compliance internals.
 - Optional voice input (Web Speech API on the browser side; provider TBD on server side).
-- **Provider abstraction.** OpenAI / Anthropic / Sophiie / local LLM / custom endpoint — same abstraction pattern as `src/lib/idAutofill/` (Phase 2.7) and `src/lib/integrations/stripe.js` (Phase 2.7 follow-up). Sophiie is one option among many, not THE provider.
+- **Provider abstraction (multi-provider, mandatory).** The dealer picks the provider per shop; LootLedger does not lock to one. Minimum viable provider list when 8.8 actually ships:
+  - **OpenAI** — ChatGPT family (gpt-4o, gpt-4o-mini, etc.).
+  - **Anthropic** — Claude family (opus / sonnet / haiku tiers).
+  - **Google** — Gemini.
+  - **xAI** — Grok.
+  - **Sophiie** — the original target. **One option among several, not the default.**
+  - **Local LLM** via OpenAI-compatible endpoints — LM Studio, Ollama, llama.cpp servers. Lets dealers keep prompts and data on-prem.
+  - **Custom** — any OpenAI-compatible third-party API, dealer-supplied URL + key.
+
+  Provider abstraction follows the same pattern as `src/lib/idAutofill/`. Adding a new provider when this extension is built = one new file in `src/lib/extensions/ai-agent/providers/`, one new option in the Settings → AI Agent dropdown. The choice is the dealer's per-shop, not hard-coded into LootLedger.
+
+  The AI provider landscape evolves rapidly. The list above is the minimum viable set as of 2026-04. When 8.8 actually ships, the list should be re-evaluated against current state-of-the-art and pricing. New providers are easy to add; the architectural pattern is fixed.
 
 ## Stage 8.9 — AI Agent Level 2 (autonomous operator + biometric KYC)
 
