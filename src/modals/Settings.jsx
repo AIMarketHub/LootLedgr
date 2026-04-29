@@ -34,6 +34,7 @@ import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
+import AdminPinSetup from "./AdminPinSetup.jsx";
 import {THRESH} from "../lib/compliance/index.js";
 import {clients} from "../lib/clients.js";
 import {analyzeMigrationTargets,runTestDataMigration} from "../lib/clientsMigration.js";
@@ -87,6 +88,10 @@ export default function Settings({
   const[migStats,setMigStats]=useState(null);
   const[migLoading,setMigLoading]=useState(false);
   const[migBusy,setMigBusy]=useState(false);
+  // Phase 2.7 follow-up batch 2 — first-time Admin PIN setup is a
+  // dedicated modal triggered from the Require-PIN toggle. Toggle
+  // does not flip until the modal completes.
+  const[showAdminSetup,setShowAdminSetup]=useState(false);
   const refreshMigStats=async()=>{
     setMigLoading(true);
     try{
@@ -97,7 +102,9 @@ export default function Settings({
     }finally{setMigLoading(false);}
   };
   useEffect(()=>{refreshMigStats();/* eslint-disable-next-line */},[]);
-  return <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
+  return <>
+    {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
+  <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
     {[
       ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
         <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override TTL is configurable in the Prices tab.</div>
@@ -154,13 +161,20 @@ export default function Settings({
       ["security","🔒 Security",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>{
           const next=e.target.checked;
-          // Turning it OFF requires the current Admin PIN. Turning
-          // it ON is unguarded — nothing to authorise yet.
+          // Turning it OFF requires the current Admin PIN.
           if(!next&&settings.requirePin){
             gate("Disable Require-PIN gate. Removes the lock screen and unprotects every other Admin-gated action.",()=>setSettings(p=>({...p,requirePin:false})));
-          }else{
-            setSettings(p=>({...p,requirePin:next}));
+            return;
           }
+          // Turning it ON for the first time (no recovery
+          // bundle stored) opens the setup modal — the toggle
+          // itself doesn't flip until the modal completes
+          // successfully. Subsequent toggles just flip.
+          if(next&&!settings.adminRecoveryPassphraseHash){
+            setShowAdminSetup(true);
+            return;
+          }
+          setSettings(p=>({...p,requirePin:next}));
         }}/>Require PIN to open app</label>
         <F label="Admin PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))} note="Master key — unlocks the app when the toggle above is on, and overrides any per-staff PIN."/>
         <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
@@ -321,5 +335,6 @@ export default function Settings({
       </div>
       <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledgr v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
     </div>
-  </Modal>;
+  </Modal>
+  </>;
 }
