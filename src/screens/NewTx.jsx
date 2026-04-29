@@ -321,17 +321,27 @@ export default function NewTx({
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
         {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
-        {requiredFields.length===0&&<div style={{...c.bnr("info"),marginTop:8}}>✓ No additional compliance fields required for this transaction.</div>}
-        {requiredFields.length>0&&(
-          <div style={c.card({padding:16,marginTop:14})}>
-            <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>REQUIRED COMPLIANCE FIELDS</div>
-            {requiredFields.includes("pepCheck")&&<SF label="PEP Check" value={client.pepCheck||""} onChange={v=>setClient(p=>({...p,pepCheck:v}))} options={[{value:"",label:"— Select —"},{value:"no",label:"No — Not a PEP"},{value:"yes",label:"PEP — refer to compliance officer"}]}/>}
-            {requiredFields.includes("tfsCheck")&&<SF label="TFS Check (dfat.gov.au sanctions)" value={client.tfsCheck||""} onChange={v=>setClient(p=>({...p,tfsCheck:v}))} options={[{value:"",label:"— Select —"},{value:"clear",label:"Clear — not on list"},{value:"match",label:"MATCH — escalate"}]}/>}
-            {requiredFields.includes("riskRating")&&<SF label="Risk Rating" value={client.riskRating||""} onChange={v=>setClient(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>}
-            {requiredFields.includes("sourceOfFunds")&&<F label="Source of Funds" value={client.sourceOfFunds||""} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))} placeholder="e.g. wages, sale of asset, inheritance"/>}
-            {requiredFields.includes("sourceOfWealth")&&<F label="Source of Wealth" value={client.sourceOfWealth||""} onChange={v=>setClient(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>}
-          </div>
-        )}
+        {/* Step 3 renders only the threshold-driven KYC fields. The
+            ID-on-every-tx fields (name / idType / idNumber) are
+            captured at step 4 — checked here just to drive the
+            empty-state banner and section visibility. */}
+        {(()=>{
+          const KYC_KEYS=["pepCheck","tfsCheck","riskRating","sourceOfFunds","sourceOfWealth"];
+          const kycFields=requiredFields.filter(k=>KYC_KEYS.includes(k));
+          return <>
+            {kycFields.length===0&&<div style={{...c.bnr("info"),marginTop:8}}>✓ No additional compliance fields required for this transaction.</div>}
+            {kycFields.length>0&&(
+              <div style={c.card({padding:16,marginTop:14})}>
+                <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>REQUIRED COMPLIANCE FIELDS</div>
+                {kycFields.includes("pepCheck")&&<SF label="PEP Check" value={client.pepCheck||""} onChange={v=>setClient(p=>({...p,pepCheck:v}))} options={[{value:"",label:"— Select —"},{value:"no",label:"No — Not a PEP"},{value:"yes",label:"PEP — refer to compliance officer"}]}/>}
+                {kycFields.includes("tfsCheck")&&<SF label="TFS Check (dfat.gov.au sanctions)" value={client.tfsCheck||""} onChange={v=>setClient(p=>({...p,tfsCheck:v}))} options={[{value:"",label:"— Select —"},{value:"clear",label:"Clear — not on list"},{value:"match",label:"MATCH — escalate"}]}/>}
+                {kycFields.includes("riskRating")&&<SF label="Risk Rating" value={client.riskRating||""} onChange={v=>setClient(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Select —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>}
+                {kycFields.includes("sourceOfFunds")&&<F label="Source of Funds" value={client.sourceOfFunds||""} onChange={v=>setClient(p=>({...p,sourceOfFunds:v}))} placeholder="e.g. wages, sale of asset, inheritance"/>}
+                {kycFields.includes("sourceOfWealth")&&<F label="Source of Wealth" value={client.sourceOfWealth||""} onChange={v=>setClient(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>}
+              </div>
+            )}
+          </>;
+        })()}
         <div style={{display:"flex",gap:10,marginTop:10}}>
           <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag SMR (internal)</button>
           <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>

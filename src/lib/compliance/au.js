@@ -150,6 +150,11 @@ export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove
 // transaction + the dealer's settings (which may carry tightened
 // threshold overrides from Phase 2.7.4b).
 //
+// Phase 2.7 follow-up (2026-04-29) — settings.requireIdOnEveryTx
+// (default true) adds name / idType / idNumber to the required set
+// regardless of transaction value. Shop policy: every transaction
+// sights ID. KYC fields stay threshold-driven exactly as before.
+//
 // Settings overrides honoured (each null = use regional default;
 // values above the legal default fall back to the default
 // defensively):
@@ -195,6 +200,12 @@ export function getRequiredFields(tx,settings){
   const sowMin=readTighten(settings,"sourceOfWealthCashThreshold",THRESH.CASH_TTR);
   const kycRequired=bullionCash>=bullionCdd||cashTotal>=cashKyc;
   const fields=[];
+  // Shop-policy ID gate. Default ON. Captures the dedupe-friendly
+  // minimum (name + ID type + ID number) on every transaction
+  // regardless of value, separate from the threshold-driven KYC
+  // fields below. Toggle in Settings → Compliance Thresholds.
+  const requireIdEveryTx=settings==null||settings.requireIdOnEveryTx!==false;
+  if(requireIdEveryTx)fields.push("name","idType","idNumber");
   if(kycRequired)fields.push("pepCheck","tfsCheck","riskRating");
   if(cashTotal>=sofMin)fields.push("sourceOfFunds");
   if(cashTotal>=sowMin)fields.push("sourceOfWealth");

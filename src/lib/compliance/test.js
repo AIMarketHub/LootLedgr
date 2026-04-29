@@ -31,9 +31,14 @@ export function checkCompliance(items,payment){
   return{flags,total,bullionCash:0,anyCash:total,requiresKYC:total>=THRESH.BULLION_CDD};
 }
 
-// Fake required-fields list — always empty (no conditional fields
-// in the TEST region). Real region hooks in 2.7.9 NewTx step 3.
-export function getRequiredFields(){return[];}
+// Fake required-fields list. Phase 2.7 follow-up (2026-04-29)
+// honours settings.requireIdOnEveryTx for parity with the real
+// regions; everything else stays empty (TEST region has no
+// threshold-driven KYC fields). Default ON, same as au.js.
+export function getRequiredFields(_tx,settings){
+  const requireIdEveryTx=settings==null||settings.requireIdOnEveryTx!==false;
+  return requireIdEveryTx?["name","idType","idNumber"]:[];
+}
 
 // Fake unit price — always $1.
 export function calcUnitPrice(){return 1;}

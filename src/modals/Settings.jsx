@@ -275,6 +275,16 @@ export default function Settings({
       </div>],
       ["compliancethresholds","📋 Compliance Thresholds",<div style={{paddingBottom:14}}>
         <div style={{fontSize:10,color:T.muted,marginBottom:12}}>Phase 2.7 — override the legal trigger thresholds for the conditional compliance fields shown in the New Transaction flow. You can only TIGHTEN (lower the dollar value to demand checks earlier) — values above the legal minimum are rejected.</div>
+        <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",fontSize:12,marginBottom:6}}>
+          <input type="checkbox" checked={settings.requireIdOnEveryTx!==false} onChange={e=>{
+            const next=e.target.checked;
+            const apply=()=>setSettings(p=>({...p,requireIdOnEveryTx:next}));
+            if(thresholdsUnlocked){apply();return;}
+            gate("Modify compliance thresholds (tightening only).",()=>{setThresholdsUnlocked(true);apply();});
+          }} style={{marginTop:3}}/>
+          <span><strong>Require ID on every transaction (recommended)</strong></span>
+        </label>
+        <div style={{fontSize:10,color:T.muted,marginBottom:14}}>When on, ID type + ID number must be captured on every transaction, regardless of value. KYC (PEP / TFS / Source of Funds / etc.) still only applies at legal thresholds. When off, ID is only required above the legal threshold — sub-threshold transactions can complete without identifying the customer (legal minimum mode).</div>
         <F label="Tighten cash KYC trigger to:" type="number" value={settings.cashKycThreshold==null?"":String(settings.cashKycThreshold)} onChange={makeGatedTightenHandler("cashKycThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} — leave blank to use this. Triggers PEP / TFS / Risk-rating checks.</div>
         <F label="Tighten bullion CDD trigger to:" type="number" value={settings.bullionCddThreshold==null?"":String(settings.bullionCddThreshold)} onChange={makeGatedTightenHandler("bullionCddThreshold",THRESH.BULLION_CDD)} placeholder="Leave blank to use default"/>
