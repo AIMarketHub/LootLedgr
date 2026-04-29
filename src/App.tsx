@@ -616,7 +616,7 @@ export default function Loot(){
           txList={txList} setTxList={setTxList} setStock={setStock} purge={purge}
           spotLog={spotLog} blacklist={blacklist} setBlacklist={setBlacklist}
           settingsOpen={settingsOpen} toggleSection={toggleSection}
-          setShowSet={setShowSet} setAppUnlocked={setAppUnlocked}
+          setShowSet={setShowSet}
           withAdminGate={withAdminGate}
         />}
 

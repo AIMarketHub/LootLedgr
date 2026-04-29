@@ -30,7 +30,6 @@ import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {sS,fmtAUD} from "../lib/utils.js";
 import {APP_VERSION} from "../lib/constants.js";
-import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
@@ -79,20 +78,30 @@ export default function Settings({
   pop,
   txList,setTxList,setStock,purge,spotLog,blacklist,setBlacklist,
   settingsOpen,toggleSection,
-  setShowSet,setAppUnlocked,
+  setShowSet,
   withAdminGate,
 }){
   // Phase 2.7 follow-up batch 2 — adminGate wrapper. Falls through
   // to fn() when the gate isn't wired (defensive — same single-
   // operator dev posture as the rest of the helpers in this modal).
   const gate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
-  // Compliance Thresholds accordion — gated open. We run the gate
-  // ONLY when transitioning from collapsed → expanded; collapsing
-  // is a free toggle. This keeps the rest of toggleSection's
-  // accordions unchanged.
-  const toggleComplianceThresholds=()=>{
-    if(settingsOpen.compliancethresholds){toggleSection("compliancethresholds");return;}
-    gate("Open Compliance Thresholds — values can only be tightened, but viewing them is admin-only.",()=>toggleSection("compliancethresholds"));
+  // Compliance Thresholds — gate the VALUE-CHANGE action, not the
+  // accordion expand. Reading the section is free; the first
+  // attempt to mutate any threshold this Settings session prompts
+  // for the Admin PIN. After approval, edits flow until Settings
+  // closes (component unmount resets `thresholdsUnlocked`). Per-
+  // keystroke gating would be unusable; one prompt per session is
+  // the right grain.
+  const[thresholdsUnlocked,setThresholdsUnlocked]=useState(false);
+  const makeGatedTightenHandler=(key,legalMin)=>{
+    const inner=makeTightenHandler(setSettings,pop,key,legalMin);
+    return v=>{
+      if(thresholdsUnlocked){inner(v);return;}
+      gate("Modify compliance thresholds (tightening only).",()=>{
+        setThresholdsUnlocked(true);
+        inner(v);
+      });
+    };
   };
   // Phase 2.7.12 — test-data migration state. Loaded eagerly when
   // the Settings modal mounts so the Danger Zone status line is
@@ -182,7 +191,7 @@ export default function Settings({
   };
   useEffect(()=>{refreshMigStats();/* eslint-disable-next-line */},[]);
   return <>
-  <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
+  <Modal title="⚙ Settings" onClose={()=>setShowSet(false)} wide>
     {[
       ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
         <div style={{fontSize:10,color:T.muted,marginBottom:10}}>Priority: GoldAPI.io → Metals-API → Metals.Dev. All free. Manual override TTL is configurable in the Prices tab.</div>
@@ -266,13 +275,13 @@ export default function Settings({
       </div>],
       ["compliancethresholds","📋 Compliance Thresholds",<div style={{paddingBottom:14}}>
         <div style={{fontSize:10,color:T.muted,marginBottom:12}}>Phase 2.7 — override the legal trigger thresholds for the conditional compliance fields shown in the New Transaction flow. You can only TIGHTEN (lower the dollar value to demand checks earlier) — values above the legal minimum are rejected.</div>
-        <F label="Tighten cash KYC trigger to:" type="number" value={settings.cashKycThreshold==null?"":String(settings.cashKycThreshold)} onChange={makeTightenHandler(setSettings,pop,"cashKycThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <F label="Tighten cash KYC trigger to:" type="number" value={settings.cashKycThreshold==null?"":String(settings.cashKycThreshold)} onChange={makeGatedTightenHandler("cashKycThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} — leave blank to use this. Triggers PEP / TFS / Risk-rating checks.</div>
-        <F label="Tighten bullion CDD trigger to:" type="number" value={settings.bullionCddThreshold==null?"":String(settings.bullionCddThreshold)} onChange={makeTightenHandler(setSettings,pop,"bullionCddThreshold",THRESH.BULLION_CDD)} placeholder="Leave blank to use default"/>
+        <F label="Tighten bullion CDD trigger to:" type="number" value={settings.bullionCddThreshold==null?"":String(settings.bullionCddThreshold)} onChange={makeGatedTightenHandler("bullionCddThreshold",THRESH.BULLION_CDD)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.BULLION_CDD.toLocaleString()} — leave blank to use this. Triggers PEP / TFS / Risk-rating checks on bullion buys.</div>
-        <F label="Tighten Source-of-Funds trigger to:" type="number" value={settings.sourceOfFundsCashThreshold==null?"":String(settings.sourceOfFundsCashThreshold)} onChange={makeTightenHandler(setSettings,pop,"sourceOfFundsCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <F label="Tighten Source-of-Funds trigger to:" type="number" value={settings.sourceOfFundsCashThreshold==null?"":String(settings.sourceOfFundsCashThreshold)} onChange={makeGatedTightenHandler("sourceOfFundsCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
-        <F label="Tighten Source-of-Wealth trigger to:" type="number" value={settings.sourceOfWealthCashThreshold==null?"":String(settings.sourceOfWealthCashThreshold)} onChange={makeTightenHandler(setSettings,pop,"sourceOfWealthCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
+        <F label="Tighten Source-of-Wealth trigger to:" type="number" value={settings.sourceOfWealthCashThreshold==null?"":String(settings.sourceOfWealthCashThreshold)} onChange={makeGatedTightenHandler("sourceOfWealthCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:6}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
       </div>],
       ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
@@ -351,7 +360,7 @@ export default function Settings({
       </div>],
     ].map(([key,title,content])=>(
       <div key={key} style={{borderBottom:"1px solid "+T.border}}>
-        <button style={ABTN} onClick={()=>key==="compliancethresholds"?toggleComplianceThresholds():toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
+        <button style={ABTN} onClick={()=>toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
         {settingsOpen[key]&&content}
       </div>
     ))}
