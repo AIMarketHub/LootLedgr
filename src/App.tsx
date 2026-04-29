@@ -124,8 +124,18 @@ export default function Loot(){
   const[spotStatus,setSpotStatus]=useState("off");
   const[spotSource,setSpotSource]=useState("");
   const manualTs=useRef(0); // manual override resets on reload — API always tries fresh
-  const MANUAL_TTL=5*60*1000; // 5 min manual override — API resumes quickly
-  const isManualActive=()=>(Date.now()-manualTs.current)<MANUAL_TTL;
+  // Manual-override TTL is configurable via Settings → Spot Feed
+  // (Phase 2.7 smoke-test follow-up, 2026-04-29). "always" disables
+  // auto-expiry; the Refresh / Resume API button still cancels
+  // regardless. Computed each render so settings changes take effect
+  // without remounting.
+  const MANUAL_TTL_MAP={"1h":3600000,"6h":21600000,"12h":43200000,"24h":86400000};
+  const MANUAL_TTL=settings.manualPriceTTL==="always"?Infinity:(MANUAL_TTL_MAP[settings.manualPriceTTL]||3600000);
+  const isManualActive=()=>{
+    if(manualTs.current<=0)return false;
+    if(MANUAL_TTL===Infinity)return true;
+    return (Date.now()-manualTs.current)<MANUAL_TTL;
+  };
 
   // T is the live theme object (exported from theme.js as a clone of
   // LIGHT). Reset it to baseline LIGHT, then overlay contrast tweaks
@@ -505,7 +515,7 @@ export default function Loot(){
           />}
 
           {screen==="prices"&&<Prices
-            settings={settings} gSpot={gSpot} sSpot={sSpot} catalog={catalog}
+            settings={settings} setSettings={setSettings} gSpot={gSpot} sSpot={sSpot} catalog={catalog}
             spotStatus={spotStatus} spotSource={spotSource} apiError={apiError}
             manualTs={manualTs} MANUAL_TTL={MANUAL_TTL}
             setShowCat={setShowCat} setGSpotManual={setGSpotManual} setSSpotManual={setSSpotManual} forceResumeAPI={forceResumeAPI}
