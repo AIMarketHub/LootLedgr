@@ -205,7 +205,7 @@ export function getRequiredFields(tx,settings){
   // regardless of value, separate from the threshold-driven KYC
   // fields below. Toggle in Settings → Compliance Thresholds.
   const requireIdEveryTx=settings==null||settings.requireIdOnEveryTx!==false;
-  if(requireIdEveryTx)fields.push("name","idType","idNumber");
+  if(requireIdEveryTx)fields.push("fullName","idType","idNumber");
   if(kycRequired)fields.push("pepCheck","tfsCheck","riskRating");
   if(cashTotal>=sofMin)fields.push("sourceOfFunds");
   if(cashTotal>=sowMin)fields.push("sourceOfWealth");

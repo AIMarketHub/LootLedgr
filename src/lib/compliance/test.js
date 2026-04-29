@@ -37,7 +37,7 @@ export function checkCompliance(items,payment){
 // threshold-driven KYC fields). Default ON, same as au.js.
 export function getRequiredFields(_tx,settings){
   const requireIdEveryTx=settings==null||settings.requireIdOnEveryTx!==false;
-  return requireIdEveryTx?["name","idType","idNumber"]:[];
+  return requireIdEveryTx?["fullName","idType","idNumber"]:[];
 }
 
 // Fake unit price — always $1.

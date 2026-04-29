@@ -296,7 +296,27 @@ export default function Loot(){
   // tx.client even if no live client record exists. So a Supabase
   // hiccup at finalize doesn't block the tx; clientId may be null.
   const finalize=async()=>{
-    if(!client.fullName||!client.dob||!client.address||!client.idType||!client.idNumber){pop("Client form incomplete.","err");return;}
+    // Phase 2.7 follow-up — required-field gate is driven by
+    // getRequiredFields(tx, settings). When settings.requireIdOnEveryTx
+    // is on (default), the dedupe-minimum trio (fullName / idType /
+    // idNumber) is in the required set regardless of value. KYC fields
+    // (pepCheck / tfsCheck / riskRating / sourceOfFunds / sourceOfWealth)
+    // are added at the legal thresholds. Below threshold + toggle off →
+    // empty required set → finalisation proceeds without ID (legal-
+    // minimum mode). The specific ID error message fires only when the
+    // ID minimums are missing, so the dealer gets a useful pointer
+    // instead of a generic "incomplete" toast.
+    const finalizeReq=getRequiredFields({payment:txPay,buyTotal,items:txItems},settings);
+    const finalizeMissing=finalizeReq.filter(k=>{const v=client[k];return v==null||String(v).trim()==="";});
+    if(finalizeMissing.length>0){
+      const idMin=["fullName","idType","idNumber"];
+      if(finalizeMissing.some(k=>idMin.includes(k))){
+        pop("ID type and ID number required — this shop sights ID on every transaction. Capture via the photo flow or fill in manually.","err");
+      }else{
+        pop("Compliance fields incomplete: "+finalizeMissing.join(", "),"err");
+      }
+      return;
+    }
     if(!idSighted){pop("Staff must confirm ID sighted.","err");return;}
     if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}
     const now=nowISO(),realInv=makeInv();
