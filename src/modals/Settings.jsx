@@ -35,6 +35,18 @@ import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import AdminPinSetup from "./AdminPinSetup.jsx";
+import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
+
+// 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
+// against decrypt that for some reason returned an unexpected
+// length — show whatever came back.
+function formatPassphrase(s){
+  const c=String(s||"").replace(/[\s-]+/g,"");
+  const out=[];
+  for(let i=0;i<c.length;i+=4)out.push(c.slice(i,i+4));
+  return out.join("-");
+}
+function isValidPin(s){return /^\d{4,12}$/.test(String(s||""));}
 import {THRESH} from "../lib/compliance/index.js";
 import {clients} from "../lib/clients.js";
 import {analyzeMigrationTargets,runTestDataMigration} from "../lib/clientsMigration.js";
@@ -92,6 +104,49 @@ export default function Settings({
   // dedicated modal triggered from the Require-PIN toggle. Toggle
   // does not flip until the modal completes.
   const[showAdminSetup,setShowAdminSetup]=useState(false);
+  // Show / Change PIN modals — both gated by the Admin gate on the
+  // outer click. The result modals are unconditional once the gate
+  // approves, so we don't need a separate "open after PIN" plumb;
+  // the gate's onApproved callback is the trigger.
+  const[passphraseShown,setPassphraseShown]=useState(null);
+  const[changePinOpen,setChangePinOpen]=useState(false);
+  const[newPin,setNewPin]=useState("");
+  const[newPinConfirm,setNewPinConfirm]=useState("");
+  const[changePinBusy,setChangePinBusy]=useState(false);
+  const onShowPassphrase=()=>gate("Reveal recovery passphrase.",async()=>{
+    const pp=await decryptPassphrase(settings.adminRecoveryPassphraseEncrypted,settings.staffPin,settings.adminRecoverySalt);
+    if(pp==null){
+      pop("Could not decrypt the passphrase. The recovery bundle may be corrupt — see the handover doc for the manual reset path.","err");
+      return;
+    }
+    setPassphraseShown(pp);
+  });
+  const onChangePinClick=()=>gate("Change Admin PIN.",()=>{
+    setNewPin("");
+    setNewPinConfirm("");
+    setChangePinOpen(true);
+  });
+  const doChangePin=async()=>{
+    if(!isValidPin(newPin)||newPin!==newPinConfirm){pop("PIN must be 4–12 digits and match the confirmation.","warn");return;}
+    setChangePinBusy(true);
+    try{
+      const pp=await decryptPassphrase(settings.adminRecoveryPassphraseEncrypted,settings.staffPin,settings.adminRecoverySalt);
+      if(pp==null){pop("Could not re-encrypt — old PIN appears stale. Try Forgot PIN on the lock screen.","err");return;}
+      const ct=await encryptPassphrase(pp,newPin,settings.adminRecoverySalt);
+      setSettings(p=>({...p,staffPin:newPin,adminRecoveryPassphraseEncrypted:ct}));
+      setChangePinOpen(false);
+      pop("Admin PIN updated. Recovery passphrase re-encrypted with the new PIN.","ok");
+    }catch(e){
+      pop("Change failed: "+sS(e&&e.message),"err");
+    }finally{setChangePinBusy(false);}
+  };
+  const copyPassphrase=async()=>{
+    if(!passphraseShown)return;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      try{await navigator.clipboard.writeText(formatPassphrase(passphraseShown));pop("Passphrase copied.","ok");}
+      catch(_){pop("Copy failed.","warn");}
+    }
+  };
   const refreshMigStats=async()=>{
     setMigLoading(true);
     try{
@@ -104,6 +159,24 @@ export default function Settings({
   useEffect(()=>{refreshMigStats();/* eslint-disable-next-line */},[]);
   return <>
     {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
+    {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
+      <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
+      <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        <button style={c.bsm(T.goldBg,T.gold)} onClick={copyPassphrase}>📋 Copy</button>
+        <button style={c.btn(T.gold,T.bg)} onClick={()=>setPassphraseShown(null)}>Done</button>
+      </div>
+      <div style={{fontSize:10,color:T.muted,marginTop:10}}>The passphrase is forgotten when this modal closes. Re-open Show Recovery Passphrase if you need it again.</div>
+    </Modal>}
+    {changePinOpen&&<Modal title="🔄 Change Admin PIN" onClose={()=>!changePinBusy&&setChangePinOpen(false)}>
+      <div style={{...c.bnr("info"),marginBottom:14}}>Setting a new Admin PIN re-encrypts the recovery passphrase under the new PIN. The passphrase itself does not change.</div>
+      <F label="New Admin PIN (4–12 digits)" type="password" value={newPin} onChange={setNewPin} required/>
+      <F label="Confirm New PIN" type="password" value={newPinConfirm} onChange={setNewPinConfirm} required note={newPin&&newPinConfirm&&newPin!==newPinConfirm?"PINs do not match.":undefined}/>
+      <div style={{display:"flex",gap:10,marginTop:10}}>
+        <button style={c.btn(isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.gold:T.border,isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.bg:T.muted)} disabled={!(isValidPin(newPin)&&newPin===newPinConfirm)||changePinBusy} onClick={doChangePin}>{changePinBusy?"Re-encrypting…":"Save New PIN"}</button>
+        <button style={c.bsm()} onClick={()=>setChangePinOpen(false)} disabled={changePinBusy}>Cancel</button>
+      </div>
+    </Modal>}
   <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
     {[
       ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
@@ -178,6 +251,11 @@ export default function Settings({
         }}/>Require PIN to open app</label>
         <F label="Admin PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))} note="Master key — unlocks the app when the toggle above is on, and overrides any per-staff PIN."/>
         <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
+        {settings.adminRecoveryPassphraseHash?<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+          <button style={c.bsm()} onClick={onShowPassphrase}>👁 Show Recovery Passphrase</button>
+          <button style={c.bsm()} onClick={onChangePinClick}>🔄 Change Admin PIN</button>
+        </div>:<div style={{fontSize:10,color:T.muted,marginTop:8}}>Show / change buttons appear after first-time setup completes.</div>}
+        {settings.adminRecoveryPassphraseHash&&<F label="Recovery phone" value={settings.adminRecoveryPhone||""} onChange={v=>setSettings(p=>({...p,adminRecoveryPhone:v}))} placeholder="+61400000000" note="Reserved for SMS-based PIN recovery. SMS branch lands in Phase 3 — Phase-3 gate will require the Admin PIN to change this field. For now the field is plain editable."/>}
       </div>],
       ["policehelp","🆘 Police Help — Duress Alerts",<div style={{paddingBottom:14}}>
         <div style={c.bnr("warn")}>The POLICE HELP button on the dashboard sends silent SMS alerts to all configured contacts. Never disclose this to potential offenders.</div>
