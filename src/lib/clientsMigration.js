@@ -2,8 +2,8 @@
 // Phase 2.7.12. Walks txList, finds transactions without
 // tx.clientId but with tx.client.idNumber, dedupes by idNumber,
 // creates client records (isTest=true) or links to existing ones,
-// and persists tx.clientId back through sb.saveTx so the linkage
-// survives a page reload.
+// and persists tx.clientId via setTxList + sb.saveTx so the
+// linkage survives a page reload.
 //
 // Surfaces as a button in Settings → Danger Zone:
 //   "Migrate test transactions to client records (one-time)"
@@ -16,9 +16,9 @@
 //   alreadyLinked).
 // - txs with no tx.client.idNumber are skipped (no dedupe key
 //   available — would create unidentifiable orphan clients).
-// - within one run, an in-memory map (seenIds) prevents duplicate
-//   client creates when multiple txs share an idNumber and the
-//   second lookup hasn't seen the just-created row yet.
+// - within one run, an in-memory map (idNumberToClientId) prevents
+//   duplicate client creates when multiple txs share an idNumber
+//   and the second lookup hasn't seen the just-created row yet.
 // - re-running after a successful migration just reports "0
 //   transactions awaiting migration"; no records change.
 //
@@ -36,6 +36,31 @@
 // per touched client. This overrides whatever counts were in
 // place — treats the migration as authoritative for test-data
 // derived counts.
+//
+// === Defensive rewrite (2026-04-29) ===
+//
+// The earlier shape built a local `updated` array, mutated entries
+// in place, called `setTxList(updated)` once at the end, and per-tx
+// `sb.saveTx(updatedTx)` inline. A user-reported bug surfaced 0 of
+// 8 transactions actually carrying tx.clientId in localStorage
+// after a successful-looking run. The likely contributors were:
+//   - positional setTxList(updated) replaces React state with the
+//     closure-captured snapshot, which can clobber concurrent
+//     updates from other code paths;
+//   - per-tx Supabase saveTx during the loop hits the known
+//     ?on_conflict=id 400 issue, so a later page reload that
+//     re-pulls from Supabase reverts the local state;
+//   - clientId resolution didn't validate non-empty truthy strings,
+//     so a malformed Supabase response could silently set
+//     `clientId: undefined` and still bump `result.linked`.
+//
+// This rewrite (a) builds a tx.id → clientId map without mutating
+// anything during the loop, (b) validates each clientId is a
+// non-empty string, (c) applies the linkage via functional
+// setState so the merge happens against current React state at
+// apply time, (d) mirrors to Supabase AFTER the local merge so a
+// reload picks up the linked state, (e) returns counters that
+// reflect what was actually written.
 
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./clients.js";
 import {sb} from "./storage.js";
@@ -52,24 +77,35 @@ export function analyzeMigrationTargets(txList,existingClients){
   };
 }
 
+// Defensive: only treat strings of meaningful length as a real id.
+// Guards against `undefined` / `null` / `""` slipping through from a
+// malformed Supabase response into `clientId: …` writes.
+function isUsableId(v){
+  return typeof v==="string"&&v.trim().length>0;
+}
+
 export async function runTestDataMigration({txList,setTxList}){
   const result={linked:0,created:0,alreadyLinked:0,skipped:0,errors:[]};
-  const updated=[...(txList||[])];
-  // idNumber → resolved clientId, populated as we go to dedupe
-  // within the run when multiple txs share an idNumber.
-  const seenIds=new Map();
+  const list=Array.isArray(txList)?txList:[];
 
-  for(let i=0;i<updated.length;i++){
-    const tx=updated[i];
+  // idNumber → clientId, populated as we resolve. Dedupes within
+  // the run so two txs sharing an idNumber don't both create.
+  const idNumberToClientId=new Map();
+  // tx.id → clientId, the planned linkages. Built in this loop;
+  // applied as a single React state update below.
+  const txIdToClientId=new Map();
+
+  for(const tx of list){
+    if(!tx)continue;
     if(tx.clientId){result.alreadyLinked++;continue;}
     if(!tx.client||!tx.client.idNumber){result.skipped++;continue;}
     const idNum=tx.client.idNumber;
 
     try{
-      let clientId=seenIds.get(idNum);
+      let clientId=idNumberToClientId.get(idNum);
       if(!clientId){
         const existing=await clients.getByIdNumber(idNum);
-        if(existing){
+        if(existing&&isUsableId(existing.id)){
           clientId=existing.id;
         }else{
           const recordFields=pickClientRecordFields({
@@ -81,32 +117,78 @@ export async function runTestDataMigration({txList,setTxList}){
             txCount:0,
           });
           const created=await clients.create(recordFields);
-          if(!created){
-            result.errors.push({tx:tx.id,msg:"create failed"});
+          if(!created||!isUsableId(created.id)){
+            result.errors.push({tx:tx.id,msg:"client create failed (no id returned)"});
             continue;
           }
           clientId=created.id;
           result.created++;
         }
-        seenIds.set(idNum,clientId);
+        idNumberToClientId.set(idNum,clientId);
       }
-
-      const updatedTx={...tx,clientId};
-      updated[i]=updatedTx;
-      try{await sb.saveTx(updatedTx);}catch(e){
-        result.errors.push({tx:tx.id,msg:"tx save failed: "+(e&&e.message||"unknown")});
+      if(!isUsableId(clientId)){
+        result.errors.push({tx:tx.id,msg:"clientId resolution returned empty"});
+        continue;
       }
+      txIdToClientId.set(tx.id,clientId);
       result.linked++;
     }catch(e){
       result.errors.push({tx:tx.id,msg:e&&e.message||"unknown"});
     }
   }
 
+  // Apply linkages. Functional setTxList so the merge runs against
+  // whatever React's current txList is at apply time, not a snapshot
+  // we captured at function entry. The matching is by tx.id, which
+  // is stable across the lifetime of a transaction. Untouched txs
+  // (already linked, skipped, errored) pass through by reference.
+  let mergedList=null;
+  if(txIdToClientId.size>0){
+    const applyMerge=prev=>{
+      const out=(prev||[]).map(t=>{
+        if(!t||t.clientId)return t;
+        const cid=txIdToClientId.get(t.id);
+        return isUsableId(cid)?{...t,clientId:cid}:t;
+      });
+      return out;
+    };
+    setTxList(prev=>{
+      const out=applyMerge(prev);
+      mergedList=out;
+      return out;
+    });
+    // Belt-and-braces: if React happens to defer the updater
+    // (extremely unlikely for useState, but the merge logic is the
+    // same against `list`), have a copy ready for the Supabase
+    // mirror + backfill.
+    if(!mergedList)mergedList=applyMerge(list);
+  }
+
+  // Mirror linked txs to Supabase. Done AFTER the local merge so a
+  // page reload that re-pulls loadTxList() picks up the linkage.
+  // Failures don't change the counters — local state is the
+  // primary write; Supabase is the durable echo. The known 400 on
+  // ?on_conflict=id upserts is logged in errors so the toast can
+  // surface it without blocking the success path.
+  if(mergedList){
+    for(const tx of mergedList){
+      if(!txIdToClientId.has(tx.id))continue;
+      try{
+        const r=await sb.saveTx(tx);
+        if(r==null)result.errors.push({tx:tx.id,msg:"Supabase saveTx returned null (likely on_conflict 400)"});
+      }catch(e){
+        result.errors.push({tx:tx.id,msg:"Supabase saveTx threw: "+(e&&e.message||"unknown")});
+      }
+    }
+  }
+
   // Backfill txCount + most-recent lastTxAt per touched client.
+  // Walk the merged result so already-linked txs from earlier runs
+  // also count correctly toward each client's totals.
   const linkCounts=new Map();
   const linkLastTxAt=new Map();
-  for(const tx of updated){
-    if(!tx.clientId)continue;
+  for(const tx of (mergedList||list)){
+    if(!tx||!tx.clientId)continue;
     linkCounts.set(tx.clientId,(linkCounts.get(tx.clientId)||0)+1);
     const t=tx.date?new Date(tx.date).getTime():0;
     if(t>(linkLastTxAt.get(tx.clientId)||0))linkLastTxAt.set(tx.clientId,t);
@@ -121,6 +203,5 @@ export async function runTestDataMigration({txList,setTxList}){
     }catch(_){/* swallow — orphan-clientId acceptable */}
   }
 
-  if(result.linked>0)setTxList(updated);
   return result;
 }
