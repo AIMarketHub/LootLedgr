@@ -1,0 +1,51 @@
+TOPIC: Capturing a new client (three methods + same-name dismissal)
+WHEN TO USE: When the customer is new, when ClientSearch returns a match that is NOT the person in front of you, when an Australian licence won't autofill cleanly, or when the customer is a tourist with a foreign passport.
+
+PROCEDURE:
+  1. Always START with ClientSearch. Type any of name, ID number,
+     phone, address, email. Hit Search.
+  2. Review the result(s). Three shapes:
+       0 matches → "Create New Client" button. Click it.
+       1 match  → confirmation card with two buttons:
+                  "✓ Yes, this is them" loads the existing record.
+                  "✗ Not them — create new" opens the capture
+                  selector for a same-name-different-person.
+       N matches → grid of cards. Each has ✓ This one and ✗.
+                   ✗ on any card jumps to create-new.
+  3. Create New Client opens the capture-method panel. Pick one:
+       📷 Capture with camera — AU licences, autofill via vision.
+       📁 Upload photo — photo lives on a phone or other device,
+                          same autofill, different source.
+       ✍ Add manually — tourist passports, foreign IDs, autofill
+                         misfires. SKIPS autofill; type every field.
+  4. The client form opens. Fill in or correct fields. Middle name
+     is optional but strongly encouraged — it is what distinguishes
+     two same-named-different-people on the next search.
+  5. Continue through the rest of NewTx — privacy ack, signature,
+     finalise. Manual-entry transactions have no ID photo on file;
+     that is the trade-off for being able to serve tourists.
+
+EDGE CASES:
+  - Same first + last name as an existing record: use ✗ Not them,
+    capture middleName, two records coexist legitimately.
+  - Tourist passport: the vision provider is tuned for AU licences
+    and will return rubbish on foreign documents. Use Add manually.
+  - Camera on desktop with no webcam: browser falls back to a file
+    picker. Pick Upload photo to be explicit instead.
+
+COMMON MISTAKES:
+  - Skipping ClientSearch and going straight to + Create New.
+    Creates duplicate records. Always search first.
+  - Auto-confirming a match without checking the address / phone /
+    last visit on the confirmation card. Read before ✓.
+  - Forgetting middleName on a same-named record. Next search
+    returns both with no way to tell them apart at a glance.
+  - Using camera / autofill on a foreign passport and being
+    surprised when the result is gibberish. Manual is the right
+    tool for non-AU IDs.
+
+RELATED TOPICS:
+  - "Sophiie - PIN recovery.txt" — companion training file.
+  - "Sophiie - client transaction history.txt" — companion file.
+  - "Sophiie - require ID on every transaction.txt" — the shop
+    policy that mandates ID capture on every transaction.
