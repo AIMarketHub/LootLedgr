@@ -1,0 +1,54 @@
+TOPIC: AI Agent settings (Sophiie integration)
+WHEN TO USE: When staff opens Settings, sees the AI Agent toggle, and asks what it does, why nothing happens after enabling it, or what Level 1 vs Level 2 means.
+
+PROCEDURE:
+  1. Confirm the staff is in Settings, AI Agent section.
+  2. Explain that the toggle ("Enable AI Agent indicator") is the master switch.
+  3. Explain the Agent Name field — purely cosmetic, the label printed
+     next to the indicator dot. Default is "Sophiie".
+  4. Explain the Agent URL field — this is the provider connection.
+     Until a real Sophiie endpoint is configured here, the indicator
+     dot will NOT appear anywhere in the app even if the toggle is on.
+     This is intentional: a flickering dot for an agent that does
+     nothing creates clutter and false expectations.
+  5. Explain the Level dropdown:
+       Level 1 — AI chat (blue dot)
+         The agent is connected and listening to staff. Staff can
+         type a question and get an answer in chat form. The agent
+         does NOT take actions inside LootLedger on its own.
+       Level 2 — AI app handling (amber dot)
+         The agent is permitted to take actions inside the app —
+         search clients, look up stock, draft compliance fields,
+         start a transaction, etc. This is a higher-trust mode and
+         should only be selected once the dealer has a clear
+         understanding of what Sophiie can and cannot do.
+  6. Note that Sophiie integration is the FINAL roadmap step,
+     after the basic app is released. Configuring URL + Level today
+     is fine — values persist — but no traffic flows until Sophiie
+     is subscribed to and the URL is real.
+
+EDGE CASES:
+  - Toggle on, URL blank: indicator dot is correctly suppressed.
+    Staff may report "the toggle does nothing" — this is the gate.
+  - Level changed mid-session: takes effect on next render. No need
+    to reload.
+  - Agent Name with non-ASCII characters: stored verbatim, displayed
+    in the tooltip. No length limit but stick to short labels.
+  - Test Connection: not provided yet (no probe endpoint contract
+    locked). Lands when Sophiie is subscribed.
+
+COMMON MISTAKES:
+  - Treating Level 2 as the default. Start at Level 1 until trust
+    is established. The amber dot is deliberately attention-getting.
+  - Filling Agent URL with a chat-UI link instead of an API endpoint.
+    The URL field is for the LLM gateway / agent webhook, not the
+    Sophiie web dashboard.
+  - Pasting a key into the URL field. There is no separate key
+    field yet (the key lives at the gateway). Do not embed credentials
+    in the URL.
+
+RELATED TOPICS:
+  - "AIGhost indicator placement" — where the dot appears in the UI.
+  - "ID autofill provider settings" — the same provider-abstraction
+    pattern, applied to ID OCR.
+  - "Phase 3 staff auth" — when per-staff PINs start gating Level 2.
