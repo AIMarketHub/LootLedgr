@@ -33,8 +33,10 @@ export default function LogoManager({
   logoDel,setLogoDel,
   pop,
   logoPinMode,setLogoPinMode,
+  withAdminGate,
 }){
   if(!logoPinMode)return null;
+  const gate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
   return <div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setLogoPinMode(false)}>
     <div style={{...c.card({padding:24}),maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
       <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:16}}>🖼 Logo Manager</div>
@@ -45,7 +47,7 @@ export default function LogoManager({
           {logoDel&&<div style={{...c.bnr("warn"),marginBottom:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <img src={logoDel.data} alt="" style={{width:32,height:32,borderRadius:"50%",objectFit:"cover",flexShrink:0}}/>
             <span style={{flex:1,minWidth:140,fontSize:12}}>Delete this image? This cannot be undone.</span>
-            <button style={c.btn(T.red,T.white,{fontSize:11,padding:"6px 12px"})} onClick={()=>{const wasActive=settings.logoImg===logoDel.data;setLogoLib(p=>p.filter(x=>x.id!==logoDel.id));if(wasActive)setSettings(p=>({...p,logoImg:""}));pop("Logo deleted.","ok");setLogoDel(null);}}>Delete</button>
+            <button style={c.btn(T.red,T.white,{fontSize:11,padding:"6px 12px"})} onClick={()=>gate("Delete logo image. This cannot be undone.",()=>{const wasActive=settings.logoImg===logoDel.data;setLogoLib(p=>p.filter(x=>x.id!==logoDel.id));if(wasActive)setSettings(p=>({...p,logoImg:""}));pop("Logo deleted.","ok");setLogoDel(null);})}>Delete</button>
             <button style={c.bsm()} onClick={()=>setLogoDel(null)}>Cancel</button>
           </div>}
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>

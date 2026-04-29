@@ -39,7 +39,7 @@ function ReadField({label,value}){
   </div>;
 }
 
-export default function ClientDetail({client,onSave,onClose,pop}){
+export default function ClientDetail({client,onSave,onClose,pop,withAdminGate}){
   const[editing,setEditing]=useState(false);
   const[form,setForm]=useState({});
   const[showGate,setShowGate]=useState(false);
@@ -47,12 +47,22 @@ export default function ClientDetail({client,onSave,onClose,pop}){
 
   if(!client)return null;
 
-  const startEdit=()=>{setForm({...client});setEditing(true);};
+  // Phase 2.7 follow-up batch 2 — Admin-PIN wrapper. Falls through
+  // when withAdminGate isn't wired (defensive — existing callers).
+  const adminGate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
+  const startEdit=()=>{
+    adminGate("Edit client record: "+sS(client.fullName||"(no name)"),()=>{
+      setForm({...client});
+      setEditing(true);
+    });
+  };
   const cancelEdit=()=>{setEditing(false);setShowGate(false);};
 
   const trySave=()=>{
-    if(getMissingMandatoryFields(form).length===0)doSave();
-    else setShowGate(true);
+    adminGate("Save client record: "+sS(form.fullName||client.fullName||"(no name)"),()=>{
+      if(getMissingMandatoryFields(form).length===0)doSave();
+      else setShowGate(true);
+    });
   };
 
   const doSave=async()=>{
@@ -95,7 +105,7 @@ export default function ClientDetail({client,onSave,onClose,pop}){
     a.click();
   };
 
-  const erasePhoto=async()=>{
+  const erasePhotoImpl=async()=>{
     if(typeof window!=="undefined"&&window.confirm&&!window.confirm("Erase the ID photo on file? This cannot be undone."))return;
     setBusy(true);
     try{
@@ -103,6 +113,7 @@ export default function ClientDetail({client,onSave,onClose,pop}){
       if(updated){onSave&&onSave(updated);pop&&pop("Photo erased.","ok");}
     }finally{setBusy(false);}
   };
+  const erasePhoto=()=>adminGate("Erase ID photo for: "+sS(client.fullName||"(no name)"),erasePhotoImpl);
 
   const lastVisit=formatLastVisit(client);
   const missing=editing?getMissingMandatoryFields(form):[];

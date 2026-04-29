@@ -35,12 +35,19 @@ export default function Staff({
   staffForm,setStaffForm,
   activeStaff,setActiveStaff,
   pop,setShowStaff,
+  withAdminGate,
 }){
   const[editId,setEditId]=React.useState(null);
   const[editForm,setEditForm]=React.useState({});
-  const startEdit=s=>{setEditId(s.id);setEditForm({name:s.name||"",role:s.role||"",pin:s.pin||""});};
+  const gate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
+  const startEdit=s=>{
+    gate("Edit staff member: "+sS(s.name||"(no name)"),()=>{
+      setEditId(s.id);
+      setEditForm({name:s.name||"",role:s.role||"",pin:s.pin||""});
+    });
+  };
   const cancelEdit=()=>{setEditId(null);setEditForm({});};
-  const saveEdit=()=>{
+  const saveEditImpl=()=>{
     if(!editForm.name){pop("Name required.","warn");return;}
     const pin=normalizePin(editForm.pin);
     if(pin===null){pop("PIN must be 4–6 digits, or blank.","warn");return;}
@@ -48,7 +55,8 @@ export default function Staff({
     cancelEdit();
     pop("Staff member updated.","ok");
   };
-  const addStaff=()=>{
+  const saveEdit=()=>gate("Save staff member: "+sS(editForm.name||"(no name)"),saveEditImpl);
+  const addStaffImpl=()=>{
     if(!staffForm.name){pop("Name required.","warn");return;}
     const pin=normalizePin(staffForm.pin);
     if(pin===null){pop("PIN must be 4–6 digits, or blank.","warn");return;}
@@ -56,6 +64,11 @@ export default function Staff({
     setStaffForm({});
     pop("Staff member added.","ok");
   };
+  const addStaff=()=>gate("Add staff member: "+sS(staffForm.name||"(no name)"),addStaffImpl);
+  const deleteStaff=s=>gate("Delete staff member: "+sS(s.name||"(no name)"),()=>{
+    setStaffList(p=>p.filter(x=>x.id!==s.id));
+    pop("Staff member deleted.","ok");
+  });
   return <Modal title="👥 Staff" onClose={()=>setShowStaff(false)}>
     <div style={{marginBottom:14}}>
       <div style={c.g2(10)}>
@@ -89,7 +102,7 @@ export default function Staff({
       </div>
       <div style={{display:"flex",gap:6}}>
         <button style={c.bsm()} onClick={()=>startEdit(s)}>Edit</button>
-        <button style={c.bsm(T.redBg,T.red)} onClick={()=>setStaffList(p=>p.filter(x=>x.id!==s.id))}>🗑</button>
+        <button style={c.bsm(T.redBg,T.red)} onClick={()=>deleteStaff(s)}>🗑</button>
       </div>
     </div>)}
   </Modal>;

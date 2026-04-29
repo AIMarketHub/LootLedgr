@@ -67,7 +67,20 @@ export default function Settings({
   txList,setTxList,setStock,purge,spotLog,blacklist,setBlacklist,
   settingsOpen,toggleSection,
   setShowSet,setAppUnlocked,
+  withAdminGate,
 }){
+  // Phase 2.7 follow-up batch 2 — adminGate wrapper. Falls through
+  // to fn() when the gate isn't wired (defensive — same single-
+  // operator dev posture as the rest of the helpers in this modal).
+  const gate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
+  // Compliance Thresholds accordion — gated open. We run the gate
+  // ONLY when transitioning from collapsed → expanded; collapsing
+  // is a free toggle. This keeps the rest of toggleSection's
+  // accordions unchanged.
+  const toggleComplianceThresholds=()=>{
+    if(settingsOpen.compliancethresholds){toggleSection("compliancethresholds");return;}
+    gate("Open Compliance Thresholds — values can only be tightened, but viewing them is admin-only.",()=>toggleSection("compliancethresholds"));
+  };
   // Phase 2.7.12 — test-data migration state. Loaded eagerly when
   // the Settings modal mounts so the Danger Zone status line is
   // accurate as soon as the user scrolls down.
@@ -139,7 +152,16 @@ export default function Settings({
         <SF label="Display Unit" value={settings.scaleUnit||"g"} onChange={v=>setSettings(p=>({...p,scaleUnit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"ozt",label:"Troy oz (ozt)"},{value:"oz",label:"Avoirdupois oz"}]}/>
       </div>],
       ["security","🔒 Security",<div style={{paddingBottom:14}}>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>setSettings(p=>({...p,requirePin:e.target.checked}))}/>Require PIN to open app</label>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>{
+          const next=e.target.checked;
+          // Turning it OFF requires the current Admin PIN. Turning
+          // it ON is unguarded — nothing to authorise yet.
+          if(!next&&settings.requirePin){
+            gate("Disable Require-PIN gate. Removes the lock screen and unprotects every other Admin-gated action.",()=>setSettings(p=>({...p,requirePin:false})));
+          }else{
+            setSettings(p=>({...p,requirePin:next}));
+          }
+        }}/>Require PIN to open app</label>
         <F label="Admin PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))} note="Master key — unlocks the app when the toggle above is on, and overrides any per-staff PIN."/>
         <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
       </div>],
@@ -247,15 +269,15 @@ export default function Settings({
       </div>],
     ].map(([key,title,content])=>(
       <div key={key} style={{borderBottom:"1px solid "+T.border}}>
-        <button style={ABTN} onClick={()=>toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
+        <button style={ABTN} onClick={()=>key==="compliancethresholds"?toggleComplianceThresholds():toggleSection(key)}><span>{title}</span><span style={{fontSize:16,color:T.muted}}>{settingsOpen[key]?"▲":"▾"}</span></button>
         {settingsOpen[key]&&content}
       </div>
     ))}
     <div style={{marginTop:14,borderTop:"2px solid "+T.border,paddingTop:14}}>
       <div style={{fontSize:11,fontWeight:"bold",color:T.red,marginBottom:10}}>⚠ Danger Zone</div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        <button style={c.bsm(T.redBg,T.red)} onClick={()=>{if(window.confirm&&!window.confirm("Clear all transactions and stock? This cannot be undone."))return;setTxList([]);setStock([]);pop("All data cleared.","warn");}}>🗑 Clear All Data</button>
-        <button style={c.bsm(T.border,T.muted)} onClick={purge}>🧹 Purge Expired (7yr)</button>
+        <button style={c.bsm(T.redBg,T.red)} onClick={()=>gate("Clear ALL transactions and stock. This cannot be undone.",()=>{if(window.confirm&&!window.confirm("Clear all transactions and stock? This cannot be undone."))return;setTxList([]);setStock([]);pop("All data cleared.","warn");})}>🗑 Clear All Data</button>
+        <button style={c.bsm(T.border,T.muted)} onClick={()=>gate("Purge expired (7-year) records.",purge)}>🧹 Purge Expired (7yr)</button>
       </div>
 
       {/* Phase 2.7.12 — one-time test-data migration. Idempotent;
@@ -270,7 +292,7 @@ export default function Settings({
           <button
             style={c.bsm(T.goldBg,T.gold)}
             disabled={migBusy||migLoading||!migStats||migStats.pending===0}
-            onClick={async()=>{
+            onClick={()=>gate("Run one-time test-transaction migration ("+(migStats?migStats.pending:"?")+" tx awaiting).",async()=>{
               if(!migStats||migStats.pending===0)return;
               if(typeof window!=="undefined"&&window.confirm&&!window.confirm("Run the one-time test-transaction migration? Creates client records for unmigrated transactions and links them. Idempotent — safe to re-run."))return;
               setMigBusy(true);
@@ -282,7 +304,7 @@ export default function Settings({
               }catch(e){
                 pop("Migration failed: "+sS(e&&e.message),"err");
               }finally{setMigBusy(false);}
-            }}
+            })}
           >
             {migBusy?"Migrating…":"Migrate test transactions to client records (one-time)"}
           </button>

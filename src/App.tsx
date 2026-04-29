@@ -7,6 +7,7 @@ import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
+import {requireAdminPin} from "./lib/adminGate.js";
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
@@ -269,7 +270,14 @@ export default function Loot(){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
 
   const handleAddItem=()=>{if(!addProd||!addCalc){pop("Enter quantity or price.","warn");return;}setTxItems(p=>[...p,{id:uid(),mode:addMode,product:addProd,qty:addQtyN||1,unitPrice:addUnit,price:addCalc,note:addNote,holdUntil:addMode==="buy"?addHours(nowISO(),THRESH.HOLD_HOURS):null,policeHold:false}]);setAddQty("");setAddCustom("");setAddNote("");pop("Added: "+sS(addProd.label),"ok");};
-  const submitPin=()=>{if(!settings.staffPin){pop("No manager PIN set. Set one in Settings → Business.","warn");setPinModal(null);return;}if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}else{pop("Incorrect PIN.","err");setPinVal("");}};
+  const submitPin=()=>{if(!settings.staffPin){pop("No Admin PIN set. Set one in Settings → Security.","warn");setPinModal(null);return;}if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}else{pop("Incorrect PIN.","err");setPinVal("");}};
+  // Phase 2.7 follow-up batch 2 — single closure-bound gate helper
+  // shared with destructive call sites in the modals/screens.
+  // Wraps requireAdminPin so callers don't have to re-thread the
+  // four callback dependencies (settings/pop/setPinModal/setPinVal)
+  // every time. When settings.requirePin is false the gate is a
+  // pass-through, so single-operator dev mode stays frictionless.
+  const withAdminGate=(reason,fn)=>{requireAdminPin({reason,callbacks:{settings,pop,setPinModal,setPinVal},onApproved:fn});};
   const handleToCompliance=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
   // Phase 2.7.9a: gates the Payment → Compliance transition (step 2
   // → step 3 in the reordered flow). Drops the old kycDone block
@@ -403,8 +411,15 @@ export default function Loot(){
   const purge=()=>{const ex=(txList||[]).filter(t=>isExpired7yr(t.deleteAfter)),es=(stock||[]).filter(s=>isExpired7yr(s.deleteAfter));ex.forEach(t=>{if(t.photoKey)store.del(t.photoKey);});setTxList(p=>p.filter(t=>!isExpired7yr(t.deleteAfter)));setStock(p=>p.filter(s=>!isExpired7yr(s.deleteAfter)));pop(ex.length+es.length>0?"Purged "+ex.length+" tx + "+es.length+" stock items.":"Nothing to purge yet.","ok");};
   const dlTx=tx=>{const u=URL.createObjectURL(new Blob([makeTxt(tx)],{type:"text/plain"})),a=document.createElement("a");a.href=u;a.download=tx.id+"_"+sS(tx.client&&tx.client.fullName||"client").replace(/[^a-zA-Z0-9]/g,"_")+".txt";a.click();URL.revokeObjectURL(u);const ph=tx.photoKey?store.get(tx.photoKey,{}):{idPhoto:tx.idPhoto,itemPhotos:tx.itemPhotos};if(ph.idPhoto)setTimeout(()=>{const a2=document.createElement("a");a2.href=ph.idPhoto;a2.download=tx.id+"_id.jpg";a2.click();},300);if(ph.itemPhotos)Object.values(ph.itemPhotos).filter(Boolean).forEach((d,i)=>setTimeout(()=>{const a3=document.createElement("a");a3.href=d;a3.download=tx.id+"_item"+i+".jpg";a3.click();},(i+2)*300));};
   const dlBatch=()=>{const fr=cliFrom?new Date(cliFrom):new Date(0),to=cliTo?new Date(cliTo):new Date();to.setHours(23,59,59);const f=(txList||[]).filter(t=>{const d=new Date(t.date);return d>=fr&&d<=to;});if(!f.length){pop("No transactions in range.","warn");return;}f.forEach(dlTx);pop("Downloading "+f.length+" file(s).","ok");};
-  const saveProd=()=>{if(!newProd.label){pop("Product label required.","warn");return;}const prod={...newProd,id:(editProd&&editProd.id)||uid(),purity:newProd.purity!==""?parseFloat(newProd.purity):null,carat:newProd.carat!==""?parseFloat(newProd.carat):null,buyMult:newProd.buyMult!==""?parseFloat(newProd.buyMult):null,sellMult:newProd.sellMult!==""?parseFloat(newProd.sellMult):null,weightG:newProd.weightG!==""?parseFloat(newProd.weightG):null,buyMode:newProd.carat?"carat":null,active:true};if(editProd)setCatalog(prev=>prev.map(x=>x.id===editProd.id?prod:x));else setCatalog(prev=>[...prev,prod]);setEditProd(null);setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});pop("Product saved.","ok");};
-  const deleteProd=(id,label)=>{setCatalog(prev=>prev.filter(x=>x.id!==id));pop(sS(label)+" deleted.","ok");};
+  const saveProdImpl=()=>{if(!newProd.label){pop("Product label required.","warn");return;}const prod={...newProd,id:(editProd&&editProd.id)||uid(),purity:newProd.purity!==""?parseFloat(newProd.purity):null,carat:newProd.carat!==""?parseFloat(newProd.carat):null,buyMult:newProd.buyMult!==""?parseFloat(newProd.buyMult):null,sellMult:newProd.sellMult!==""?parseFloat(newProd.sellMult):null,weightG:newProd.weightG!==""?parseFloat(newProd.weightG):null,buyMode:newProd.carat?"carat":null,active:true};if(editProd)setCatalog(prev=>prev.map(x=>x.id===editProd.id?prod:x));else setCatalog(prev=>[...prev,prod]);setEditProd(null);setNewProd({cat:"Other",sub:"",type:"scrap",unit:"g",purity:"",carat:"",label:"",buyMult:"",sellMult:"",weightG:"",active:true});pop("Product saved.","ok");};
+  const deleteProdImpl=(id,label)=>{setCatalog(prev=>prev.filter(x=>x.id!==id));pop(sS(label)+" deleted.","ok");};
+  // Phase 2.7 follow-up batch 2 — Admin-gated wrappers handed to
+  // CatalogEditor in place of the raw saveProd / deleteProd. The
+  // editor stays unchanged; the gate is applied here so only one
+  // call site needs to know about it. Bypassed when requirePin is
+  // off (see adminGate.js).
+  const saveProd=()=>{if(!newProd.label){pop("Product label required.","warn");return;}withAdminGate((editProd?"Update product: ":"Add product: ")+sS(newProd.label),saveProdImpl);};
+  const deleteProd=(id,label)=>{withAdminGate("Delete catalog product: "+sS(label),()=>deleteProdImpl(id,label));};
   const exportPayload=()=>({exported:nowISO(),spots:{goldAUD_oz:gSpot,silverAUD_oz:sSpot},prices:{goldPerGram:fmt2(gSpot/TROY_OZ),goldBuy999PerG:fmt2(gSpot/TROY_OZ*0.9),alluvialBuyPerG:fmt2(gSpot/TROY_OZ*0.9),silverPerGram:fmt2(sSpot/TROY_OZ)},recentTransactions:(txList||[]).slice(0,5).map(t=>({contractNo:t.id,date:t.date,buy:t.buyTotal,sell:t.sellTotal,net:t.net}))});
 
   const locked=settings.requirePin&&!appUnlocked;
@@ -507,6 +522,7 @@ export default function Loot(){
             setCliNoteId={setCliNoteId} setCliNoteVal={setCliNoteVal}
             pop={pop}
             setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
+            withAdminGate={withAdminGate}
           />}
 
           {screen==="history"&&<History
@@ -591,6 +607,7 @@ export default function Loot(){
           spotLog={spotLog} blacklist={blacklist} setBlacklist={setBlacklist}
           settingsOpen={settingsOpen} toggleSection={toggleSection}
           setShowSet={setShowSet} setAppUnlocked={setAppUnlocked}
+          withAdminGate={withAdminGate}
         />}
 
         {showApi&&<ApiDiagnostics
@@ -617,6 +634,7 @@ export default function Loot(){
           staffForm={staffForm} setStaffForm={setStaffForm}
           activeStaff={activeStaff} setActiveStaff={setActiveStaff}
           pop={pop} setShowStaff={setShowStaff}
+          withAdminGate={withAdminGate}
         />}
 
         {cliNoteId&&<Modal title="📝 Client Note" onClose={()=>setCliNoteId(null)}>
@@ -636,7 +654,7 @@ export default function Loot(){
             <F label="Price Paid ($)" value={editStockVal.price||""} onChange={v=>setEditStockVal(p=>({...p,price:v}))} type="number"/>
           </div>
           <div style={{display:"flex",gap:10}}>
-            <button style={c.btn(T.gold)} onClick={()=>{setStock(p=>p.map(s=>s.id===editStockId?{...s,...editStockVal,weight_g:editStockVal.weight_g?parseFloat(editStockVal.weight_g):s.weight_g,price:editStockVal.price?parseFloat(editStockVal.price):s.price}:s));setEditStockId(null);pop("Stock item updated.","ok");}}>Save</button>
+            <button style={c.btn(T.gold)} onClick={()=>withAdminGate("Edit stock item: "+sS(editStockVal.description||editStockId),()=>{setStock(p=>p.map(s=>s.id===editStockId?{...s,...editStockVal,weight_g:editStockVal.weight_g?parseFloat(editStockVal.weight_g):s.weight_g,price:editStockVal.price?parseFloat(editStockVal.price):s.price}:s));setEditStockId(null);pop("Stock item updated.","ok");})}>Save</button>
             <button style={c.bsm()} onClick={()=>setEditStockId(null)}>Cancel</button>
           </div>
         </Modal>}
@@ -649,6 +667,7 @@ export default function Loot(){
           logoDel={logoDel} setLogoDel={setLogoDel}
           pop={pop}
           logoPinMode={logoPinMode} setLogoPinMode={setLogoPinMode}
+          withAdminGate={withAdminGate}
         />
 
         <Notif msg={notify&&notify.msg} type={notify&&notify.type} onClose={()=>setNotify(null)}/>
