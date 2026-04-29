@@ -62,6 +62,7 @@ const region={
     cashTTR:THRESH.CASH_TTR,
   },
   holdPeriodHours:THRESH.HOLD_HOURS,
+  THRESH,
   STATE_INFO,
   PRIVACY_NOTICE,
   checkCompliance,
