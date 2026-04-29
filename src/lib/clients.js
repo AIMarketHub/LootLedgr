@@ -82,7 +82,7 @@ export const isClientMandatoryComplete=c=>getMissingMandatoryFields(c).length===
 // shape but are NOT persisted in the clients table.
 
 export const CLIENT_RECORD_FIELDS=[
-  "fullName","dob","address","phone","email",
+  "fullName","middleName","dob","address","phone","email",
   "idType","idNumber","idPhoto",
   "pepCheck","tfsCheck","riskRating",
   "sourceOfFunds","sourceOfWealth",

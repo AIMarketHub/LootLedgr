@@ -70,10 +70,17 @@ export function analyzeMigrationTargets(txList,existingClients){
   const idNumbers=[...new Set(pending.map(tx=>tx.client.idNumber))];
   const existingIds=new Set((existingClients||[]).map(c=>c.idNumber).filter(Boolean));
   const newClientsToCreate=idNumbers.filter(id=>!existingIds.has(id));
+  // Legacy un-IDed transactions — pre-policy records with no
+  // idNumber. Cannot be migrated (no dedupe key); the badge in
+  // History / Clients / ClientDetail surfaces them. The status
+  // line uses this count to distinguish "nothing left to do" from
+  // "everything migrate-able is done; these will never link".
+  const legacyNoId=(txList||[]).filter(tx=>!tx.clientId&&!(tx.client&&tx.client.idNumber)).length;
   return{
     pending:pending.length,
     uniqueIdNumbers:idNumbers.length,
     newClientsToCreate:newClientsToCreate.length,
+    legacyNoId,
   };
 }
 

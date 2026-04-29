@@ -387,7 +387,7 @@ export default function Settings({
       <div style={{marginTop:18,paddingTop:14,borderTop:"1px solid "+T.border}}>
         <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:6}}>🔗 Client-record migration (one-time)</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:10,minHeight:16}}>
-          {migLoading?"Computing…":!migStats?"Stats unavailable.":migStats.pending===0?"✓ All transactions linked to client records.":(migStats.pending+" transaction"+(migStats.pending===1?"":"s")+" awaiting migration · "+migStats.newClientsToCreate+" new client record"+(migStats.newClientsToCreate===1?"":"s")+" to create.")}
+          {migLoading?"Computing…":!migStats?"Stats unavailable.":migStats.pending===0?(migStats.legacyNoId>0?"✓ All migrate-able transactions linked. "+migStats.legacyNoId+" legacy un-IDed transaction"+(migStats.legacyNoId===1?"":"s")+" remain (pre-policy).":"✓ All transactions linked to client records."):(migStats.pending+" transaction"+(migStats.pending===1?"":"s")+" awaiting migration · "+migStats.newClientsToCreate+" new client record"+(migStats.newClientsToCreate===1?"":"s")+" to create"+(migStats.legacyNoId>0?" · "+migStats.legacyNoId+" legacy un-IDed (cannot migrate)":"")+".")}
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <button

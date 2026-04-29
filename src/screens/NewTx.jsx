@@ -506,6 +506,7 @@ export default function NewTx({
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 3 — MY DETAILS</div>
           <div style={c.g2(10)}>
             <F label="Full Legal Name" required value={client.fullName} onChange={v=>setClient(p=>({...p,fullName:v}))}/>
+            <F label="Middle Name" value={client.middleName||""} onChange={v=>setClient(p=>({...p,middleName:v}))} note="Optional. Helps distinguish customers with the same first + last name."/>
             <F label="Date of Birth" required type="date" value={client.dob} onChange={v=>setClient(p=>({...p,dob:v}))}/>
             <F label="Phone Number" value={client.phone} onChange={v=>setClient(p=>({...p,phone:v}))}/>
             <F label="Residential Address" required value={client.address} onChange={v=>setClient(p=>({...p,address:v}))}/>

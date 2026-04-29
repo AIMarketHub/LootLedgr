@@ -201,6 +201,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
         <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>IDENTITY</div>
         {editing?<div style={c.g2(10)}>
           <F label="Full Legal Name" required value={form.fullName||""} onChange={v=>setForm(p=>({...p,fullName:v}))}/>
+          <F label="Middle Name" value={form.middleName||""} onChange={v=>setForm(p=>({...p,middleName:v}))} note="Optional. Helps distinguish customers with the same first + last name."/>
           <F label="Date of Birth" required type="date" value={form.dob||""} onChange={v=>setForm(p=>({...p,dob:v}))}/>
           <F label="Phone" value={form.phone||""} onChange={v=>setForm(p=>({...p,phone:v}))}/>
           <F label="Email" value={form.email||""} onChange={v=>setForm(p=>({...p,email:v}))}/>
@@ -209,6 +210,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
           <F label="ID Number" required value={form.idNumber||""} onChange={v=>setForm(p=>({...p,idNumber:v}))}/>
         </div>:<div>
           <ReadField label="Full Name" value={client.fullName}/>
+          {client.middleName&&<ReadField label="Middle Name" value={client.middleName}/>}
           <ReadField label="Date of Birth" value={client.dob}/>
           <ReadField label="Phone" value={client.phone}/>
           <ReadField label="Email" value={client.email}/>
