@@ -178,6 +178,7 @@ export default function Clients({
                 {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
                 {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR</span>}
                 {tx.clientId&&<span style={c.badge(T.gold,T.goldBg)}>🔗 LINKED</span>}
+                {tx.legacyNoId&&<span style={c.badge(T.muted)}>⚠ LEGACY UN-IDED</span>}
               </div>
               <div style={{fontSize:12,color:T.white}}>{fmtAUD(tx.buyTotal)} buy · {fmtAUD(tx.sellTotal)} sell</div>
               <div style={{fontSize:11,color:T.muted,marginTop:2}}>{fmtDate(tx.date)} · {sS(tx.payment).toUpperCase()}</div>

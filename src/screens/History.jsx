@@ -31,6 +31,7 @@ export default function History({
               {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" FILED":" PENDING"}</span>}
               {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
               {tx.voided&&<span style={c.badge(T.muted)}>VOIDED</span>}
+              {tx.legacyNoId&&<span style={c.badge(T.muted)}>⚠ LEGACY UN-IDED</span>}
             </div>
             <div style={{fontSize:13,color:T.white,fontWeight:500,marginBottom:3}}>{sS(tx.client&&tx.client.fullName||"—")}</div>
             <div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:12,color:T.muted}}>

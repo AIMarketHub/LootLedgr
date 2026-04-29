@@ -95,10 +95,21 @@ export async function runTestDataMigration({txList,setTxList}){
   // applied as a single React state update below.
   const txIdToClientId=new Map();
 
+  // Phase 2.7 follow-up — txs that pre-date the require-ID-on-
+  // every-transaction policy and have no idNumber get a visible
+  // tx.legacyNoId flag so History / Clients / ClientDetail can
+  // render a "⚠ Legacy un-IDed" badge. Tracked alongside the
+  // skipped counter; the count itself is unchanged.
+  const legacyNoIdTxIds=new Set();
+
   for(const tx of list){
     if(!tx)continue;
     if(tx.clientId){result.alreadyLinked++;continue;}
-    if(!tx.client||!tx.client.idNumber){result.skipped++;continue;}
+    if(!tx.client||!tx.client.idNumber){
+      result.skipped++;
+      if(!tx.legacyNoId)legacyNoIdTxIds.add(tx.id);
+      continue;
+    }
     const idNum=tx.client.idNumber;
 
     try{
@@ -137,18 +148,25 @@ export async function runTestDataMigration({txList,setTxList}){
     }
   }
 
-  // Apply linkages. Functional setTxList so the merge runs against
-  // whatever React's current txList is at apply time, not a snapshot
-  // we captured at function entry. The matching is by tx.id, which
-  // is stable across the lifetime of a transaction. Untouched txs
-  // (already linked, skipped, errored) pass through by reference.
+  // Apply linkages + legacyNoId flags. Functional setTxList so the
+  // merge runs against whatever React's current txList is at apply
+  // time, not a snapshot we captured at function entry. The
+  // matching is by tx.id, which is stable across the lifetime of a
+  // transaction. Untouched txs (already linked, no work to do)
+  // pass through by reference.
+  const hasMergeWork=txIdToClientId.size>0||legacyNoIdTxIds.size>0;
   let mergedList=null;
-  if(txIdToClientId.size>0){
+  if(hasMergeWork){
     const applyMerge=prev=>{
       const out=(prev||[]).map(t=>{
-        if(!t||t.clientId)return t;
-        const cid=txIdToClientId.get(t.id);
-        return isUsableId(cid)?{...t,clientId:cid}:t;
+        if(!t)return t;
+        const cid=t.clientId?null:txIdToClientId.get(t.id);
+        const flagLegacy=legacyNoIdTxIds.has(t.id)&&!t.legacyNoId;
+        if(!cid&&!flagLegacy)return t;
+        const next={...t};
+        if(isUsableId(cid))next.clientId=cid;
+        if(flagLegacy)next.legacyNoId=true;
+        return next;
       });
       return out;
     };
@@ -172,7 +190,7 @@ export async function runTestDataMigration({txList,setTxList}){
   // surface it without blocking the success path.
   if(mergedList){
     for(const tx of mergedList){
-      if(!txIdToClientId.has(tx.id))continue;
+      if(!txIdToClientId.has(tx.id)&&!legacyNoIdTxIds.has(tx.id))continue;
       try{
         const r=await sb.saveTx(tx);
         if(r==null)result.errors.push({tx:tx.id,msg:"Supabase saveTx returned null (likely on_conflict 400)"});
