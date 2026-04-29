@@ -1,0 +1,57 @@
+TOPIC: Require ID on every transaction (shop policy)
+WHEN TO USE: When staff is unsure whether a small / sub-threshold transaction needs ID, when a customer pushes back on being asked for ID for a low-value sale, when configuring a new install of LootLedger, or when reviewing the dealer's compliance posture.
+
+PROCEDURE:
+  1. Confirm the policy with the shop owner before changing it.
+     Default is ON (recommended). Turning it off opens the door to
+     un-IDed transactions below the legal threshold.
+  2. Open Settings (gear icon) → Compliance Thresholds accordion.
+  3. The first item is the toggle "Require ID on every transaction
+     (recommended)". Above it is a help line explaining the on /
+     off behaviour. The toggle itself is gated by Admin PIN — the
+     same gate that protects the threshold-tightening fields below
+     it; one PIN entry per Settings session unlocks both.
+  4. Toggle ON behaviour:
+       - Every transaction must capture name + ID type + ID number.
+       - Sub-threshold cash transactions (e.g. a $50 chain buy) STILL
+         require ID, captured via the photo flow or manually.
+       - KYC fields (PEP / TFS / Risk / Source of Funds / Source of
+         Wealth) only appear at the legal thresholds. Sub-threshold
+         transactions do NOT need PEP screening.
+  5. Toggle OFF behaviour ("legal minimum mode"):
+       - Sub-threshold transactions can complete without identifying
+         the customer.
+       - At or above the legal threshold ($10k cash, $5k bullion),
+         the conditional KYC fields and ID still apply.
+  6. The NewTx Client step (step 4) prompts for the same fields
+     either way; the difference is whether finalising rejects an
+     incomplete form. With the toggle ON and ID fields blank,
+     finalize pops "ID type and ID number required — this shop
+     sights ID on every transaction."
+
+EDGE CASES:
+  - Transactions migrated from before the policy was introduced
+    have no idNumber and cannot retroactively be IDed. They show
+    a "⚠ LEGACY UN-IDED" badge in History, in the Clients
+    Transactions view, and in any client's transaction history
+    list. The badge is informational; the records are kept as-is.
+  - The Admin PIN is required to flip the toggle, so a junior
+    staff member can't quietly relax the policy.
+
+COMMON MISTAKES:
+  - Treating sub-threshold transactions as "ID optional" when the
+    toggle is ON. They are not — the shop policy says every tx
+    sights ID. The toast wording exists to remind.
+  - Confusing ID capture with KYC. Capturing name + ID type + ID
+    number is the dedupe minimum and runs every transaction. KYC
+    (PEP / TFS / Risk / Source of Funds / Source of Wealth) only
+    runs above the legal thresholds.
+  - Toggling OFF for "convenience" on a busy day. Don't — the
+    legal-minimum mode is for shops that have made a deliberate
+    choice to follow the legal floor and nothing more.
+
+RELATED TOPICS:
+  - "Sophiie - PIN recovery.txt" — companion training file.
+  - "Sophiie - client transaction history.txt" — companion file.
+  - The Compliance Thresholds section in Settings — the
+    threshold-tightening fields live alongside this toggle.
