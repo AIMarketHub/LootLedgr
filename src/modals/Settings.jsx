@@ -113,6 +113,30 @@ export default function Settings({
   const[newPin,setNewPin]=useState("");
   const[newPinConfirm,setNewPinConfirm]=useState("");
   const[changePinBusy,setChangePinBusy]=useState(false);
+  // Three-case toggle handler. Extracted from the inline onChange
+  // so the branching is explicit and the gate is only invoked when
+  // there's something for it to verify against.
+  //
+  //   next=true  + no bundle  → first-time setup modal, NO gate
+  //                              (no PIN exists yet to validate).
+  //   next=true  + bundle ok  → re-enable, just flip the flag
+  //                              (rare — bundle survived a prior
+  //                              disable; daily-use flow is to
+  //                              keep requirePin on once set).
+  //   next=false               → gate on current Admin PIN
+  //                              (security must not be silently
+  //                              disabled). The gate itself
+  //                              short-circuits when requirePin is
+  //                              already false, so the false→false
+  //                              edge is a free pass-through.
+  const onRequirePinToggle=next=>{
+    if(next){
+      if(!settings.adminRecoveryPassphraseHash){setShowAdminSetup(true);return;}
+      setSettings(p=>({...p,requirePin:true}));
+      return;
+    }
+    gate("Disable Require-PIN gate. Removes the lock screen and unprotects every other Admin-gated action.",()=>setSettings(p=>({...p,requirePin:false})));
+  };
   const onShowPassphrase=()=>gate("Reveal recovery passphrase.",async()=>{
     const pp=await decryptPassphrase(settings.adminRecoveryPassphraseEncrypted,settings.staffPin,settings.adminRecoverySalt);
     if(pp==null){
@@ -158,25 +182,6 @@ export default function Settings({
   };
   useEffect(()=>{refreshMigStats();/* eslint-disable-next-line */},[]);
   return <>
-    {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
-    {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
-      <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
-      <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        <button style={c.bsm(T.goldBg,T.gold)} onClick={copyPassphrase}>📋 Copy</button>
-        <button style={c.btn(T.gold,T.bg)} onClick={()=>setPassphraseShown(null)}>Done</button>
-      </div>
-      <div style={{fontSize:10,color:T.muted,marginTop:10}}>The passphrase is forgotten when this modal closes. Re-open Show Recovery Passphrase if you need it again.</div>
-    </Modal>}
-    {changePinOpen&&<Modal title="🔄 Change Admin PIN" onClose={()=>!changePinBusy&&setChangePinOpen(false)}>
-      <div style={{...c.bnr("info"),marginBottom:14}}>Setting a new Admin PIN re-encrypts the recovery passphrase under the new PIN. The passphrase itself does not change.</div>
-      <F label="New Admin PIN (4–12 digits)" type="password" value={newPin} onChange={setNewPin} required/>
-      <F label="Confirm New PIN" type="password" value={newPinConfirm} onChange={setNewPinConfirm} required note={newPin&&newPinConfirm&&newPin!==newPinConfirm?"PINs do not match.":undefined}/>
-      <div style={{display:"flex",gap:10,marginTop:10}}>
-        <button style={c.btn(isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.gold:T.border,isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.bg:T.muted)} disabled={!(isValidPin(newPin)&&newPin===newPinConfirm)||changePinBusy} onClick={doChangePin}>{changePinBusy?"Re-encrypting…":"Save New PIN"}</button>
-        <button style={c.bsm()} onClick={()=>setChangePinOpen(false)} disabled={changePinBusy}>Cancel</button>
-      </div>
-    </Modal>}
   <Modal title="⚙ Settings" onClose={()=>{setAppUnlocked(!settings.requirePin);if(settings.requirePin)store.set("sessionActive",false);setShowSet(false);}} wide>
     {[
       ["spotfeed","📡 Spot Feed — API Keys",<div style={{paddingBottom:14}}>
@@ -232,23 +237,7 @@ export default function Settings({
         <SF label="Display Unit" value={settings.scaleUnit||"g"} onChange={v=>setSettings(p=>({...p,scaleUnit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"ozt",label:"Troy oz (ozt)"},{value:"oz",label:"Avoirdupois oz"}]}/>
       </div>],
       ["security","🔒 Security",<div style={{paddingBottom:14}}>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>{
-          const next=e.target.checked;
-          // Turning it OFF requires the current Admin PIN.
-          if(!next&&settings.requirePin){
-            gate("Disable Require-PIN gate. Removes the lock screen and unprotects every other Admin-gated action.",()=>setSettings(p=>({...p,requirePin:false})));
-            return;
-          }
-          // Turning it ON for the first time (no recovery
-          // bundle stored) opens the setup modal — the toggle
-          // itself doesn't flip until the modal completes
-          // successfully. Subsequent toggles just flip.
-          if(next&&!settings.adminRecoveryPassphraseHash){
-            setShowAdminSetup(true);
-            return;
-          }
-          setSettings(p=>({...p,requirePin:next}));
-        }}/>Require PIN to open app</label>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>onRequirePinToggle(e.target.checked)}/>Require PIN to open app</label>
         <F label="Admin PIN" type="password" value={settings.staffPin} onChange={v=>setSettings(p=>({...p,staffPin:v}))} note="Master key — unlocks the app when the toggle above is on, and overrides any per-staff PIN."/>
         <SF label="Session Timeout" value={settings.sessionTimeout||"never"} onChange={v=>setSettings(p=>({...p,sessionTimeout:v}))} options={[{value:"never",label:"Never (stay logged in)"},{value:"1h",label:"1 hour"},{value:"8h",label:"8 hours"},{value:"close",label:"Every time app closes"}]}/>
         {settings.adminRecoveryPassphraseHash?<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
@@ -415,5 +404,29 @@ export default function Settings({
       <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledgr v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
     </div>
   </Modal>
+  {/* Nested modals — rendered AFTER the Settings Modal so they win
+      the same-z-index stacking tie. Modal primitive is fixed at
+      z-index 999 across the app; later siblings paint on top.
+      Without this ordering AdminPinSetup opens but stays hidden
+      behind the Settings overlay (the bug fix this commit makes). */}
+  {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
+  {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
+    <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
+    <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <button style={c.bsm(T.goldBg,T.gold)} onClick={copyPassphrase}>📋 Copy</button>
+      <button style={c.btn(T.gold,T.bg)} onClick={()=>setPassphraseShown(null)}>Done</button>
+    </div>
+    <div style={{fontSize:10,color:T.muted,marginTop:10}}>The passphrase is forgotten when this modal closes. Re-open Show Recovery Passphrase if you need it again.</div>
+  </Modal>}
+  {changePinOpen&&<Modal title="🔄 Change Admin PIN" onClose={()=>!changePinBusy&&setChangePinOpen(false)}>
+    <div style={{...c.bnr("info"),marginBottom:14}}>Setting a new Admin PIN re-encrypts the recovery passphrase under the new PIN. The passphrase itself does not change.</div>
+    <F label="New Admin PIN (4–12 digits)" type="password" value={newPin} onChange={setNewPin} required/>
+    <F label="Confirm New PIN" type="password" value={newPinConfirm} onChange={setNewPinConfirm} required note={newPin&&newPinConfirm&&newPin!==newPinConfirm?"PINs do not match.":undefined}/>
+    <div style={{display:"flex",gap:10,marginTop:10}}>
+      <button style={c.btn(isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.gold:T.border,isValidPin(newPin)&&newPin===newPinConfirm&&!changePinBusy?T.bg:T.muted)} disabled={!(isValidPin(newPin)&&newPin===newPinConfirm)||changePinBusy} onClick={doChangePin}>{changePinBusy?"Re-encrypting…":"Save New PIN"}</button>
+      <button style={c.bsm()} onClick={()=>setChangePinOpen(false)} disabled={changePinBusy}>Cancel</button>
+    </div>
+  </Modal>}
   </>;
 }
