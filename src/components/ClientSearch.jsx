@@ -11,11 +11,21 @@
 //
 // Result handling per spec:
 //   - 0 matches  → "No client found. Create new?" + Cancel
-//   - 1 match    → confirmation card, "Use This Client" button.
-//                  No auto-load — staff must click to confirm.
-//   - N matches  → grid of cards, click the right one.
+//   - 1 match    → confirmation card, "✓ Yes, this is them" or
+//                  "✗ Not them — create new". No auto-load — staff
+//                  must explicitly confirm or dismiss.
+//   - N matches  → grid of cards, each with its own "✓ This one"
+//                  and "✗" buttons. Any ✗ jumps straight to the
+//                  create-new flow (the user is signalling none of
+//                  these are right).
 // Every popup carries an explicit Cancel button in addition to the
 // Modal primitive's ✕ Close.
+//
+// Phase 2.7 follow-up (2026-04-30): the dismissal path on a name
+// match exists because real-world same-name customers are common —
+// auto-confirming on first match would silently merge two distinct
+// people under one client record. The middleName field surfaced
+// here when present helps staff disambiguate at a glance.
 //
 // Blacklisted matches still appear in results (the soft-block PIN
 // flow lives at 2.7.11 and gates onSelect downstream). The badge
@@ -56,6 +66,21 @@ export default function ClientSearch({onSelect,onCreateNew,autoFocus=false}){
     return bits.join(" · ");
   };
 
+  // Display name with middleName interleaved when present. Helps
+  // staff distinguish two same-first-and-last-name customers in
+  // the result list. Falls back to fullName-only for records
+  // pre-dating the middleName field.
+  const fmtClientName=cl=>{
+    const fn=sS(cl&&cl.fullName).trim();
+    const mn=sS(cl&&cl.middleName).trim();
+    if(!fn)return "";
+    if(!mn)return fn;
+    // Inject middleName after the first whitespace-separated token.
+    const i=fn.indexOf(" ");
+    if(i<0)return fn+" "+mn;
+    return fn.slice(0,i)+" "+mn+fn.slice(i);
+  };
+
   return <div>
     <div style={{display:"flex",gap:8,marginBottom:8}}>
       <input
@@ -87,42 +112,48 @@ export default function ClientSearch({onSelect,onCreateNew,autoFocus=false}){
         const cl=results[0];
         const lv=formatLastVisit(cl);
         const line=fmtLine(cl);
+        const displayName=fmtClientName(cl);
         return <div>
           <div style={{...c.card({padding:14}),marginBottom:14}}>
             <div style={{fontWeight:"bold",color:T.white,fontSize:14,marginBottom:4}}>
-              {sS(cl.fullName)||"(no name)"}
+              {displayName||"(no name)"}
               {cl.blacklisted&&<span style={{...c.badge(T.red),marginLeft:8,fontSize:10}}>⛔ BLACKLISTED</span>}
             </div>
             {line&&<div style={{fontSize:12,color:T.muted,marginBottom:2}}>{line}</div>}
             {cl.address&&<div style={{fontSize:11,color:T.muted}}>{sS(cl.address)}</div>}
             {lv&&<div style={{fontSize:11,color:T.muted,marginTop:6}}>Last visit: {lv}</div>}
           </div>
-          <div style={{display:"flex",gap:10}}>
-            <button style={c.btn(T.green,T.bg)} onClick={()=>pick(cl)}>Use This Client</button>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <button style={c.btn(T.green,T.bg)} onClick={()=>pick(cl)}>✓ Yes, this is them</button>
+            <button style={c.btn(T.border,T.text)} onClick={create}>✗ Not them — create new</button>
             <button style={c.bsm()} onClick={close}>Cancel</button>
           </div>
         </div>;
       })()}
 
       {results.length>1&&<div>
-        <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Multiple matches. Click the right client to use them.</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Multiple matches. Confirm one with ✓ — or ✗ on any to create a new client (same first / last name, different person).</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:10,marginBottom:14}}>
           {results.map(cl=>{
             const lv=formatLastVisit(cl);
             const line=fmtLine(cl);
-            return <button
+            const displayName=fmtClientName(cl);
+            return <div
               key={cl.id}
-              style={{...c.card({padding:12}),textAlign:"left",border:"1px solid "+T.border,cursor:"pointer",background:T.surface,fontFamily:"inherit",color:T.text}}
-              onClick={()=>pick(cl)}
+              style={{...c.card({padding:12}),border:"1px solid "+T.border,background:T.surface,color:T.text}}
             >
               <div style={{fontWeight:"bold",color:T.white,fontSize:13,marginBottom:3}}>
-                {sS(cl.fullName)||"(no name)"}
+                {displayName||"(no name)"}
                 {cl.blacklisted&&<span style={{...c.badge(T.red),marginLeft:6,fontSize:9}}>⛔</span>}
               </div>
               {line&&<div style={{fontSize:11,color:T.muted,marginBottom:2}}>{line}</div>}
               {cl.address&&<div style={{fontSize:10,color:T.muted}}>{sS(cl.address)}</div>}
-              {lv&&<div style={{fontSize:10,color:T.muted,marginTop:4}}>Last visit: {lv}</div>}
-            </button>;
+              {lv&&<div style={{fontSize:10,color:T.muted,marginTop:4,marginBottom:8}}>Last visit: {lv}</div>}
+              <div style={{display:"flex",gap:6,marginTop:8}}>
+                <button style={c.bsm(T.green,T.bg,{flex:1,fontSize:11})} onClick={()=>pick(cl)}>✓ This one</button>
+                <button style={c.bsm(T.border,T.text,{fontSize:11})} onClick={create} title="Not them — create new">✗</button>
+              </div>
+            </div>;
           })}
         </div>
         <button style={c.bsm()} onClick={close}>Cancel</button>
