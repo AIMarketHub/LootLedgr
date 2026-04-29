@@ -1,0 +1,53 @@
+TOPIC: Admin PIN recovery
+WHEN TO USE: When a staff member or owner has forgotten the Admin PIN, locked themselves out, or wants to know what to do BEFORE that happens. Also when a new staff member is being onboarded and needs to understand the safety net.
+
+PROCEDURE:
+  1. Confirm the user is on the lock screen (the 🔒 + "Loot Ledgr"
+     prompt asking for a PIN).
+  2. Look for the "Forgot PIN?" link below the Unlock button. If
+     the link is absent, first-time PIN setup has not been done
+     yet — the recovery system is only armed after that step.
+  3. Click "Forgot PIN?" and choose ONE of the two recovery paths:
+        a) "Use Recovery Passphrase" — fully active.
+        b) "Send SMS Code" — greyed out until Phase 3.
+  4. Passphrase path:
+        - Find the 24-character passphrase that was generated at
+          first-time setup. It looks like K3M9-X2P7-Q4R8-N1V5-T6W3-J9L0.
+        - Type or paste it into the input. Hyphens, spaces, and
+          case do not matter — the system normalises.
+        - Click Verify. On match, the user is asked to set a NEW
+          PIN. On no match, the field clears and an error appears.
+        - Set a new 4–12 digit PIN, confirm, click Save & Unlock.
+          The app unlocks immediately with the new PIN.
+  5. The recovery passphrase is NOT consumed by use. It stays valid
+     for future recoveries until first-time setup is run again
+     (which would generate a new one).
+
+EDGE CASES:
+  - "Forgot PIN?" link is missing: the recovery bundle was never
+     created. Use the Supabase manual-reset fallback (handover doc
+     in docs/handover/admin-pin-recovery-fallback.md). After reset,
+     run first-time setup again and capture a fresh passphrase.
+  - User has the passphrase but chose to skip the recovery phone
+     at setup: passphrase path still works, SMS path stays grey.
+  - Decryption error after PIN entry in Settings → Show Recovery
+     Passphrase: the recovery bundle is corrupt. Same Supabase
+     fallback applies.
+
+COMMON MISTAKES:
+  - Writing the passphrase down somewhere insecure (back of an
+     invoice, sticky note on the till). Treat it like a paper
+     copy of a banking key — locked drawer, safe, or password
+     manager only.
+  - Sharing the recovery phone with multiple staff. The phone is
+     the recovery target for the OWNER, not a shared inbox.
+  - Assuming "Change Admin PIN" rotates the passphrase. It does
+     not — only the encryption layer changes. The passphrase is
+     stable for the lifetime of the installation.
+  - Trying SMS recovery before Phase 3 lands. The button is
+     greyed out for a reason; do not file a bug.
+
+RELATED TOPICS:
+  - "Sophiie - AI Agent settings.txt" — companion training file.
+  - "Sophiie - admin actions.txt" — the gated-action surface that
+     the Admin PIN unlocks (lands when the corpus expands).
