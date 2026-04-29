@@ -50,7 +50,7 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
     return;
   }
   setPinModal({
-    reason:"⛔ BLACKLISTED CLIENT — manager PIN required to proceed.\n\nClient: "+sS(client.fullName||"(no name)"),
+    reason:"⛔ BLACKLISTED CLIENT — Admin PIN required to proceed.\n\nClient: "+sS(client.fullName||"(no name)"),
     cb:async()=>{
       try{
         await recordBlacklistOverride(client.id,{

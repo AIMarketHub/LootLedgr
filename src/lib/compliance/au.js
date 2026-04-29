@@ -129,7 +129,7 @@ export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove
   const anyCash=isCash?total:0;
   const flags=[{level:"info",key:"id",msg:"🪪 ID must be sighted for every transaction — Victorian law s.19, no exceptions."}];
   if(isCash&&total>=THRESH.CASH_WARN&&bullionCash<THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
-    flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Manager must acknowledge before proceeding."});
+    flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Admin must acknowledge before proceeding."});
   if(bullionCash>=THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
     flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory."});
   if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)

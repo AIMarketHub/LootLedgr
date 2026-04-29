@@ -286,7 +286,7 @@ export default function Loot(){
   // because in the new flow KYC fields are collected AT step 3,
   // not before — step 3 is what we're trying to enter. The cash-
   // hardblock and $2k cash-warn PIN gates still apply.
-  const handleToClient=()=>{if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Manager acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
+  const handleToClient=()=>{if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Admin acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
 
   // Phase 2.7.9b — async because we resolve the client linkage
   // (update existing or create new) before assembling the tx.
@@ -565,9 +565,9 @@ export default function Loot(){
 
         {pinModal&&<div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPinModal(null)}>
           <div style={{...c.card({padding:24}),maxWidth:460,width:"100%"}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:15,fontWeight:"bold",color:T.white,marginBottom:16}}>🔐 Manager Authorisation Required</div>
+            <div style={{fontSize:15,fontWeight:"bold",color:T.white,marginBottom:16}}>🔐 Admin Authorisation Required</div>
             <div style={{...c.bnr("warn"),marginBottom:16}}>{pinModal.reason}</div>
-            <F label="Manager PIN" type="password" value={pinVal} onChange={setPinVal}/>
+            <F label="Admin PIN" type="password" value={pinVal} onChange={setPinVal}/>
             <div style={{display:"flex",gap:10}}>
               <button style={c.btn(T.gold,T.bg)} onClick={submitPin}>Authorise</button>
               <button style={c.bsm()} onClick={()=>{setPinModal(null);setPinVal("");}}>Cancel</button>
