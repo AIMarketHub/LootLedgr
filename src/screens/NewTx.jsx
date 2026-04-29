@@ -43,6 +43,7 @@ import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
 import {PRIVACY_NOTICE,THRESH,getRequiredFields} from "../lib/compliance/index.js";
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
+import {createPaymentLink} from "../lib/integrations/stripe.js";
 import ClientSearch from "../components/ClientSearch.jsx";
 import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
 import {requireBlacklistOverride} from "../lib/blacklistGate.js";
@@ -238,7 +239,7 @@ export default function NewTx({
         <div style={c.card({padding:16,marginBottom:14})}>
           <label style={c.lbl}>Payment Method</label>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
-            {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[])].map(opt=>(
+            {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[]),...(settings.stripeEnabled&&sS(settings.stripeSecretKey).trim()?[{v:"stripe",icon:"💠",label:"Stripe"}]:[])].map(opt=>(
               <button key={opt.v} onClick={()=>setTxPay(opt.v)} style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
                 <span style={{fontSize:24}}>{opt.icon}</span><span style={{fontWeight:"bold"}}>{opt.label}</span>
               </button>
@@ -272,6 +273,23 @@ export default function NewTx({
           <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:8}}>₿ Crypto Payment</div>
           {(()=>{const COINS=[{k:"BTC",l:"Bitcoin",w:settings.walletBTC},{k:"ETH",l:"Ethereum",w:settings.walletETH},{k:"BNB",l:"Binance",w:settings.walletBNB},{k:"XRP",l:"Ripple",w:settings.walletXRP},{k:"SOL",l:"Solana",w:settings.walletSOL}].filter(x=>x.w);if(!COINS.length)return <div style={c.bnr("warn")}>No wallets configured in Settings.</div>;return COINS.map(coin=><div key={coin.k} style={{...c.card({padding:10}),marginBottom:6}}><div style={{fontWeight:"bold",color:T.gold,fontSize:11,marginBottom:4}}>{coin.k} — {coin.l}</div><div style={{fontFamily:"monospace",fontSize:10,background:T.surface,padding:"6px 8px",borderRadius:4,wordBreak:"break-all",marginBottom:6}}>{coin.w}</div><button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{navigator.clipboard&&navigator.clipboard.writeText(coin.w);pop(coin.k+" copied.","ok");}}>📋 Copy</button></div>);})()}
           <button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Crypto received.","ok")}>✓ Crypto Received</button>
+        </div>}
+        {txPay==="stripe"&&net>0&&<div style={c.card({padding:16,marginBottom:10})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:"#635bff",marginBottom:8}}>💠 Stripe — {(settings.stripeMode||"test")==="live"?"LIVE":"TEST"} mode</div>
+          <button style={{...c.btn(T.gold,T.bg),width:"100%",marginBottom:6}} onClick={()=>pop("Stripe Terminal hardware integration coming in Phase 7. Use 'Send payment link' for now.","warn")}>🖥 Charge card now (in person)</button>
+          <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{
+            pop("Creating Stripe payment link…","ok");
+            const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");
+            const desc=(sells.length?"Sale":buys.length?"Purchase":"Loot Ledgr")+" · Loot #"+txNo;
+            const r=await createPaymentLink(settings,net,desc);
+            if(r.ok&&r.url){
+              if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(r.url);
+              pop("Payment link copied. Share with customer.","ok");
+              window.open(r.url,"_blank");
+            }else pop(r.msg,"err");
+          }}>📲 Send payment link ({fmtAUD(net)})</button>
+          <div style={{fontSize:10,color:T.muted,marginTop:8}}>Customer pays at stripe.com — card data never touches this device.</div>
+          <button style={{...c.bsm(T.border,T.muted),marginTop:8,width:"100%"}} onClick={()=>pop("Stripe payment confirmed manually.","ok")}>✓ Confirm Manually</button>
         </div>}
         {net<0&&<div style={c.card({padding:16,marginBottom:10})}><div style={c.bnr("warn")}>We pay client {fmtAUD(-net)} by {sS(txPay).toUpperCase()}.</div>{txPay==="eftpos"&&<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={async()=>{const r=await sendEftpos(settings,-net,m=>pop(m,"ok"));pop(r.msg,r.ok?"ok":"err");}}>🖥 Refund via Terminal</button>}<button style={{...c.btn(T.green,T.bg),marginTop:8,width:"100%"}} onClick={()=>pop("Client paid.","ok")}>✓ Client Paid</button></div>}
         {net===0&&<div style={c.bnr("info")}>⚖ Zero balance — no payment needed.</div>}

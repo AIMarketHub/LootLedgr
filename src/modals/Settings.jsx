@@ -32,6 +32,7 @@ import {sS,fmtAUD} from "../lib/utils.js";
 import {APP_VERSION} from "../lib/constants.js";
 import {store} from "../lib/storage.js";
 import {sendDuressSMS} from "../lib/integrations.js";
+import {probeStripe} from "../lib/integrations/stripe.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import {THRESH} from "../lib/compliance/index.js";
 import {clients} from "../lib/clients.js";
@@ -230,6 +231,17 @@ export default function Settings({
           <F label="Store Domain" value={settings.shopifyDomain||""} onChange={v=>setSettings(p=>({...p,shopifyDomain:v}))} placeholder="yourstore.myshopify.com"/>
           <F label="Admin API Token" type="password" value={settings.shopifyToken||""} onChange={v=>setSettings(p=>({...p,shopifyToken:v}))}/>
         </div>
+        <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Stripe Payments</div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:10}}><input type="checkbox" checked={!!settings.stripeEnabled} onChange={e=>setSettings(p=>({...p,stripeEnabled:e.target.checked}))}/>Enable Stripe Payments</label>
+        {settings.stripeEnabled&&<div>
+          <div style={{...c.bnr("warn"),marginBottom:10}}>⚠ Payment data sent to Stripe (Privacy Act 1988 — confirm Stripe DPA accepted). Card numbers never touch this device — Stripe Checkout collects them on stripe.com.</div>
+          <F label="Publishable Key" value={settings.stripePublishableKey||""} onChange={v=>setSettings(p=>({...p,stripePublishableKey:v}))} placeholder="pk_test_… or pk_live_…"/>
+          <F label="Secret Key" type="password" value={settings.stripeSecretKey||""} onChange={v=>setSettings(p=>({...p,stripeSecretKey:v}))} placeholder="sk_test_… or sk_live_…"/>
+          <SF label="Mode" value={settings.stripeMode||"test"} onChange={v=>setSettings(p=>({...p,stripeMode:v}))} options={[{value:"test",label:"Test mode"},{value:"live",label:"Live mode"}]}/>
+          <F label="Webhook Endpoint URL" value={settings.stripeWebhookUrl||""} onChange={v=>setSettings(p=>({...p,stripeWebhookUrl:v}))} placeholder="https://…/stripe/webhook" note="Configured during production deployment. Stripe POSTs payment-confirmation events here. Stored only — no server endpoint is built into this skeleton yet."/>
+          <button style={c.bsm()} onClick={async()=>{const r=await probeStripe(settings);pop(r.msg,r.ok?"ok":"warn");}}>Test Connection</button>
+          <div style={{fontSize:10,color:T.muted,marginTop:6}}>Note: Stripe's REST API blocks browser CORS on the secret-key surface. Test Connection and Send-Payment-Link will only succeed once Stage 7 wires up a server proxy. Plumbing is correct against Stripe's contract — the toggle reserves the slot until then.</div>
+        </div>}
         <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,marginTop:14}}>Webhook</div>
         <F label="Webhook URL (POST on every transaction)" value={settings.webhookUrl||""} onChange={v=>setSettings(p=>({...p,webhookUrl:v}))} placeholder="https://hook.make.com/…"/>
       </div>],
