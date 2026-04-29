@@ -293,6 +293,7 @@ export default function Settings({
         </div>}
       </div>],
       ["ai","🤖 AI Agent",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:10,color:T.muted,marginBottom:12,lineHeight:1.5}}>AI Agent is an upcoming extension (planned for post-launch as Stage 8.8 / 8.9). The fields below are reserved configuration — Name, URL, and Level placeholders that the future extension will read from. Full agent capabilities (chat trainer, induction tests, autonomous operation, biometric KYC) ship in the AI Agent extension.</div>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.aiAgentEnabled} onChange={e=>setSettings(p=>({...p,aiAgentEnabled:e.target.checked}))}/>Enable AI Agent indicator</label>
         {settings.aiAgentEnabled&&<div style={c.g2(10)}>
           <F label="Agent Name" value={settings.aiAgentName||"Sophiie"} onChange={v=>setSettings(p=>({...p,aiAgentName:v}))}/>
