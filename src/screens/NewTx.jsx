@@ -35,7 +35,7 @@
 // The basket-row inline-edit state (adjId / adjVal) and the
 // existing photo-input ref (fileRef) stay where they are.
 
-import React from "react";
+import React,{useState} from "react";
 import {T,c} from "../theme.js";
 import {F,SF,HoldTimer} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
@@ -87,6 +87,20 @@ export default function NewTx({
   setPinModal,setPinVal,activeStaff,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
+  // Phase 2.7 follow-up (2026-04-30) — sub-state for the new-client
+  // path. null while staff hasn't chosen a method yet (selector is
+  // shown), then "camera" / "upload" / "manual". Reset whenever
+  // clientStep leaves "new". Local state because it's purely a UI
+  // routing decision inside step 4; nothing downstream cares which
+  // method was used once the form is populated.
+  const[captureMethod,setCaptureMethod]=useState(null);
+  const resetClientStep=()=>{
+    setClientStep("search");
+    setClient({});
+    setPhoto(null);
+    setSelectedClientId(null);
+    setCaptureMethod(null);
+  };
 
   // Phase 2.7.8 — drives step 3's conditional rendering. Reads
   // settings overrides (cashKycThreshold, bullionCddThreshold,
@@ -397,6 +411,7 @@ export default function NewTx({
               setSelectedClientId(null);
               setClient({});
               setPhoto(null);
+              setCaptureMethod(null);
               setClientStep("new");
             }}
           />
@@ -405,26 +420,56 @@ export default function NewTx({
           </div>
         </div>}
 
-        {clientStep==="new"&&!photo&&<div style={c.card({padding:14,marginBottom:14})}>
+        {/* Phase 2.7 follow-up (2026-04-30) — capture-method
+            selector. Three real-world paths:
+              📷 Camera   AU licences, autofill via vision provider
+              📁 Upload   photo on phone / different device, autofill
+              ✍ Manual   tourist passports / foreign IDs / autofill
+                          failed — skips IdPhotoCapture and lands
+                          straight in the form
+            All three converge on the same client form below; only
+            the path to populating it differs. */}
+        {clientStep==="new"&&!captureMethod&&!photo&&<div style={c.card({padding:14,marginBottom:14})}>
+          <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:6}}>+ Create New Client</div>
+          <div style={{fontSize:11,color:T.muted,marginBottom:14}}>How would you like to capture their ID?</div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <button style={c.btn(T.gold,T.bg,{textAlign:"left",padding:"14px 16px"})} onClick={()=>setCaptureMethod("camera")}>
+              <div style={{fontSize:13,fontWeight:"bold"}}>📷 Capture with camera</div>
+              <div style={{fontSize:11,fontWeight:"normal",opacity:0.85,marginTop:3,textTransform:"none",letterSpacing:0}}>Australian licences — autofill via AI vision</div>
+            </button>
+            <button style={c.btn(T.border,T.text,{textAlign:"left",padding:"14px 16px"})} onClick={()=>setCaptureMethod("upload")}>
+              <div style={{fontSize:13,fontWeight:"bold"}}>📁 Upload photo</div>
+              <div style={{fontSize:11,fontWeight:"normal",opacity:0.85,marginTop:3,textTransform:"none",letterSpacing:0}}>Photo on phone or different device</div>
+            </button>
+            <button style={c.btn(T.border,T.text,{textAlign:"left",padding:"14px 16px"})} onClick={()=>setCaptureMethod("manual")}>
+              <div style={{fontSize:13,fontWeight:"bold"}}>✍ Add manually</div>
+              <div style={{fontSize:11,fontWeight:"normal",opacity:0.85,marginTop:3,textTransform:"none",letterSpacing:0}}>Tourist passports, foreign IDs, autofill failed</div>
+            </button>
+          </div>
+          <button style={{...c.bsm(),marginTop:14}} onClick={resetClientStep}>← Back to search</button>
+        </div>}
+
+        {clientStep==="new"&&(captureMethod==="camera"||captureMethod==="upload")&&!photo&&<div style={c.card({padding:14,marginBottom:14})}>
           <IdPhotoCapture
             settings={settings}
             pop={pop}
+            mode={captureMethod}
             onCapture={(p,fields)=>{
               setPhoto(p);
               setClient(prev=>({...prev,...(fields||{})}));
             }}
-            onCancel={()=>{
-              setClientStep("search");
-              setClient({});
-              setSelectedClientId(null);
-            }}
+            onCancel={()=>{setCaptureMethod(null);setClient({});}}
           />
         </div>}
 
-        {(clientStep==="existing"||(clientStep==="new"&&photo))&&<>
+        {(clientStep==="existing"||(clientStep==="new"&&(photo||captureMethod==="manual")))&&<>
         {clientStep==="existing"&&<div style={{...c.bnr("info"),marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <span style={{flex:1}}>✓ Loaded existing client. Edits below update the client record on transaction completion.</span>
-          <button style={c.bsm(T.border,T.muted)} onClick={()=>{setClientStep("search");setClient({});setPhoto(null);setSelectedClientId(null);}}>Choose different client</button>
+          <button style={c.bsm(T.border,T.muted)} onClick={resetClientStep}>Choose different client</button>
+        </div>}
+        {clientStep==="new"&&captureMethod==="manual"&&!photo&&<div style={{...c.bnr("info"),marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{flex:1}}>✍ Manual entry — fill in the client details below. No autofill, no ID photo on file.</span>
+          <button style={c.bsm(T.border,T.muted)} onClick={()=>setCaptureMethod(null)}>Use a different method</button>
         </div>}
         <div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,color:T.blue,fontWeight:"bold",marginBottom:8}}>PRIVACY NOTICE</div>

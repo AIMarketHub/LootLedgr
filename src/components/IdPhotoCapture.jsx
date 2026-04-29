@@ -22,6 +22,13 @@
 // privacyNotice surfaces above the capture buttons every time
 // staff takes a photo, not just in Settings. Cloud providers get
 // the warn-style banner; on-device gets the info-style banner.
+//
+// `mode` prop (Phase 2.7 follow-up, 2026-04-30): "camera" or
+// "upload" picks which capture button is shown — when staff has
+// already chosen the method via the parent's capture-method
+// selector, showing both buttons here would be redundant. Default
+// (no `mode` prop or "both") keeps the original twin-button
+// layout for any caller that hasn't migrated.
 
 import React,{useState,useRef} from "react";
 import {T,c} from "../theme.js";
@@ -29,7 +36,7 @@ import {sS} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
 import {extractIdFields,getProvider} from "../lib/idAutofill/index.js";
 
-export default function IdPhotoCapture({settings,pop,onCapture,onCancel}){
+export default function IdPhotoCapture({settings,pop,onCapture,onCancel,mode}){
   const[photo,setPhoto]=useState(null);
   const[busy,setBusy]=useState(false);
   const captureRef=useRef(null);
@@ -71,8 +78,8 @@ export default function IdPhotoCapture({settings,pop,onCapture,onCancel}){
     {privacyNotice&&<div style={{...c.bnr(isCloud?"warn":"info"),marginBottom:14}}>{privacyNotice}</div>}
 
     {!photo&&<div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
-      <button style={c.btn(T.gold,T.bg)} onClick={()=>captureRef.current&&captureRef.current.click()}>📷 Capture from Camera</button>
-      <button style={c.btn(T.border,T.text)} onClick={()=>uploadRef.current&&uploadRef.current.click()}>📂 Upload Photo</button>
+      {(mode==null||mode==="camera"||mode==="both")&&<button style={c.btn(T.gold,T.bg)} onClick={()=>captureRef.current&&captureRef.current.click()}>📷 Capture from Camera</button>}
+      {(mode==null||mode==="upload"||mode==="both")&&<button style={c.btn(T.border,T.text)} onClick={()=>uploadRef.current&&uploadRef.current.click()}>📂 Upload Photo</button>}
       <input ref={captureRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" style={{display:"none"}} onChange={onFile}/>
       <input ref={uploadRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{display:"none"}} onChange={onFile}/>
     </div>}
