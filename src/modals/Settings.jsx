@@ -183,7 +183,7 @@ export default function Settings({
         {settings.aiAgentEnabled&&<div style={c.g2(10)}>
           <F label="Agent Name" value={settings.aiAgentName||"Sophiie"} onChange={v=>setSettings(p=>({...p,aiAgentName:v}))}/>
           <F label="Agent URL" value={settings.aiAgentUrl||""} onChange={v=>setSettings(p=>({...p,aiAgentUrl:v}))} placeholder="https://…"/>
-          <SF label="Level" value={String(settings.aiAgentLevel||1)} onChange={v=>setSettings(p=>({...p,aiAgentLevel:parseInt(v)}))} options={[{value:"1",label:"1 — AI chat (blue)"},{value:"2",label:"2 — AI app handling (amber)"}]}/>
+          <SF label="Level" value={String(settings.aiAgentLevel||1)} onChange={v=>setSettings(p=>({...p,aiAgentLevel:parseInt(v)}))} options={[{value:"1",label:"Level 1 — AI chat"},{value:"2",label:"Level 2 — AI app handling"}]}/>
         </div>}
       </div>],
       ["idautofill","🪪 ID Autofill Provider",<div style={{paddingBottom:14}}>
