@@ -27,6 +27,7 @@ import Settings from "./modals/Settings.jsx";
 import ApiDiagnostics from "./modals/ApiDiagnostics.jsx";
 import CatalogEditor from "./modals/CatalogEditor.jsx";
 import LogoManager from "./modals/LogoManager.jsx";
+import ForgotPin from "./modals/ForgotPin.jsx";
 
 export default function Loot(){
   const[screen,setScreen]=useState("dashboard");
@@ -101,6 +102,7 @@ export default function Loot(){
   const[duressActive,setDuressActive]=useState(false);
   const[appUnlocked,setAppUnlocked]=useState(()=>{const s=store.get("settings",{});if(!s.requirePin)return true;const t=s.sessionTimeout||"never";if(t==="never")return !!store.get("sessionActive",false);if(t==="close")return false;const limits={"1h":3600000,"8h":28800000};return Date.now()-store.get("sessionLast",0)<(limits[t]||Infinity);});
   const[appPinInput,setAppPinInput]=useState("");
+  const[forgotPinOpen,setForgotPinOpen]=useState(false);
   const[pinModal,setPinModal]=useState(null);
   const[pinVal,setPinVal]=useState("");
   const[flagNote,setFlagNote]=useState("");
@@ -435,7 +437,15 @@ export default function Loot(){
             <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
             <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={8} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
             <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
+            {settings.adminRecoveryPassphraseHash&&<button style={{background:"none",border:"none",color:T.muted,fontSize:11,marginTop:14,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setForgotPinOpen(true)}>Forgot PIN?</button>}
           </div>
+          {forgotPinOpen&&<ForgotPin
+            settings={settings}
+            setSettings={setSettings}
+            pop={pop}
+            onClose={()=>setForgotPinOpen(false)}
+            onUnlocked={()=>{setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}}
+          />}
         </div>
       ):(
       <div>
