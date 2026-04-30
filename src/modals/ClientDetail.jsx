@@ -131,30 +131,43 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
     a.click();
   };
 
-  // Toggle the blacklist flag. Each direction is Admin-PIN gated
-  // (the gate auto-bypasses when settings.requirePin is off). Both
-  // sides preserve the prior trail — clearing the flag does NOT
-  // delete blacklistedAt / blacklistedBy / blacklistReason; it adds
-  // blacklistClearedAt / blacklistClearedBy alongside.
+  // Asymmetric gate (2026-04-30 policy update): flagging is open
+  // to any staff — when a problem customer is in front of you,
+  // there is no time to chase a manager for a PIN to write down a
+  // safety note. Clearing the flag is manager-only; absolution
+  // shouldn't be a junior-staff decision. The override gate at the
+  // NewTx Client step is unchanged and continues to fire on every
+  // selection of a blacklisted client.
+  //
+  // Both sides preserve the prior trail — clearing the flag does
+  // NOT delete blacklistedAt / blacklistedBy / blacklistReason; it
+  // adds blacklistClearedAt / blacklistClearedBy alongside.
+  const applyBlacklistChange=async next=>{
+    const now=nowISO();
+    const staff=sS(activeStaff||"Unknown");
+    const patch=next
+      ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistReason:client.blacklistReason||""}
+      :{blacklisted:false,blacklistClearedAt:now,blacklistClearedBy:staff};
+    setBusy(true);
+    try{
+      const updated=await clients.update(client.id,patch);
+      if(updated){
+        onSave&&onSave(updated);
+        pop&&pop(next?"Client flagged — soft-block enabled.":"Blacklist cleared.","ok");
+      }else{
+        pop&&pop("Update failed.","err");
+      }
+    }finally{setBusy(false);}
+  };
   const toggleBlacklist=()=>{
     const next=!client.blacklisted;
-    adminGate(next?"Flag client as blacklisted":"Clear blacklist on client",async()=>{
-      const now=nowISO();
-      const staff=sS(activeStaff||"Unknown");
-      const patch=next
-        ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistReason:client.blacklistReason||""}
-        :{blacklisted:false,blacklistClearedAt:now,blacklistClearedBy:staff};
-      setBusy(true);
-      try{
-        const updated=await clients.update(client.id,patch);
-        if(updated){
-          onSave&&onSave(updated);
-          pop&&pop(next?"Client flagged — soft-block enabled.":"Blacklist cleared.","ok");
-        }else{
-          pop&&pop("Update failed.","err");
-        }
-      }finally{setBusy(false);}
-    });
+    if(next){
+      // Flag — open to any staff. No gate.
+      applyBlacklistChange(true);
+    }else{
+      // Clear — manager-only. Admin PIN gate.
+      adminGate("Clear blacklist on client",()=>applyBlacklistChange(false));
+    }
   };
 
   // Inline reason save on blur. No gate — the spec is "no admin
@@ -356,7 +369,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
           <input type="checkbox" checked={!!client.blacklisted} onChange={toggleBlacklist} disabled={busy} style={{marginTop:3}}/>
           <span><strong>Blacklisted</strong> — block this client with manager override</span>
         </label>
-        <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.5}}>When on, staff selecting this client at New Transaction Client step sees an Admin-PIN prompt: "BLACKLISTED CLIENT — Admin PIN required to proceed". Override events log to the audit trail below.</div>
+        <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.5}}>When on, staff selecting this client at New Transaction Client step sees an Admin-PIN prompt: "BLACKLISTED CLIENT — Admin PIN required to proceed". Override events log to the audit trail below. Flagging is open to any staff member; clearing requires Admin PIN.</div>
         {client.blacklisted&&<div style={{...c.card({padding:10,background:T.surface}),marginBottom:10,borderLeft:"3px solid "+T.red}}>
           <div style={{fontSize:11,color:T.red,fontWeight:"bold",marginBottom:6}}>⚠ FLAGGED on {client.blacklistedAt?fmtDate(client.blacklistedAt):"—"}{client.blacklistedBy?" by "+sS(client.blacklistedBy):""}</div>
           <F label="Reason (optional)" as="textarea" value={reasonDraft} onChange={setReasonDraft} placeholder="Optional — why is this client flagged?"/>
