@@ -61,7 +61,7 @@ export default function Loot(){
   const[simp,setSimp]=useState(()=>store.get("simp",false));
   const[contrast,setContrast]=useState(()=>store.get("contrast",0));
   const[fontSize,setFontSize]=useState(()=>store.get("fontSize",14));
-  const[settingsOpen,setSettingsOpen]=useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,compliancethresholds:false,crypto:false,ai:false,idautofill:false,integrations:false});
+  const[settingsOpen,setSettingsOpen]=useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,compliancethresholds:false,amlprogram:false,crypto:false,ai:false,idautofill:false,integrations:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const[quickMode,setQuickMode]=useState(false);
   const[qmMode,setQMMode]=useState("buy");

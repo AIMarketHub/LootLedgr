@@ -28,7 +28,13 @@
 
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
-import {sS,fmtAUD} from "../lib/utils.js";
+import {sS,fmtAUD,fmtDate} from "../lib/utils.js";
+
+// Date+time formatter used by the AML/CTF Program status card and
+// version history. fmtDate from utils renders "DD/MM/YY HH:MM";
+// the AML surface is documentation grade, so we elaborate to a
+// long-form day/month/year + 24-hour time.
+const fmtDateTime=iso=>{if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}};
 import {APP_VERSION} from "../lib/constants.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
@@ -113,6 +119,13 @@ export default function Settings({
   // dedicated modal triggered from the Require-PIN toggle. Toggle
   // does not flip until the modal completes.
   const[showAdminSetup,setShowAdminSetup]=useState(false);
+  // AML/CTF Program — three sub-modals wire up across Commits 2-4.
+  // Setting them here so the status card buttons in this commit
+  // resolve cleanly; the modals themselves render below the
+  // Settings Modal in the fragment so they stack above it.
+  const[showAmlForm,setShowAmlForm]=useState(false);
+  const[showAmlHistory,setShowAmlHistory]=useState(false);
+  const[showAmlPdf,setShowAmlPdf]=useState(false);
   // Show / Change PIN modals — both gated by the Admin gate on the
   // outer click. The result modals are unconditional once the gate
   // approves, so we don't need a separate "open after PIN" plumb;
@@ -293,6 +306,43 @@ export default function Settings({
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:14}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
         <F label="Tighten Source-of-Wealth trigger to:" type="number" value={settings.sourceOfWealthCashThreshold==null?"":String(settings.sourceOfWealthCashThreshold)} onChange={makeGatedTightenHandler("sourceOfWealthCashThreshold",THRESH.CASH_TTR)} placeholder="Leave blank to use default"/>
         <div style={{fontSize:10,color:T.muted,marginTop:-8,marginBottom:6}}>Default: ${THRESH.CASH_TTR.toLocaleString()} cash — leave blank to use this.</div>
+      </div>],
+      ["amlprogram","📋 AML/CTF Program",<div style={{paddingBottom:14}}>
+        {(()=>{
+          const prog=(settings.amlProgram&&typeof settings.amlProgram==="object")?settings.amlProgram:{currentVersion:null,versions:[],draft:null};
+          const versions=Array.isArray(prog.versions)?prog.versions:[];
+          const current=prog.currentVersion?versions.find(v=>v.version===prog.currentVersion):null;
+          const hasDraft=!!(prog.draft&&prog.draft.data);
+          // Next review: 3 years from approval, per Section 8 default.
+          let nextReview=null;
+          if(current&&current.approvedAt){
+            const d=new Date(current.approvedAt);
+            d.setFullYear(d.getFullYear()+3);
+            nextReview=d.toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});
+          }
+          return <>
+            <div style={{...c.bnr("info"),marginBottom:14}}>
+              <strong>AUSTRAC obligation.</strong> Tranche-2 reporting entities (precious metals & stones dealers) must maintain a written AML/CTF Program from 1 July 2026. This form pre-fills statutory-correct defaults — you confirm or edit each section, save & approve, then download as PDF for AUSTRAC audits. Versions are immutable once approved.
+            </div>
+            <div style={c.card({padding:14,marginBottom:14,borderLeft:"3px solid "+(current?T.green:T.gold)})}>
+              <div style={{fontSize:11,fontWeight:"bold",color:current?T.green:T.gold,marginBottom:8}}>STATUS</div>
+              {current?<div style={{fontSize:12,color:T.text}}>
+                <div>Current version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
+                <div>Saved {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
+                {current.approvedBy&&<div>Approved {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
+                {nextReview&&<div style={{marginTop:6,color:T.muted}}>Next independent review due: {nextReview}</div>}
+                <div style={{marginTop:6,color:T.muted}}>Total versions saved: {versions.length}</div>
+              </div>:<div style={{fontSize:12,color:T.muted}}>
+                {hasDraft?<>Draft saved {fmtDateTime(prog.draft.savedAt)}{prog.draft.savedBy?" by "+sS(prog.draft.savedBy):""}. Not yet approved.</>:<>No AML/CTF Program on file. Click below to start — the form pre-fills statutory defaults so most sections only need a quick review.</>}
+              </div>}
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              <button style={c.btn(T.gold,T.bg)} onClick={()=>setShowAmlForm(true)}>{current||hasDraft?"+ Edit / Update Program":"+ Fill Out AML/CTF Program"}</button>
+              <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowAmlPdf(true)} disabled={!current}>📄 Download as PDF</button>
+              <button style={c.bsm()} onClick={()=>setShowAmlHistory(true)} disabled={versions.length===0}>📜 View Version History ({versions.length})</button>
+            </div>
+          </>;
+        })()}
       </div>],
       ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
