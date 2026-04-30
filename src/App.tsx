@@ -297,12 +297,15 @@ export default function Loot(){
   // pass-through, so single-operator dev mode stays frictionless.
   const withAdminGate=(reason,fn)=>{requireAdminPin({reason,callbacks:{settings,pop,setPinModal,setPinVal},onApproved:fn});};
   const handleToCompliance=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
-  // Phase 2.7.9a: gates the Payment → Compliance transition (step 2
-  // → step 3 in the reordered flow). Drops the old kycDone block
-  // because in the new flow KYC fields are collected AT step 3,
-  // not before — step 3 is what we're trying to enter. The cash-
-  // hardblock and $2k cash-warn PIN gates still apply.
-  const handleToClient=()=>{if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Admin acknowledgement required.",cb:()=>setTxStep(3)});setPinVal("");}else setTxStep(3);};
+  // Phase 2.7 follow-up (2026-04-30) reorder: gates the
+  // Price+Payment → Staff transition (new step 4 → step 5). The
+  // cash hardblock and $2k cash-warn PIN gates apply here because
+  // the dealer has just picked a payment method; if cash is off
+  // the table this gate clears immediately. Renamed from the
+  // legacy handleToClient — its previous "→ step 3" target was
+  // Compliance under the old flow, but the cash gate's natural
+  // home is the moment of payment-method confirmation.
+  const handleToStaff=()=>{if(compliance.flags.some(f=>f.key==="cash_shop_hardblock")){pop("Cash refused — exceeds shop hard limit. Switch to EFTPOS, card, or bank transfer.","err");return;}if(compliance.flags.some(f=>f.key==="cash_warn")){setPinModal({reason:"Cash transaction ≥ $2,000 — Admin acknowledgement required.",cb:()=>setTxStep(5)});setPinVal("");}else setTxStep(5);};
 
   // Phase 2.7.9b — async because we resolve the client linkage
   // (update existing or create new) before assembling the tx.
@@ -544,7 +547,7 @@ export default function Loot(){
             qf={qf} setQF={setQF}
             qmMode={qmMode} setQMMode={setQMMode}
             catalog={catalog} settings={settings} scaleStatus={scaleStatus} scaleLive={scaleLive} fileRef={fileRef}
-            handleAddItem={handleAddItem} handleToCompliance={handleToCompliance} handleToClient={handleToClient}
+            handleAddItem={handleAddItem} handleToCompliance={handleToCompliance} handleToStaff={handleToStaff}
             resetTx={resetTx} finalize={finalize}
             pop={pop}
             setShowFlag={setShowFlag} setShowCat={setShowCat} setScreen={setScreen}

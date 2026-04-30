@@ -48,7 +48,7 @@ import ClientSearch from "../components/ClientSearch.jsx";
 import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
 import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 
-const STEP_LABELS=["Basket","Price+Payment","Compliance","Client","Staff","Done"];
+const STEP_LABELS=["Basket","Compliance","Client","Price+Payment","Staff","Done"];
 
 export default function NewTx({
   txStep,setTxStep,
@@ -75,7 +75,7 @@ export default function NewTx({
   qf,setQF,
   qmMode,setQMMode,
   catalog,settings,scaleStatus,scaleLive,fileRef,
-  handleAddItem,handleToCompliance,handleToClient,
+  handleAddItem,handleToCompliance,handleToStaff,
   resetTx,finalize,
   pop,
   setShowFlag,setShowCat,setScreen,
@@ -253,20 +253,23 @@ export default function NewTx({
         </div>
         {basketTable}
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Payment →</button>
+          <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Compliance →</button>
           <button style={c.bsm()} onClick={resetTx}>Reset</button>
         </div>
       </div>
     )}
 
     {/* ===================================================================
-        STEP 2 — PRICE + PAYMENT (was step 5 in the old flow)
-        Picking the payment method here unlocks the cash gates that
-        fire at step 2 → step 3 (handleToClient still gates the cash
-        hardblock + $2k cash-warn PIN; Phase 2.7.9a updated it to
-        drop the kycDone gate since KYC fields are now in step 3).
+        STEP 4 — PRICE + PAYMENT
+        Phase 2.7 follow-up (2026-04-30) reorder: Price+Payment moved
+        from step 2 to step 4 so the basket → compliance → client →
+        payment sequence matches real shop reality. Picking the
+        payment method here drives the cash gates that fire on the
+        Next click via handleToStaff (formerly handleToClient — the
+        cash hardblock + $2k cash-warn PIN gate; advances to Staff
+        on success).
         =================================================================== */}
-    {txStep===2&&(
+    {txStep===4&&(
       <div>
         <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:14}}>Price + Payment</div>
         <div style={c.card({padding:16,marginBottom:14})}>
@@ -339,22 +342,26 @@ export default function NewTx({
           </div>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={handleToClient}>Next: Compliance →</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
+          <button style={c.btn(T.gold)} onClick={handleToStaff}>Next: Staff →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
         </div>
       </div>
     )}
 
     {/* ===================================================================
-        STEP 3 — CONDITIONAL COMPLIANCE (Phase 2.7 spec)
+        STEP 2 — CONDITIONAL COMPLIANCE (Phase 2.7 spec)
         Renders the AUSTRAC flag banners (statutory; from
         checkCompliance) plus only the fields getRequiredFields
         returns for the current tx + settings. With dealer-side
         threshold tightening, fields can light up earlier than the
         AUSTRAC defaults. With nothing tightened and a small tx,
         this step may have no fields at all — just a notice.
+
+        Phase 2.7 follow-up (2026-04-30) reorder: Compliance now
+        runs immediately after Basket so the dealer sees the AML
+        picture before identifying the client.
         =================================================================== */}
-    {txStep===3&&(
+    {txStep===2&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
         {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
@@ -384,14 +391,14 @@ export default function NewTx({
           <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
         </div>
         <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button style={c.btn(T.gold)} onClick={()=>setTxStep(4)}>Next: Client →</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
+          <button style={c.btn(T.gold)} onClick={()=>setTxStep(3)}>Next: Client →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
         </div>
       </div>
     )}
 
     {/* ===================================================================
-        STEP 4 — CLIENT (Phase 2.7.9b: ClientSearch + IdPhotoCapture
+        STEP 3 — CLIENT (Phase 2.7.9b: ClientSearch + IdPhotoCapture
         integrated alongside the legacy declaration form)
 
         clientStep "search"   → ClientSearch input + popups
@@ -407,8 +414,14 @@ export default function NewTx({
         finalize() handles client-record updates / auto-create per
         spec (no in-form Edit toggle for now — read-only-with-toggle
         deferred; flagged in commit message).
+
+        Phase 2.7 follow-up (2026-04-30) reorder: Client now sits
+        between Compliance and Price+Payment. The ID-on-every-tx
+        capture + KYC-field collection happens here under known
+        compliance requirements, before the dealer picks a payment
+        method.
         =================================================================== */}
-    {txStep===4&&(
+    {txStep===3&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
@@ -559,8 +572,8 @@ export default function NewTx({
           <F label="Date" type="date" required value={client.signatureDate||new Date().toISOString().slice(0,10)} onChange={v=>setClient(p=>({...p,signatureDate:v}))}/>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(5);}}>Next: Staff Section →</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
+          <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Payment →</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
         </div>
         </>}
       </div>
