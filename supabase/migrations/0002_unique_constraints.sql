@@ -1,3 +1,16 @@
+-- DEPRECATED 2026-04-30 — This migration was a no-op against the
+-- actual schema, which already has composite (id, shop_id) PRIMARY
+-- KEYs on transactions / catalog / stock (the correct multi-tenant
+-- design). The IF NOT EXISTS guards correctly detected the existing
+-- composite PRIMARY KEY and skipped, so the migration ran without
+-- error but the underlying 400s persisted. The real fix was app-
+-- side: src/lib/storage.js now sends ?on_conflict=id,shop_id
+-- matching the composite key. This file stays for git history; do
+-- not modify or delete.
+--
+-- Original (now-incorrect) intent below.
+-- ──────────────────────────────────────────────────────────────────
+--
 -- LootLedger — Phase 2.7 follow-up migration (2026-04-30)
 -- Adds PRIMARY KEY constraints to transactions / catalog / stock so
 -- PostgREST's `?on_conflict=id&Prefer: resolution=merge-duplicates`

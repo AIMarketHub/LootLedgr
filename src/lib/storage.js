@@ -51,7 +51,24 @@ export const store={
 export const sbFetch=async(path,opts={})=>{try{const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});if(!r.ok)return null;const t=await r.text();return t?JSON.parse(t):null;}catch(_){return null;}};
 
 const ts=()=>new Date().toISOString();
-const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(tbl==="settings"?"shop_id":"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
+// PostgREST `?on_conflict=` must name the EXACT columns of the
+// table's PRIMARY KEY (or a UNIQUE constraint). The four mirrored
+// tables in lootledger-dev / -prod use composite (id, shop_id) PKs
+// for transactions / catalog / stock — the multi-tenant design that
+// only requires id-uniqueness within a shop. settings is keyed on
+// shop_id alone (one row per shop). clients is single-key on id
+// (uuid PK from the 0001 migration). Sending the wrong column name
+// here returns 400 ("no unique or exclusion constraint matching the
+// ON CONFLICT specification") and the upsert silently fails — root
+// cause of the Phase 2.7 console-noise saga, fixed 2026-04-30.
+const ON_CONFLICT={
+  transactions:"id,shop_id",
+  catalog:"id,shop_id",
+  stock:"id,shop_id",
+  clients:"id",
+  settings:"shop_id",
+};
+const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(ON_CONFLICT[tbl]||"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
 
 export const sb={
   saveTx:async tx=>upsSB("transactions",{id:tx.id,shop_id:SHOP_ID,data:tx,updated_at:ts()}),
