@@ -1,0 +1,162 @@
+// LootLedger — AML/CTF Program PDF/HTML export.
+// Phase 2.7 follow-up (2026-04-30). Renders the current approved
+// version as a printable artifact + offers two outputs:
+//
+//   🖨 Print   — calls window.print(). The print stylesheet in
+//                src/index.css (the same one used by the Receipt
+//                component) hides everything except elements with
+//                the .receipt-print-area class. The full program
+//                rendered in this modal carries that class so it
+//                prints standalone — staff can choose "Save as
+//                PDF" in the browser dialog to get a PDF.
+//
+//   ⬇ Download HTML — extracts the rendered .receipt-print-area
+//                outerHTML and wraps it in a minimal HTML5
+//                document for download. Customer / auditor opens
+//                in any browser, prints or saves as PDF
+//                themselves. Filename:
+//                AML-CTF-Program-v{version}-{shopName}-{date}.html
+//
+// jsPDF is not in deps; the print-or-HTML pattern is the same the
+// Receipt component already uses. Phase E adds proper PDF library
+// integration if the dealer needs it.
+//
+// The render is intentionally documentation-grade: cover page
+// (shop name, version, approval date, Compliance Officer name,
+// senior manager approver), explicit section dividers, every
+// field labelled per FIELD_META so an auditor reading the export
+// alone gets the same structure as the form.
+
+import React from "react";
+import {T,c} from "../theme.js";
+import {Modal} from "../components/ui";
+import {sS} from "../lib/utils.js";
+import {SECTION_TITLES,SECTION_FIELDS,FIELD_META} from "../lib/amlProgram/defaults.js";
+
+function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return sS(iso);}}
+function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}}
+function safeShopName(name){return sS(name).replace(/[^a-zA-Z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"shop";}
+
+// Inline-styled render of the program. Light theme — paper-and-ink
+// — so it reads as a printable artifact regardless of the
+// surrounding app modal. The .receipt-print-area class on the
+// outer div is what the @media print rules in index.css preserve
+// when window.print() fires.
+export function AmlProgramRender({version,shopName}){
+  if(!version)return null;
+  const data=version.data||{};
+  const sections=Object.keys(SECTION_TITLES);
+  const dashed={border:0,borderTop:"1px dashed #000",margin:"16px 0"};
+  const sectionStyle={pageBreakInside:"avoid",breakInside:"avoid",marginBottom:18};
+  return <div className="receipt-print-area" style={{
+    fontFamily:"Georgia, 'Times New Roman', serif",
+    color:"#000",
+    background:"#fff",
+    padding:"24px",
+    maxWidth:"800px",
+    margin:"0 auto",
+    fontSize:"12px",
+    lineHeight:1.55,
+  }}>
+    {/* Cover page */}
+    <div style={{textAlign:"center",padding:"40px 0",pageBreakAfter:"always"}}>
+      <div style={{fontSize:14,letterSpacing:"0.2em",color:"#666",marginBottom:24}}>AML/CTF PROGRAM</div>
+      <h1 style={{fontSize:28,margin:"0 0 8px",fontWeight:"bold"}}>{sS(shopName)||sS(data["s1.businessName"])||"LootLedger"}</h1>
+      {data["s1.abn"]&&<div style={{fontSize:13,marginBottom:6}}>ABN: {sS(data["s1.abn"])}</div>}
+      {data["s1.dealerLicenceNo"]&&<div style={{fontSize:13,marginBottom:6}}>Dealer Licence: {sS(data["s1.dealerLicenceNo"])}</div>}
+      <div style={{margin:"32px 0",fontSize:14}}>
+        <div><strong>Version {sS(version.version)}</strong></div>
+        <div style={{marginTop:6}}>Approved: {fmtLong(version.approvedAt)}</div>
+        {version.approvedBy&&<div style={{marginTop:6}}>Approved by: {sS(version.approvedBy)}</div>}
+        {data["s2.officerName"]&&<div style={{marginTop:14}}>AML/CTF Compliance Officer: <strong>{sS(data["s2.officerName"])}</strong></div>}
+      </div>
+      <div style={{fontSize:11,color:"#666",marginTop:24,padding:"12px",border:"1px solid #ccc"}}>
+        This document is the entity's written AML/CTF Program for the purposes of the Anti-Money Laundering and Counter-Terrorism Financing Act 2006 (Cth) and the AML/CTF Rules 2025. Retain for AUSTRAC audit. Generated from LootLedger on {fmtDateTime(new Date().toISOString())}.
+      </div>
+    </div>
+
+    {/* Sections */}
+    {sections.map(sk=>(
+      <section key={sk} style={sectionStyle}>
+        <h2 style={{fontSize:16,fontWeight:"bold",margin:"0 0 12px",paddingBottom:6,borderBottom:"2px solid #000"}}>{SECTION_TITLES[sk]}</h2>
+        {SECTION_FIELDS[sk].map(fk=>{
+          const meta=FIELD_META[fk]||{label:fk};
+          const v=data[fk];
+          let display;
+          if(meta.type==="checkbox")display=v?"☑ Yes":"☐ No";
+          else if(v==null||String(v).trim()==="")display="—";
+          else display=String(v);
+          const isLong=meta.type==="textarea"||(typeof display==="string"&&display.length>80);
+          return <div key={fk} style={{marginBottom:isLong?12:6,pageBreakInside:"avoid",breakInside:"avoid"}}>
+            <div style={{fontSize:11,color:"#444",fontWeight:"bold",marginBottom:isLong?4:0,letterSpacing:"0.02em"}}>{meta.label}{!isLong&&": "}</div>
+            <div style={{fontSize:12,color:"#000",whiteSpace:"pre-wrap",lineHeight:1.55}}>{display}</div>
+          </div>;
+        })}
+      </section>
+    ))}
+
+    <hr style={dashed}/>
+    <footer style={{textAlign:"center",fontSize:10,color:"#666",marginTop:24}}>
+      <div>End of document. Retain for 7 years per AML/CTF Act and Privacy Act requirements.</div>
+      <div>Generated {fmtDateTime(new Date().toISOString())} from LootLedger.</div>
+    </footer>
+  </div>;
+}
+
+// Minimal dlFile clone — the App-level dlFile lives in App.tsx and
+// isn't exported. Local copy keeps this modal self-contained.
+function downloadFile(content,filename,mime){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([content],{type:mime||"text/plain"}));
+  a.download=filename;
+  a.click();
+}
+
+export default function AmlProgramPdf({settings,pop,onClose}){
+  const prog=(settings&&settings.amlProgram)||{currentVersion:null,versions:[]};
+  const versions=Array.isArray(prog.versions)?prog.versions:[];
+  const current=prog.currentVersion?versions.find(v=>v.version===prog.currentVersion):null;
+  const shopName=current?.data?.["s1.businessName"]||settings?.businessName||"LootLedger";
+
+  if(!current){
+    return <Modal title="📄 AML/CTF Program — Export" onClose={onClose}>
+      <div style={{...c.bnr("warn"),marginBottom:14}}>No approved version yet. Save &amp; Approve a version from the form first, then return here to export.</div>
+      <button style={c.bsm()} onClick={onClose}>Close</button>
+    </Modal>;
+  }
+
+  const onPrint=()=>{try{window.print();}catch(_){}};
+
+  const onDownloadHtml=()=>{
+    // Grab the live render (the .receipt-print-area inside this
+    // modal). Wrap in a self-contained HTML5 document with a tiny
+    // print-friendly stylesheet so the file opens cleanly in any
+    // browser without depending on the app's CSS.
+    const node=document.querySelector(".receipt-print-area");
+    if(!node){pop&&pop("Render unavailable — refresh and try again.","err");return;}
+    const today=new Date().toISOString().slice(0,10);
+    const filename="AML-CTF-Program-v"+sS(current.version)+"-"+safeShopName(shopName)+"-"+today+".html";
+    const html=
+      '<!DOCTYPE html><html lang="en-AU"><head><meta charset="utf-8">'+
+      '<title>AML/CTF Program v'+sS(current.version)+' — '+sS(shopName)+'</title>'+
+      '<style>body{margin:0;background:#fff;color:#000;font-family:Georgia,"Times New Roman",serif}'+
+      '@page{margin:1.5cm}'+
+      'h1,h2{page-break-after:avoid}'+
+      'section{page-break-inside:avoid}'+
+      '</style></head><body>'+node.outerHTML+'</body></html>';
+    downloadFile(html,filename,"text/html");
+    pop&&pop("Downloaded "+filename,"ok");
+  };
+
+  return <Modal title={"📄 AML/CTF Program v"+sS(current.version)+" — Export"} onClose={onClose} wide>
+    <div style={{...c.bnr("info"),marginBottom:14}}>
+      Preview below. <strong>🖨 Print</strong> opens the browser print dialog (choose <em>Save as PDF</em> for a PDF). <strong>⬇ Download HTML</strong> saves a self-contained file you can open and print on any device.
+    </div>
+    <AmlProgramRender version={current} shopName={shopName}/>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:14,position:"sticky",bottom:0,padding:"12px 0",background:T.bg,borderTop:"1px solid "+T.border}}>
+      <button style={c.btn(T.gold,T.bg)} onClick={onPrint}>🖨 Print</button>
+      <button style={c.bsm(T.goldBg,T.gold)} onClick={onDownloadHtml}>⬇ Download HTML</button>
+      <button style={c.bsm()} onClick={onClose}>Close</button>
+    </div>
+  </Modal>;
+}

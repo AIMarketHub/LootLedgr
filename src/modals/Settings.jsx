@@ -42,6 +42,7 @@ import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import AdminPinSetup from "./AdminPinSetup.jsx";
 import AmlProgramForm from "./AmlProgramForm.jsx";
 import AmlProgramHistory from "./AmlProgramHistory.jsx";
+import AmlProgramPdf from "./AmlProgramPdf.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 
 // 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
@@ -484,6 +485,7 @@ export default function Settings({
   {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
   {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
   {showAmlHistory&&<AmlProgramHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlHistory(false)} onRestoredOpenForm={()=>setShowAmlForm(true)}/>}
+  {showAmlPdf&&<AmlProgramPdf settings={settings} pop={pop} onClose={()=>setShowAmlPdf(false)}/>}
   {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
     <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
     <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>
