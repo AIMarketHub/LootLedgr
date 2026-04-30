@@ -65,28 +65,24 @@ export default function Clients({
   // Open a tx's linked client (mode 2 → ClientDetail). Fetches
   // fresh from clients.getById since the in-memory clientsData
   // list may be empty if the user never opened mode 1.
+  //
+  // Phase 2.7 follow-up (2026-04-30): no Admin-PIN gate on open.
+  // Reading the record is read-only; the blacklist state is
+  // surfaced inside the modal via the red header banner + the
+  // RISK / STATUS section + ClientSearch result badges. The
+  // override gate stays correctly wired at NewTx Client step's
+  // ClientSearch onSelect — that is the genuine override moment.
   const openClientFromTx=async(tx)=>{
     if(!tx||!tx.clientId)return;
     setLoading(true);
     try{
       const cl=await clients.getById(tx.clientId);
-      if(cl){
-        requireBlacklistOverride({
-          client:cl,
-          callbacks:{pop,setPinModal,setPinVal,activeStaff},
-          onApproved:()=>setSelectedClient(cl),
-        });
-      }else pop&&pop("Client record not found (orphan link).","warn");
+      if(cl)setSelectedClient(cl);
+      else pop&&pop("Client record not found (orphan link).","warn");
     }finally{setLoading(false);}
   };
 
-  const openClient=cl=>{
-    requireBlacklistOverride({
-      client:cl,
-      callbacks:{pop,setPinModal,setPinVal,activeStaff},
-      onApproved:()=>setSelectedClient(cl),
-    });
-  };
+  const openClient=cl=>{setSelectedClient(cl);};
 
   const filteredClients=useMemo(()=>{
     let list=[...(clientsData||[])];
