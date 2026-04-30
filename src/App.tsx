@@ -172,10 +172,25 @@ export default function Loot(){
   useEffect(()=>store.set("fontSize",fontSize),[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
-  useEffect(()=>{store.set("catalog",catalog);sb.saveCatalog(catalog);},[catalog]);
-  useEffect(()=>{store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));if(txList.length)sb.saveTx(txList[0]);},[txList]);
-  useEffect(()=>{store.set("stock",stock);const prev=prevStockRef.current,curr=new Set((stock||[]).map(s=>s.id));prev.forEach(s=>{if(!curr.has(s.id))sb.deleteStock(s.id);});(stock||[]).forEach(s=>{const o=prev.find(p=>p.id===s.id);if(!o||JSON.stringify(o)!==JSON.stringify(s))sb.saveStock(s);});prevStockRef.current=stock;},[stock]);
-  useEffect(()=>{store.set("settings",settings);if(sbSettingsTimer.current)clearTimeout(sbSettingsTimer.current);sbSettingsTimer.current=setTimeout(()=>sb.saveSettings(settings),2000);},[settings]);
+  // Phase 2.7 follow-up (2026-04-30) — Supabase mirror writes are
+  // best-effort; local state is the primary truth. sbFetch already
+  // swallows network / non-2xx errors and returns null, but the
+  // browser's default fetch logging still surfaces a red 400 in the
+  // console when the on_conflict=id upsert fails (the schema is
+  // missing the PRIMARY KEY constraint that PostgREST needs for
+  // the merge-duplicates path; addressed by 0002_unique_constraints.sql).
+  // Wrap each call so the diagnostic message is controlled and the
+  // upcoming-schema-fix context is visible. Behaviour-preserving:
+  // these calls were already fire-and-forget; the wrapper only adds
+  // a console.warn on null returns or thrown rejections.
+  const sbWarn=(name,p)=>{
+    if(!p||typeof p.then!=="function")return p;
+    return p.then(r=>{if(r==null)console.warn("[supabase] "+name+" returned null — likely on_conflict 400; local state is authoritative. Apply 0002_unique_constraints.sql to enable the durable echo.");return r;}).catch(e=>{console.warn("[supabase] "+name+" failed:",e&&e.message);return null;});
+  };
+  useEffect(()=>{store.set("catalog",catalog);sbWarn("saveCatalog",sb.saveCatalog(catalog));},[catalog]);
+  useEffect(()=>{store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));if(txList.length)sbWarn("saveTx",sb.saveTx(txList[0]));},[txList]);
+  useEffect(()=>{store.set("stock",stock);const prev=prevStockRef.current,curr=new Set((stock||[]).map(s=>s.id));prev.forEach(s=>{if(!curr.has(s.id))sbWarn("deleteStock",sb.deleteStock(s.id));});(stock||[]).forEach(s=>{const o=prev.find(p=>p.id===s.id);if(!o||JSON.stringify(o)!==JSON.stringify(s))sbWarn("saveStock",sb.saveStock(s));});prevStockRef.current=stock;},[stock]);
+  useEffect(()=>{store.set("settings",settings);if(sbSettingsTimer.current)clearTimeout(sbSettingsTimer.current);sbSettingsTimer.current=setTimeout(()=>sbWarn("saveSettings",sb.saveSettings(settings)),2000);},[settings]);
   useEffect(()=>store.set("vendors",vendors),[vendors]);
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
   useEffect(()=>{if(logoLib.length===0&&SEED_LOGO){setLogoLib([{id:"default-logo",data:SEED_LOGO,isLogo:true}]);setSettings(p=>p.logoImg?p:{...p,logoImg:SEED_LOGO});}},[]);
