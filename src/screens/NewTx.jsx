@@ -35,7 +35,7 @@
 // The basket-row inline-edit state (adjId / adjVal) and the
 // existing photo-input ref (fileRef) stay where they are.
 
-import React,{useState} from "react";
+import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {F,SF,HoldTimer} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
@@ -94,6 +94,25 @@ export default function NewTx({
   // routing decision inside step 4; nothing downstream cares which
   // method was used once the form is populated.
   const[captureMethod,setCaptureMethod]=useState(null);
+
+  // Phase 2.7 follow-up (2026-04-30) — outbound (we-pay-client)
+  // payments must use a method that legitimately supports paying
+  // funds TO the customer. Per Australian eftpos scheme rules
+  // (eftpos Terms s.8), refunds must go back to the original
+  // purchase card; there is no compliant way to send funds via
+  // EFTPOS for a goods purchase from a customer. Card Online and
+  // Stripe Checkout (the existing payment-link path) are also
+  // pull-from-customer flows, not push-to-customer. Hide all three
+  // when net < 0, default to bank.
+  //
+  // Future: a dedicated push-to-card / Stripe Payouts path lands
+  // in Phase 5+ (accounting refinements). Tracked in roadmap.
+  useEffect(()=>{
+    if(net<0&&(txPay==="eftpos"||txPay==="card"||txPay==="stripe")){
+      setTxPay("bank");
+    }
+  },[net,txPay,setTxPay]);
+
   const resetClientStep=()=>{
     setClientStep("search");
     setClient({});
@@ -253,12 +272,16 @@ export default function NewTx({
         <div style={c.card({padding:16,marginBottom:14})}>
           <label style={c.lbl}>Payment Method</label>
           <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:8}}>
-            {[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[]),...(settings.stripeEnabled&&sS(settings.stripeSecretKey).trim()?[{v:"stripe",icon:"💠",label:"Stripe"}]:[])].map(opt=>(
+            {(net<0
+              ?[{v:"bank",icon:"🏦",label:"Bank EFT"},{v:"cash",icon:"💵",label:"Cash"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[])]
+              :[{v:"cash",icon:"💵",label:"Cash"},{v:"eftpos",icon:"🖥",label:"EFTPOS"},{v:"card",icon:"💳",label:"Card Online"},{v:"bank",icon:"🏦",label:"Bank EFT"},...(settings.cryptoEnabled?[{v:"crypto",icon:"₿",label:"Crypto"}]:[]),...(settings.stripeEnabled&&sS(settings.stripeSecretKey).trim()?[{v:"stripe",icon:"💠",label:"Stripe"}]:[])]
+            ).map(opt=>(
               <button key={opt.v} onClick={()=>setTxPay(opt.v)} style={{...c.btn(txPay===opt.v?T.gold:T.border,txPay===opt.v?T.bg:T.text,{padding:"12px 16px",minWidth:80,display:"flex",flexDirection:"column",alignItems:"center",gap:3,textTransform:"none",letterSpacing:0,fontSize:11})}}>
                 <span style={{fontSize:24}}>{opt.icon}</span><span style={{fontWeight:"bold"}}>{opt.label}</span>
               </button>
             ))}
           </div>
+          {net<0&&<div style={{fontSize:10,color:T.muted,marginTop:10,lineHeight:1.5}}>Pay customer via PayID / OSKO bank transfer. EFTPOS payouts to customer cards are not scheme-compliant for goods purchases — use a real refund only when reversing a prior card sale.</div>}
         </div>
         <div style={{...c.card({padding:14}),marginBottom:14,textAlign:"center"}}>
           <div style={{fontSize:11,color:T.muted,marginBottom:4}}>{net>=0?"Amount to collect from client":"Amount to pay client"}</div>
