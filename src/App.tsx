@@ -685,6 +685,7 @@ export default function Loot(){
           settingsOpen={settingsOpen} toggleSection={toggleSection}
           setShowSet={setShowSet}
           withAdminGate={withAdminGate}
+          activeStaff={activeStaff}
         />}
 
         {showApi&&<ApiDiagnostics

@@ -40,6 +40,7 @@ import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
 import {PROVIDERS,probeProvider} from "../lib/idAutofill/index.js";
 import AdminPinSetup from "./AdminPinSetup.jsx";
+import AmlProgramForm from "./AmlProgramForm.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 
 // 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
@@ -86,6 +87,7 @@ export default function Settings({
   settingsOpen,toggleSection,
   setShowSet,
   withAdminGate,
+  activeStaff,
 }){
   // Phase 2.7 follow-up batch 2 — adminGate wrapper. Falls through
   // to fn() when the gate isn't wired (defensive — same single-
@@ -479,6 +481,7 @@ export default function Settings({
       Without this ordering AdminPinSetup opens but stays hidden
       behind the Settings overlay (the bug fix this commit makes). */}
   {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
+  {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
   {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
     <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
     <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>

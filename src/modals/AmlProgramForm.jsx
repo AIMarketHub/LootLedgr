@@ -1,0 +1,180 @@
+// LootLedger — AML/CTF Program form modal.
+// Phase 2.7 follow-up (2026-04-30). The 12-section governance
+// form. Pre-fills statutory-correct defaults from
+// src/lib/amlProgram/defaults.js so the dealer mostly confirms
+// rather than authors. Two save paths:
+//
+//   Save Draft        writes to settings.amlProgram.draft. Doesn't
+//                     bump currentVersion. Drafts are mutable —
+//                     each save overwrites the previous draft.
+//   Save & Approve    writes a new immutable entry to
+//                     settings.amlProgram.versions[], updates
+//                     settings.amlProgram.currentVersion to the
+//                     new version, clears the draft. Requires
+//                     senior-manager name and explicit approval
+//                     checkbox.
+//
+// The form data is a flat map keyed by `${section}.${field}` per
+// the defaults module. Section navigation uses anchor jumps; the
+// modal itself scrolls.
+//
+// Initial seed precedence (most recent first):
+//   1. settings.amlProgram.draft.data — resume an in-progress edit
+//   2. The most recent approved version's data — start from the
+//      last approved baseline
+//   3. buildDefaults(settings) — pristine statutory defaults
+
+import React,{useState,useMemo} from "react";
+import {T,c} from "../theme.js";
+import {Modal,F,SF} from "../components/ui";
+import {sS,nowISO} from "../lib/utils.js";
+import {SECTION_TITLES,SECTION_FIELDS,FIELD_META,buildDefaults,nextVersion} from "../lib/amlProgram/defaults.js";
+
+function todayPlus3YearsISODate(){
+  const d=new Date();
+  d.setFullYear(d.getFullYear()+3);
+  return d.toISOString().slice(0,10);
+}
+
+// Renders a single field by key. Reads from the form-data map and
+// writes back via setData. Type derived from FIELD_META; falls back
+// to a single-line text input.
+function FormField({fieldKey,data,setData}){
+  const meta=FIELD_META[fieldKey]||{type:"text",label:fieldKey};
+  const value=data[fieldKey];
+  const set=v=>setData(p=>({...p,[fieldKey]:v}));
+  if(meta.type==="checkbox"){
+    return <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,marginBottom:10,cursor:"pointer",lineHeight:1.5}}>
+      <input type="checkbox" checked={!!value} onChange={e=>set(e.target.checked)} style={{marginTop:3,flexShrink:0}}/>
+      <span>{meta.label}</span>
+    </label>;
+  }
+  if(meta.type==="textarea"){
+    return <F label={meta.label} as="textarea" value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
+  }
+  if(meta.type==="date"){
+    return <F label={meta.label} type="date" value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
+  }
+  return <F label={meta.label} value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
+}
+
+export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onClose}){
+  // Compute the initial seed once at mount.
+  const seed=useMemo(()=>{
+    const prog=(settings&&settings.amlProgram)||{};
+    if(prog.draft&&prog.draft.data)return{...buildDefaults(settings),...prog.draft.data};
+    if(Array.isArray(prog.versions)&&prog.currentVersion){
+      const cur=prog.versions.find(v=>v.version===prog.currentVersion);
+      if(cur&&cur.data)return{...buildDefaults(settings),...cur.data};
+    }
+    return buildDefaults(settings);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  const[data,setData]=useState(seed);
+  const[approverName,setApproverName]=useState("");
+  const[approveAck,setApproveAck]=useState(false);
+  const[savingDraft,setSavingDraft]=useState(false);
+  const[approving,setApproving]=useState(false);
+  const[showApprovePanel,setShowApprovePanel]=useState(false);
+
+  const dirty=useMemo(()=>JSON.stringify(data)!==JSON.stringify(seed),[data,seed]);
+  const sections=Object.keys(SECTION_TITLES);
+
+  const onSaveDraft=async()=>{
+    setSavingDraft(true);
+    try{
+      const draft={data,savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")};
+      setSettings(p=>({...p,amlProgram:{...(p.amlProgram||{currentVersion:null,versions:[]}),draft}}));
+      pop&&pop("Draft saved.","ok");
+    }finally{setSavingDraft(false);}
+  };
+
+  const onApprove=async()=>{
+    if(!approverName.trim()){pop&&pop("Senior manager name required.","warn");return;}
+    if(!approveAck){pop&&pop("Approval checkbox required.","warn");return;}
+    setApproving(true);
+    try{
+      // Auto-fill computed fields if blank.
+      const nowIso=nowISO();
+      const finalData={...data};
+      if(!finalData["s1.programApprovedDate"])finalData["s1.programApprovedDate"]=new Date().toISOString().slice(0,10);
+      if(!finalData["s8.firstReviewDue"])finalData["s8.firstReviewDue"]=todayPlus3YearsISODate();
+      if(!finalData["s12.nextReviewDate"])finalData["s12.nextReviewDate"]=todayPlus3YearsISODate();
+      if(!finalData["s12.lastReviewDate"])finalData["s12.lastReviewDate"]=new Date().toISOString().slice(0,10);
+      if(!finalData["s9.seniorManagerName"])finalData["s9.seniorManagerName"]=approverName.trim();
+      if(!finalData["s1.seniorManagerName"])finalData["s1.seniorManagerName"]=approverName.trim();
+
+      const prog=(settings&&settings.amlProgram)||{currentVersion:null,versions:[]};
+      const newVersion=nextVersion(prog.currentVersion);
+      const entry={
+        version:newVersion,
+        savedAt:nowIso,
+        savedBy:sS(activeStaff||"Unknown"),
+        approvedAt:nowIso,
+        approvedBy:approverName.trim(),
+        data:finalData,
+      };
+      const versions=Array.isArray(prog.versions)?prog.versions:[];
+      setSettings(p=>({...p,amlProgram:{currentVersion:newVersion,versions:[...versions,entry],draft:null}}));
+      pop&&pop("Approved as v"+newVersion+".","ok");
+      onClose&&onClose();
+    }finally{setApproving(false);}
+  };
+
+  const onCancel=()=>{
+    if(dirty){
+      if(typeof window!=="undefined"&&window.confirm){
+        if(!window.confirm("Discard unsaved changes? Use Save Draft to keep them."))return;
+      }
+    }
+    onClose&&onClose();
+  };
+
+  return <Modal title="📋 AML/CTF Program" onClose={onCancel} wide>
+    <div style={{...c.bnr("info"),marginBottom:14}}>
+      Statutory defaults are pre-filled. Confirm or edit each section. <strong>Save Draft</strong> keeps the in-progress edit. <strong>Save &amp; Approve</strong> creates an immutable approved version (records who approved, when, and locks the data for audit).
+    </div>
+
+    {/* Section nav — anchor links so the dealer can jump quickly */}
+    <div style={{...c.card({padding:10}),marginBottom:14,display:"flex",flexWrap:"wrap",gap:6,fontSize:11}}>
+      {sections.map(k=>(
+        <a key={k} href={"#aml-"+k} style={{color:T.gold,textDecoration:"none",padding:"3px 8px",border:"1px solid "+T.border,borderRadius:4}}>{SECTION_TITLES[k]}</a>
+      ))}
+    </div>
+
+    {sections.map(sk=>(
+      <div key={sk} id={"aml-"+sk} style={{...c.card({padding:14}),marginBottom:14,scrollMarginTop:16}}>
+        <div style={{fontSize:13,fontWeight:"bold",color:T.gold,marginBottom:12,paddingBottom:8,borderBottom:"1px solid "+T.border}}>{SECTION_TITLES[sk]}</div>
+        {SECTION_FIELDS[sk].map(fk=><FormField key={fk} fieldKey={fk} data={data} setData={setData}/>)}
+      </div>
+    ))}
+
+    {/* Approval panel — collapsed until the dealer is ready to lock
+        a version. Two-step pattern (open + confirm) prevents an
+        accidental approve from a misclick on the bottom button. */}
+    <div style={c.card({padding:14,marginBottom:14,borderLeft:"3px solid "+T.green})}>
+      <div style={{fontSize:12,fontWeight:"bold",color:T.green,marginBottom:8}}>SAVE &amp; APPROVE — creates immutable v{nextVersion((settings&&settings.amlProgram&&settings.amlProgram.currentVersion)||null)}</div>
+      <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.5}}>Once approved, this version is locked and saved to the audit trail. Use this when senior management has reviewed and signed off. Use <em>Save Draft</em> below for in-progress edits.</div>
+      {!showApprovePanel&&<button style={c.btn(T.green,T.bg)} onClick={()=>setShowApprovePanel(true)}>Open approval panel</button>}
+      {showApprovePanel&&<div>
+        <F label="Senior manager name (typed full name acts as signature)" value={approverName} onChange={setApproverName} required/>
+        <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,marginTop:8,marginBottom:14,cursor:"pointer",lineHeight:1.5}}>
+          <input type="checkbox" checked={approveAck} onChange={e=>setApproveAck(e.target.checked)} style={{marginTop:3}}/>
+          <span><strong>I, {approverName.trim()||"[name]"}, approve this AML/CTF Program version on behalf of senior management.</strong> The data captured above accurately reflects this entity's AML/CTF arrangements as of today.</span>
+        </label>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+          <button style={c.btn(T.green,T.bg)} disabled={approving||!approverName.trim()||!approveAck} onClick={onApprove}>{approving?"Approving…":"Save & Approve"}</button>
+          <button style={c.bsm()} onClick={()=>setShowApprovePanel(false)} disabled={approving}>Cancel approval</button>
+        </div>
+      </div>}
+    </div>
+
+    {/* Bottom button row — Save Draft and Cancel always visible. */}
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",position:"sticky",bottom:0,padding:"12px 0",background:T.bg,borderTop:"1px solid "+T.border}}>
+      <button style={c.btn(T.gold,T.bg)} onClick={onSaveDraft} disabled={savingDraft}>{savingDraft?"Saving…":"💾 Save Draft"}</button>
+      <button style={c.bsm()} onClick={onCancel}>Cancel</button>
+      {dirty&&<span style={{fontSize:10,color:T.orange,padding:"6px 0"}}>• Unsaved changes</span>}
+    </div>
+  </Modal>;
+}
