@@ -12,6 +12,7 @@ import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
 import TxPhotoManager from "./components/TxPhotoManager.jsx";
+import Receipt from "./components/Receipt.jsx";
 import Dashboard from "./screens/Dashboard.jsx";
 import Stock from "./screens/Stock.jsx";
 import History from "./screens/History.jsx";
@@ -627,10 +628,36 @@ export default function Loot(){
           {selTx.ttrRequired&&selTx.ttrStatus!=="FILED"&&<button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{setTxList(p=>p.map(t=>t.id===selTx.id?{...t,ttrStatus:"FILED"}:t));setSelTx(p=>({...p,ttrStatus:"FILED"}));pop("TTR marked as filed.","ok");}}>✓ Mark TTR Filed</button>}
         </Modal>}
 
-        {receiptTx&&<Modal title="🧾 Receipt" onClose={()=>setReceiptTx(null)}>
-          <pre style={{fontSize:11,fontFamily:"monospace",background:T.surface,padding:16,borderRadius:6,whiteSpace:"pre-wrap",color:T.text,marginBottom:14}}>{makeReceipt(receiptTx)}</pre>
-          <div style={{display:"flex",gap:10}}>
-            <button style={c.btn(T.gold,T.bg)} onClick={()=>dlFile(makeReceipt(receiptTx),"receipt-"+receiptTx.id+".txt","text/plain")}>⬇ Download</button>
+        {receiptTx&&<Modal title="🧾 Receipt" onClose={()=>setReceiptTx(null)} wide>
+          {/* Phase 2.7 follow-up (2026-04-30) — Receipt component
+              replaces the legacy <pre>{makeReceipt(...)}</pre>
+              .txt rendering. The Receipt's outer .receipt-print-area
+              class is what the @media print rules in index.css
+              re-show when window.print() fires from this modal.
+              Light theme is intentional — reads as a printable
+              artifact even inside the dark app modal. */}
+          <Receipt tx={receiptTx} settings={settings}/>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:14}}>
+            <button style={c.btn(T.gold,T.bg)} onClick={()=>{
+              // Print: window.print() captures the current page, the
+              // print stylesheet hides everything except the
+              // .receipt-print-area we just rendered above.
+              try{window.print();}catch(_){}
+            }}>🖨 Print Receipt</button>
+            <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>{
+              // Download: extract the live Receipt's outerHTML and
+              // wrap in a minimal HTML document so customers can
+              // open in any browser to print or save as PDF.
+              const node=document.querySelector(".receipt-print-area");
+              if(!node){
+                // Defensive fallback to the legacy .txt path if for
+                // some reason the receipt didn't mount.
+                dlFile(makeReceipt(receiptTx),"receipt-"+receiptTx.id+".txt","text/plain");
+                return;
+              }
+              const html='<!DOCTYPE html><html lang="en-AU"><head><meta charset="utf-8"><title>Receipt '+sS(receiptTx.id)+'</title><style>body{margin:0;background:#fff;color:#000;font-family:"Courier New",Consolas,monospace}</style></head><body>'+node.outerHTML+'</body></html>';
+              dlFile(html,"receipt-"+receiptTx.id+".html","text/html");
+            }}>⬇ Download HTML</button>
             <button style={c.bsm()} onClick={()=>setReceiptTx(null)}>Close</button>
           </div>
         </Modal>}
