@@ -110,6 +110,53 @@ export default function NewTx({
     if(typeof setScreen==="function")setScreen("dashboard");
   };
 
+  // Phase 2.7 follow-up (2026-04-30) — Done step closure flow.
+  // Click Complete Transaction on step 6 → finalize() commits the
+  // tx → print prompt opens. Print or Skip both lead to a
+  // 3-second auto-dismissing "Transaction Complete" modal that
+  // routes back to Dashboard via resetTx + setScreen.
+  //
+  // The "New Transaction" secondary button is the alternative
+  // path: commit + go straight to Dashboard with no modals. Same
+  // commit semantics either way — the tx is not persisted until
+  // the user clicks one of the two terminal buttons on step 6.
+  //
+  // window.print() is the launch-sprint print path. It opens the
+  // browser native print dialog with the current page; receipt
+  // polish (print stylesheet, popup window, thermal printer
+  // integration) is Phase E. The modal flow is independent of
+  // what the print dialog does — the user dismisses it however
+  // they like and the auto-dismiss timer takes them home.
+  const[printPromptOpen,setPrintPromptOpen]=useState(false);
+  const[completeModalOpen,setCompleteModalOpen]=useState(false);
+  const finishToDashboard=()=>{
+    setCompleteModalOpen(false);
+    resetTx();
+    if(typeof setScreen==="function")setScreen("dashboard");
+  };
+  const showCompleteModal=()=>{
+    setCompleteModalOpen(true);
+    setTimeout(finishToDashboard,3000);
+  };
+  const handleCompleteTransaction=async()=>{
+    try{await finalize();}catch(_){/* finalize handles its own pop on error */}
+    setPrintPromptOpen(true);
+  };
+  const handlePrint=()=>{
+    setPrintPromptOpen(false);
+    try{window.print();}catch(_){}
+    showCompleteModal();
+  };
+  const handleSkipPrint=()=>{
+    setPrintPromptOpen(false);
+    showCompleteModal();
+  };
+  const handleNewTransaction=async()=>{
+    try{await finalize();}catch(_){}
+    resetTx();
+    if(typeof setScreen==="function")setScreen("dashboard");
+  };
+
   // Phase 2.7 follow-up (2026-04-30) — outbound (we-pay-client)
   // payments must use a method that legitimately supports paying
   // funds TO the customer. Per Australian eftpos scheme rules
@@ -636,27 +683,37 @@ export default function NewTx({
     )}
 
     {/* ===================================================================
-        STEP 6 — DONE (unchanged)
+        STEP 6 — DONE (Phase 2.7 follow-up 2026-04-30 — closure flow)
+        Big ✓ icon + summary + Complete Transaction (gold primary,
+        triggers print prompt) + New Transaction (secondary, skips
+        prompt and routes home). The previous Back to Staff and
+        ✕ Cancel buttons are gone — by step 6 the dealer has
+        already confirmed the basket, compliance, client, payment,
+        and staff stages. Going back to edit at this point would
+        risk dropping a partially-finalized tx; the dedicated
+        Cancel system on steps 1–5 covers the abandon path.
         =================================================================== */}
     {txStep===6&&(
       <div>
-        <div style={c.card({padding:16,marginBottom:14,borderLeft:"4px solid "+T.gold})}>
-          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:12}}>📋 TRANSACTION SUMMARY</div>
+        <div style={{textAlign:"center",marginBottom:14}}>
+          <div style={{fontSize:48,color:T.green,marginBottom:8,lineHeight:1}}>✓</div>
+          <div style={{fontSize:20,fontWeight:"bold",color:T.white}}>Transaction Complete</div>
+        </div>
+        <div style={c.card({padding:16,marginBottom:14,borderLeft:"4px solid "+T.green})}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.green,marginBottom:12}}>📋 TRANSACTION SUMMARY</div>
           <div style={c.g2(10)}>
-            <div><div style={c.lbl}>Invoice #</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
-            <div><div style={c.lbl}>Client</div><div style={{color:T.white}}>{client.fullName}</div></div>
+            <div><div style={c.lbl}>Transaction #</div><div style={{color:T.gold,fontWeight:"bold",fontSize:14}}>{txNo}</div></div>
+            <div><div style={c.lbl}>Client</div><div style={{color:T.white}}>{client.fullName||"Anonymous"}</div></div>
             <div><div style={c.lbl}>Payment</div><div style={{textTransform:"uppercase"}}>{txPay}</div></div>
+            <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:16}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
             {buyTotal>0&&<div><div style={c.lbl}>Buy Total</div><div style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(buyTotal)}</div></div>}
             {sellTotal>0&&<div><div style={c.lbl}>Sell Total</div><div style={{color:T.gold,fontWeight:"bold"}}>{fmtAUD(sellTotal)}</div></div>}
-            <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:16}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
+            <div><div style={c.lbl}>Date</div><div style={{color:T.text}}>{new Date().toLocaleString("en-AU")}</div></div>
           </div>
           {compliance.flags.some(f=>f.key==="ttr")&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR required — file with AUSTRAC Online within 10 business days.</div>}
         </div>
-        <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}} onClick={finalize}>✓ Complete Transaction</button>
-        <div style={{display:"flex",gap:10}}>
-          <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>setTxStep(5)}>← Back to Staff</button>
-          <button style={{...c.bsm(T.border,T.muted),flex:1}} onClick={()=>{resetTx();setScreen("dashboard");}}>✕ Cancel</button>
-        </div>
+        <button style={{...c.btn(T.green,T.bg),width:"100%",fontSize:15,padding:"16px",marginBottom:10}} onClick={handleCompleteTransaction}>✓ Complete Transaction</button>
+        <button style={{...c.btn(T.border,T.text),width:"100%",fontSize:13,padding:"12px"}} onClick={handleNewTransaction}>🆕 New Transaction</button>
       </div>
     )}
 
@@ -672,6 +729,31 @@ export default function NewTx({
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <button style={c.btn(T.red,T.white)} onClick={confirmCancel}>Cancel Transaction</button>
         <button style={c.bsm()} onClick={()=>setCancelOpen(false)}>Keep Editing</button>
+      </div>
+    </Modal>}
+
+    {/* Print prompt — fires after Complete Transaction commits the
+        tx via finalize(). Modal blocks dismissal via backdrop /
+        close-X; the user must explicitly choose Print or Skip so
+        the closure flow can advance to the auto-dismiss modal.
+        Both paths terminate at finishToDashboard via showCompleteModal. */}
+    {printPromptOpen&&<Modal title="Print Receipt?" onClose={()=>{}}>
+      <div style={{fontSize:12,color:T.text,marginBottom:14}}>Transaction #{txNo} — {net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)} via {sS(txPay).toUpperCase()}</div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        <button style={c.btn(T.gold,T.bg)} onClick={handlePrint}>📄 Yes — Print</button>
+        <button style={c.bsm()} onClick={handleSkipPrint}>No — Skip</button>
+      </div>
+    </Modal>}
+
+    {/* Auto-dismiss confirmation. Backdrop click and the close-X
+        both call finishToDashboard so the dealer can short-circuit
+        the 3-second wait if they're done; the timer fires the same
+        finishToDashboard either way. resetTx + setScreen are
+        idempotent so a double-fire from racing dismissals is
+        harmless. */}
+    {completeModalOpen&&<Modal title="✓ Transaction Complete" onClose={finishToDashboard}>
+      <div style={{fontSize:13,color:T.text,textAlign:"center",padding:"20px 0"}}>
+        Saved as #{txNo}. Returning to Dashboard…
       </div>
     </Modal>}
   </div>;
