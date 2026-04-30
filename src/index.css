@@ -109,3 +109,29 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* ================================================================
+   Receipt printing — Phase 2.7 follow-up (2026-04-30)
+   ================================================================
+   .receipt-print-only wraps the Receipt component instances that
+   should NOT be visible on screen but MUST be visible when the
+   page is being printed (e.g. NewTx Done step's print path). The
+   History receipt modal renders Receipt directly without this
+   wrapper because it shows the receipt as an in-app preview.
+
+   The print-mode rules hide every other element via visibility
+   (not display: none — visibility lets descendants override and
+   keeps layout boxes intact for the receipt to claim). Then the
+   .receipt-print-area class on the Receipt root and its children
+   re-asserts visibility, and absolute-positions the receipt at
+   page origin so the browser print engine starts at the top.
+   ================================================================ */
+.receipt-print-only { display: none; }
+
+@media print {
+  .receipt-print-only { display: block !important; }
+  body { visibility: hidden !important; background: #fff !important; }
+  .receipt-print-area { visibility: visible !important; position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; background: #fff !important; color: #000 !important; }
+  .receipt-print-area * { visibility: visible !important; color: inherit !important; }
+  @page { margin: 1cm; }
+}
