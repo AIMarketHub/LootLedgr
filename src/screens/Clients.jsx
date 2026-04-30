@@ -204,6 +204,7 @@ export default function Clients({
       onClose={()=>{setSelectedClient(null);loadClients();}}
       withAdminGate={withAdminGate}
       setSelTx={setSelTx}
+      activeStaff={activeStaff}
     />}
   </div>;
 }

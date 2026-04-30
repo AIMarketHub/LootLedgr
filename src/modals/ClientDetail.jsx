@@ -24,11 +24,11 @@
 //     [Proceed] [Cancel]
 //   Cancel keeps edit state. Proceed saves the partial.
 
-import React,{useState,useMemo} from "react";
+import React,{useState,useMemo,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F,SF} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
-import {sN,sS,fmtAUD,fmtDate} from "../lib/utils.js";
+import {sN,sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
 import {clients,getMissingMandatoryFields,formatLastVisit} from "../lib/clients.js";
 
@@ -58,11 +58,18 @@ function modesOf(tx){
   return has;
 }
 
-export default function ClientDetail({client,txList,onSave,onClose,pop,withAdminGate,setSelTx}){
+export default function ClientDetail({client,txList,onSave,onClose,pop,withAdminGate,setSelTx,activeStaff}){
   const[editing,setEditing]=useState(false);
   const[form,setForm]=useState({});
   const[showGate,setShowGate]=useState(false);
   const[busy,setBusy]=useState(false);
+  // Phase 2.7 follow-up (2026-04-30) — Blacklist toggle UI. Reason
+  // text auto-saves on blur (no Admin gate to update once flagged);
+  // the toggle itself is gated. The draft is hydrated from
+  // client.blacklistReason on every render so it stays in sync if
+  // another path updates the record.
+  const[reasonDraft,setReasonDraft]=useState(sS((client&&client.blacklistReason)||""));
+  useEffect(()=>{setReasonDraft(sS((client&&client.blacklistReason)||""));},[client&&client.id,client&&client.blacklistReason]);
 
   if(!client)return null;
 
@@ -124,6 +131,49 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
     a.click();
   };
 
+  // Toggle the blacklist flag. Each direction is Admin-PIN gated
+  // (the gate auto-bypasses when settings.requirePin is off). Both
+  // sides preserve the prior trail — clearing the flag does NOT
+  // delete blacklistedAt / blacklistedBy / blacklistReason; it adds
+  // blacklistClearedAt / blacklistClearedBy alongside.
+  const toggleBlacklist=()=>{
+    const next=!client.blacklisted;
+    adminGate(next?"Flag client as blacklisted":"Clear blacklist on client",async()=>{
+      const now=nowISO();
+      const staff=sS(activeStaff||"Unknown");
+      const patch=next
+        ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistReason:client.blacklistReason||""}
+        :{blacklisted:false,blacklistClearedAt:now,blacklistClearedBy:staff};
+      setBusy(true);
+      try{
+        const updated=await clients.update(client.id,patch);
+        if(updated){
+          onSave&&onSave(updated);
+          pop&&pop(next?"Client flagged — soft-block enabled.":"Blacklist cleared.","ok");
+        }else{
+          pop&&pop("Update failed.","err");
+        }
+      }finally{setBusy(false);}
+    });
+  };
+
+  // Inline reason save on blur. No gate — the spec is "no admin
+  // gate to update text once flagged"; the gate sits on the toggle
+  // that decides whether the field appears at all. Skips the write
+  // when the draft hasn't actually changed (every focus → blur
+  // would otherwise round-trip an identical update).
+  const saveReason=async()=>{
+    if(!client.blacklisted)return;
+    const next=sS(reasonDraft);
+    if(next===sS(client.blacklistReason||""))return;
+    setBusy(true);
+    try{
+      const updated=await clients.update(client.id,{blacklistReason:next});
+      if(updated){onSave&&onSave(updated);pop&&pop("Reason saved.","ok");}
+      else pop&&pop("Save failed.","err");
+    }finally{setBusy(false);}
+  };
+
   const erasePhotoImpl=async()=>{
     if(typeof window!=="undefined"&&window.confirm&&!window.confirm("Erase the ID photo on file? This cannot be undone."))return;
     setBusy(true);
@@ -179,6 +229,10 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
           {lastVisit&&<span>Last visit: {lastVisit}</span>}
         </div>
       </div>
+      {client.blacklisted&&<div style={{...c.bnr("warn"),marginBottom:14,borderLeft:"4px solid "+T.red,background:T.redBg||"#2a0a0a",color:T.red}}>
+        ⚠ <strong>BLACKLISTED</strong> — flagged {client.blacklistedAt?fmtDate(client.blacklistedAt):"(no date)"}{client.blacklistedBy?" by "+sS(client.blacklistedBy):""}.
+        {client.blacklistReason&&<div style={{fontSize:11,marginTop:4,color:T.text}}>Reason: {sS(client.blacklistReason)}</div>}
+      </div>}
 
       {/* Photo block */}
       <div style={{...c.card({padding:14}),marginBottom:14}}>
@@ -229,7 +283,10 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
           <SF label="Risk Rating" value={form.riskRating||""} onChange={v=>setForm(p=>({...p,riskRating:v}))} options={[{value:"",label:"— Not recorded —"},{value:"low",label:"Low"},{value:"medium",label:"Medium"},{value:"high",label:"High"}]}/>
           <F label="Source of Funds" value={form.sourceOfFunds||""} onChange={v=>setForm(p=>({...p,sourceOfFunds:v}))} placeholder="e.g. wages, sale of asset, inheritance"/>
           <F label="Source of Wealth" value={form.sourceOfWealth||""} onChange={v=>setForm(p=>({...p,sourceOfWealth:v}))} placeholder="e.g. business income, savings, inheritance"/>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,marginTop:10,marginBottom:10,cursor:"pointer"}}><input type="checkbox" checked={!!form.blacklisted} onChange={e=>setForm(p=>({...p,blacklisted:e.target.checked}))}/>Blacklist this client</label>
+          {/* Blacklist moved to the dedicated RISK / STATUS section
+              below — it has its own Admin-PIN gate per direction
+              and a reason / history sub-panel. The edit form no
+              longer routes through `form.blacklisted`. */}
           <F label="Internal Notes (staff-only)" as="textarea" value={form.internalNotes||""} onChange={v=>setForm(p=>({...p,internalNotes:v}))}/>
         </div>:<div>
           <ReadField label="PEP" value={client.pepCheck}/>
@@ -286,21 +343,39 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
         </>}
       </div>
 
-      {/* Phase 2.7.11 — blacklist override history. Collapsed by
-          default; <details>/<summary> handles the toggle without
-          extra state. Hidden entirely when no overrides recorded. */}
-      {Array.isArray(client.blacklistOverrides)&&client.blacklistOverrides.length>0&&<details style={{marginBottom:14}}>
-        <summary style={{cursor:"pointer",fontSize:11,color:T.muted,padding:"6px 0",letterSpacing:"0.05em"}}>⛔ BLACKLIST OVERRIDE HISTORY ({client.blacklistOverrides.length})</summary>
-        <div style={{...c.card({padding:10}),marginTop:8}}>
-          {client.blacklistOverrides.map((o,i)=>(
-            <div key={i} style={{padding:"6px 0",borderBottom:i<client.blacklistOverrides.length-1?"1px solid "+T.border+"44":"none",fontSize:11,color:T.muted}}>
-              <div style={{color:T.text}}>{o.timestamp?new Date(o.timestamp).toLocaleString("en-AU"):"—"}</div>
-              {o.staffId&&<div>Staff: {sS(o.staffId)}</div>}
-              {o.reason&&<div>Reason: {sS(o.reason)}</div>}
-            </div>
-          ))}
-        </div>
-      </details>}
+      {/* Phase 2.7 follow-up (2026-04-30) — RISK / STATUS section.
+          The toggle is the only place in the UI that flips
+          client.blacklisted (the inline checkbox in the Compliance
+          edit form was removed). Each direction is Admin-PIN gated
+          via toggleBlacklist; the reason field auto-saves on blur
+          when set. The override history (Phase 2.7.11) is folded
+          into this panel so the trail lives next to the toggle. */}
+      <div style={{...c.card({padding:14}),marginBottom:14,borderLeft:"3px solid "+(client.blacklisted?T.red:T.border)}}>
+        <div style={{fontSize:11,fontWeight:"bold",color:client.blacklisted?T.red:T.gold,marginBottom:10}}>RISK / STATUS</div>
+        <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:busy?"default":"pointer",fontSize:12,marginBottom:8,opacity:busy?0.6:1}}>
+          <input type="checkbox" checked={!!client.blacklisted} onChange={toggleBlacklist} disabled={busy} style={{marginTop:3}}/>
+          <span><strong>Blacklisted</strong> — block this client with manager override</span>
+        </label>
+        <div style={{fontSize:10,color:T.muted,marginBottom:10,lineHeight:1.5}}>When on, staff selecting this client at New Transaction Client step sees an Admin-PIN prompt: "BLACKLISTED CLIENT — Admin PIN required to proceed". Override events log to the audit trail below.</div>
+        {client.blacklisted&&<div style={{...c.card({padding:10,background:T.surface}),marginBottom:10,borderLeft:"3px solid "+T.red}}>
+          <div style={{fontSize:11,color:T.red,fontWeight:"bold",marginBottom:6}}>⚠ FLAGGED on {client.blacklistedAt?fmtDate(client.blacklistedAt):"—"}{client.blacklistedBy?" by "+sS(client.blacklistedBy):""}</div>
+          <F label="Reason (optional)" as="textarea" value={reasonDraft} onChange={setReasonDraft} placeholder="Optional — why is this client flagged?"/>
+          <button style={c.bsm()} onClick={saveReason} disabled={busy||sS(reasonDraft)===sS(client.blacklistReason||"")}>{busy?"Saving…":"Save reason"}</button>
+        </div>}
+        {!client.blacklisted&&client.blacklistClearedAt&&<div style={{fontSize:10,color:T.muted,marginBottom:10}}>Cleared on {fmtDate(client.blacklistClearedAt)}{client.blacklistClearedBy?" by "+sS(client.blacklistClearedBy):""}.{client.blacklistedAt?" Previously flagged on "+fmtDate(client.blacklistedAt)+(client.blacklistedBy?" by "+sS(client.blacklistedBy):"")+".":""}</div>}
+        {Array.isArray(client.blacklistOverrides)&&client.blacklistOverrides.length>0&&<details>
+          <summary style={{cursor:"pointer",fontSize:11,color:T.muted,padding:"6px 0",letterSpacing:"0.05em"}}>⛔ BLACKLIST OVERRIDE HISTORY ({client.blacklistOverrides.length})</summary>
+          <div style={{...c.card({padding:10}),marginTop:8}}>
+            {client.blacklistOverrides.map((o,i)=>(
+              <div key={i} style={{padding:"6px 0",borderBottom:i<client.blacklistOverrides.length-1?"1px solid "+T.border+"44":"none",fontSize:11,color:T.muted}}>
+                <div style={{color:T.text}}>{o.timestamp?new Date(o.timestamp).toLocaleString("en-AU"):"—"}</div>
+                {o.staffId&&<div>Staff: {sS(o.staffId)}</div>}
+                {o.reason&&<div>Reason: {sS(o.reason)}</div>}
+              </div>
+            ))}
+          </div>
+        </details>}
+      </div>
 
       {/* Actions */}
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
