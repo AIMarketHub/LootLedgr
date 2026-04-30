@@ -46,6 +46,7 @@ import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} 
 import {createPaymentLink} from "../lib/integrations/stripe.js";
 import ClientSearch from "../components/ClientSearch.jsx";
 import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
+import Receipt from "../components/Receipt.jsx";
 import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 
 const STEP_LABELS=["Basket","Compliance","Client","Price+Payment","Staff","Done"];
@@ -756,5 +757,28 @@ export default function NewTx({
         Saved as #{txNo}. Returning to Dashboard…
       </div>
     </Modal>}
+
+    {/* Phase 2.7 follow-up (2026-04-30) — print-only Receipt for
+        the Done step's Print path. Hidden on screen via the
+        `.receipt-print-only` class in src/index.css; visible only
+        when window.print() fires. The pendingTx mirrors the tx
+        object finalize() builds in App.tsx — same field set, same
+        sources, computed inline so the receipt reflects the
+        in-progress transaction even before finalize commits it
+        (the Done step always has the full state available). */}
+    {txStep===6&&<div className="receipt-print-only">
+      <Receipt
+        tx={{
+          id:txNo,
+          date:new Date().toISOString(),
+          items:txItems,
+          payment:txPay,
+          buyTotal,sellTotal,net,
+          client,staff,
+          ttrRequired:compliance.flags.some(f=>f.key==="ttr"),
+        }}
+        settings={settings}
+      />
+    </div>}
   </div>;
 }
