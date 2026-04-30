@@ -172,20 +172,21 @@ export default function Loot(){
   useEffect(()=>store.set("fontSize",fontSize),[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
-  // Phase 2.7 follow-up (2026-04-30) — Supabase mirror writes are
-  // best-effort; local state is the primary truth. sbFetch already
-  // swallows network / non-2xx errors and returns null, but the
-  // browser's default fetch logging still surfaces a red 400 in the
-  // console when the on_conflict=id upsert fails (the schema is
-  // missing the PRIMARY KEY constraint that PostgREST needs for
-  // the merge-duplicates path; addressed by 0002_unique_constraints.sql).
-  // Wrap each call so the diagnostic message is controlled and the
-  // upcoming-schema-fix context is visible. Behaviour-preserving:
-  // these calls were already fire-and-forget; the wrapper only adds
-  // a console.warn on null returns or thrown rejections.
+  // Phase 2.7 follow-up — Supabase mirror writes are best-effort;
+  // local state is the primary truth. The on_conflict shape was
+  // fixed in commit c7d9ebd; sbFetch was given a 3-way return shape
+  // in this commit so empty-body success no longer looks like
+  // failure (PostgREST commonly returns 2xx with no body for
+  // upserts and DELETEs). The wrapper now warns ONLY on real
+  // failures: null (hard network) or { __sbError: status } (HTTP
+  // non-2xx). Empty-body success and parsed-JSON success are silent.
   const sbWarn=(name,p)=>{
     if(!p||typeof p.then!=="function")return p;
-    return p.then(r=>{if(r==null)console.warn("[supabase] "+name+" returned null — likely on_conflict 400; local state is authoritative. Apply 0002_unique_constraints.sql to enable the durable echo.");return r;}).catch(e=>{console.warn("[supabase] "+name+" failed:",e&&e.message);return null;});
+    return p.then(r=>{
+      if(r==null)console.warn("[supabase] "+name+" hard-failed (network / parse error)");
+      else if(r&&r.__sbError)console.warn("[supabase] "+name+" returned status "+r.__sbError);
+      return r;
+    }).catch(e=>{console.warn("[supabase] "+name+" threw:",e&&e.message);return null;});
   };
   useEffect(()=>{store.set("catalog",catalog);sbWarn("saveCatalog",sb.saveCatalog(catalog));},[catalog]);
   useEffect(()=>{store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));if(txList.length)sbWarn("saveTx",sb.saveTx(txList[0]));},[txList]);

@@ -48,7 +48,41 @@ export const store={
   del:(k)=>{try{localStorage.removeItem("gf_"+k);}catch(_){}},
 };
 
-export const sbFetch=async(path,opts={})=>{try{const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});if(!r.ok)return null;const t=await r.text();return t?JSON.parse(t):null;}catch(_){return null;}};
+// sbFetch returns one of four shapes so callers can distinguish
+// success-with-no-body (PostgREST's normal upsert response) from
+// real failures:
+//   { __sbOk: true }         2xx with empty body — common for upserts
+//                              and DELETEs without Prefer:
+//                              return=representation. Treat as success.
+//   { __sbError: <status> }  2xx-not-ok response — server reachable
+//                              but rejected the request. Treat as
+//                              error; the status is the diagnostic.
+//   <parsed JSON>            2xx with body — typically an array (for
+//                              SELECTs) or the inserted/updated row(s)
+//                              when Prefer: return=representation is
+//                              set. Treat as success.
+//   null                     hard network failure (fetch threw,
+//                              JSON.parse threw, etc.). Treat as error.
+//
+// Callers reading list / object data continue to work unchanged
+// (they read array indices or properties, which on the sentinel
+// objects come back undefined → falsy → graceful fallback).
+// Callers that distinguish success from failure should test with
+// the sbOk helper below rather than `r == null`.
+export const sbFetch=async(path,opts={})=>{
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});
+    if(!r.ok)return{__sbError:r.status};
+    const t=await r.text();
+    if(!t)return{__sbOk:true};
+    return JSON.parse(t);
+  }catch(_){return null;}
+};
+
+// Truthy iff the sbFetch result represents a success of any kind.
+// Both null (network failure) and __sbError (HTTP failure) are
+// not-ok; the empty-body sentinel and any parsed JSON are ok.
+export const sbOk=r=>r!=null&&!r.__sbError;
 
 const ts=()=>new Date().toISOString();
 // PostgREST `?on_conflict=` must name the EXACT columns of the

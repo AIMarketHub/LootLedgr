@@ -200,7 +200,13 @@ export async function runTestDataMigration({txList,setTxList}){
       if(!txIdToClientId.has(tx.id)&&!legacyNoIdTxIds.has(tx.id))continue;
       try{
         const r=await sb.saveTx(tx);
-        if(r==null)result.errors.push({tx:tx.id,msg:"Supabase saveTx returned null (likely on_conflict 400)"});
+        // Three-way sbFetch return shape (storage.js): null = hard
+        // network failure, { __sbError } = HTTP non-2xx, anything
+        // else = success (parsed JSON or { __sbOk: true } for
+        // empty-body 2xx). Log the real failures; treat success-
+        // with-no-body as a clean Supabase mirror write.
+        if(r==null)result.errors.push({tx:tx.id,msg:"Supabase saveTx hard-failed (network / parse)"});
+        else if(r&&r.__sbError)result.errors.push({tx:tx.id,msg:"Supabase saveTx status "+r.__sbError});
       }catch(e){
         result.errors.push({tx:tx.id,msg:"Supabase saveTx threw: "+(e&&e.message||"unknown")});
       }
