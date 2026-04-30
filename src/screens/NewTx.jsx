@@ -474,7 +474,7 @@ export default function NewTx({
         <div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,color:T.blue,fontWeight:"bold",marginBottom:8}}>PRIVACY NOTICE</div>
           <pre style={{fontSize:10,color:T.muted,whiteSpace:"pre-wrap",fontFamily:T.ff,margin:0}}>{PRIVACY_NOTICE(settings.businessName,settings.abn)}</pre>
-          <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={privAck} onChange={e=>setPrivAck(e.target.checked)}/><strong>I HAVE READ AND UNDERSTOOD THIS NOTICE — PROCEED</strong></label>
+          <label style={{display:"flex",alignItems:"center",gap:8,marginTop:10,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={privAck} onChange={e=>setPrivAck(e.target.checked)}/><strong>✓ The client has been told and understands</strong></label>
         </div>
         <div style={c.card({padding:16,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 1 — TRANSACTION</div>
