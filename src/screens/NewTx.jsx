@@ -37,7 +37,7 @@
 
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
-import {F,SF,HoldTimer} from "../components/ui";
+import {F,SF,HoldTimer,Modal} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
 import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
 import {checkPhotoSize} from "../lib/storage.js";
@@ -94,6 +94,21 @@ export default function NewTx({
   // routing decision inside step 4; nothing downstream cares which
   // method was used once the form is populated.
   const[captureMethod,setCaptureMethod]=useState(null);
+
+  // Phase 2.7 follow-up (2026-04-30) — Cancel transaction confirm.
+  // Each in-progress step has a Cancel button that pops this
+  // modal. On confirm, resetTx() clears every NewTx state field
+  // (basket / client / payment / compliance / photos / etc.) and
+  // setScreen("dashboard") returns to the main screen. The Done
+  // step (txStep===6) does NOT show the Cancel button — the
+  // transaction is already complete by then.
+  const[cancelOpen,setCancelOpen]=useState(false);
+  const handleCancel=()=>setCancelOpen(true);
+  const confirmCancel=()=>{
+    resetTx();
+    setCancelOpen(false);
+    if(typeof setScreen==="function")setScreen("dashboard");
+  };
 
   // Phase 2.7 follow-up (2026-04-30) — outbound (we-pay-client)
   // payments must use a method that legitimately supports paying
@@ -254,6 +269,7 @@ export default function NewTx({
         {basketTable}
         <div style={{display:"flex",gap:10}}>
           <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Compliance →</button>
+          <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={resetTx}>Reset</button>
         </div>
       </div>
@@ -343,6 +359,7 @@ export default function NewTx({
         </div>
         <div style={{display:"flex",gap:10}}>
           <button style={c.btn(T.gold)} onClick={handleToStaff}>Next: Staff →</button>
+          <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
         </div>
       </div>
@@ -392,6 +409,7 @@ export default function NewTx({
         </div>
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button style={c.btn(T.gold)} onClick={()=>setTxStep(3)}>Next: Client →</button>
+          <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
         </div>
       </div>
@@ -573,6 +591,7 @@ export default function NewTx({
         </div>
         <div style={{display:"flex",gap:10}}>
           <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Payment →</button>
+          <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
         </div>
         </>}
@@ -610,6 +629,7 @@ export default function NewTx({
         </div>
         <div style={{display:"flex",gap:10}}>
           <button style={c.btn(T.green,T.bg)} onClick={()=>setTxStep(6)}>Next: Finalise →</button>
+          <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(4)}>← Back</button>
         </div>
       </div>
@@ -639,5 +659,20 @@ export default function NewTx({
         </div>
       </div>
     )}
+
+    {/* Phase 2.7 follow-up (2026-04-30) — Cancel-transaction
+        confirmation modal. Pops over whichever step Cancel was
+        clicked from. Confirm wipes all NewTx state via resetTx
+        and routes back to the Dashboard. Keep Editing dismisses
+        without touching state. Step 6's existing ✕ Cancel above
+        is unchanged per spec — that path is pre-finalize and
+        doesn't require the same confirm flow. */}
+    {cancelOpen&&<Modal title="Cancel Transaction?" onClose={()=>setCancelOpen(false)}>
+      <div style={{...c.bnr("warn"),marginBottom:14}}>All entered data will be lost. This action cannot be undone.</div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        <button style={c.btn(T.red,T.white)} onClick={confirmCancel}>Cancel Transaction</button>
+        <button style={c.bsm()} onClick={()=>setCancelOpen(false)}>Keep Editing</button>
+      </div>
+    </Modal>}
   </div>;
 }
