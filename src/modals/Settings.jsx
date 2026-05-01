@@ -28,7 +28,7 @@
 
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
-import {sS,fmtAUD,fmtDate} from "../lib/utils.js";
+import {sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
 
 // Date+time formatter used by the AML/CTF Program status card and
 // version history. fmtDate from utils renders "DD/MM/YY HH:MM";
@@ -317,33 +317,98 @@ export default function Settings({
           const versions=Array.isArray(prog.versions)?prog.versions:[];
           const current=prog.currentVersion?versions.find(v=>v.version===prog.currentVersion):null;
           const hasDraft=!!(prog.draft&&prog.draft.data);
-          // Next review: 3 years from approval, per Section 8 default.
           let nextReview=null;
           if(current&&current.approvedAt){
             const d=new Date(current.approvedAt);
             d.setFullYear(d.getFullYear()+3);
             nextReview=d.toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});
           }
+          const mostRecent=versions.length?[...versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]:null;
+          // Seed a fresh draft from the current approved version.
+          // Used by both "↺ Edit as new draft" (CURRENT card) and
+          // "+ Start a new draft" (DRAFT card when none exists);
+          // confirms before overwriting an existing draft.
+          const seedDraftFromCurrent=()=>{
+            if(!current)return;
+            if(hasDraft){
+              if(typeof window!=="undefined"&&window.confirm){
+                if(!window.confirm("A draft already exists. Replace it with a copy of v"+sS(current.version)+"?"))return;
+              }
+            }
+            setSettings(p=>({
+              ...p,
+              amlProgram:{
+                ...(p.amlProgram||{currentVersion:null,versions:[]}),
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+              },
+            }));
+            setShowAmlForm(true);
+          };
+          const discardDraft=()=>{
+            if(typeof window!=="undefined"&&window.confirm){
+              if(!window.confirm("Discard the current draft? Edits will be lost. This cannot be undone."))return;
+            }
+            setSettings(p=>({
+              ...p,
+              amlProgram:{...(p.amlProgram||{currentVersion:null,versions:[]}),draft:null},
+            }));
+            pop&&pop("Draft discarded.","warn");
+          };
           return <>
             <div style={{...c.bnr("info"),marginBottom:14}}>
               <strong>AUSTRAC obligation.</strong> Tranche-2 reporting entities (precious metals & stones dealers) must maintain a written AML/CTF Program from 1 July 2026. This form pre-fills statutory-correct defaults — you confirm or edit each section, save & approve, then download as PDF for AUSTRAC audits. Versions are immutable once approved.
             </div>
-            <div style={c.card({padding:14,marginBottom:14,borderLeft:"3px solid "+(current?T.green:T.gold)})}>
-              <div style={{fontSize:11,fontWeight:"bold",color:current?T.green:T.gold,marginBottom:8}}>STATUS</div>
-              {current?<div style={{fontSize:12,color:T.text}}>
-                <div>Current version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
-                <div>Saved {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
-                {current.approvedBy&&<div>Approved {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
-                {nextReview&&<div style={{marginTop:6,color:T.muted}}>Next independent review due: {nextReview}</div>}
-                <div style={{marginTop:6,color:T.muted}}>Total versions saved: {versions.length}</div>
-              </div>:<div style={{fontSize:12,color:T.muted}}>
-                {hasDraft?<>Draft saved {fmtDateTime(prog.draft.savedAt)}{prog.draft.savedBy?" by "+sS(prog.draft.savedBy):""}. Not yet approved.</>:<>No AML/CTF Program on file. Click below to start — the form pre-fills statutory defaults so most sections only need a quick review.</>}
-              </div>}
+
+            {/* Card 1 — CURRENT VERSION */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.gold}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📌 CURRENT VERSION</div>
+              {current?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
+                  <div>Saved: {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
+                  {current.approvedBy&&<div>Approved: {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
+                  {nextReview&&<div style={{color:T.muted,marginTop:4}}>Next independent review due: {nextReview}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowAmlPdf(true)}>📄 Download PDF</button>
+                  <button style={c.bsm()} onClick={seedDraftFromCurrent}>↺ Edit as new draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:10}}>No AML/CTF Program approved yet.</div>
+                <button style={c.btn(T.gold,T.bg)} onClick={()=>setShowAmlForm(true)}>+ Fill out AML/CTF Program</button>
+              </>}
             </div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-              <button style={c.btn(T.gold,T.bg)} onClick={()=>setShowAmlForm(true)}>{current||hasDraft?"+ Edit / Update Program":"+ Fill Out AML/CTF Program"}</button>
-              <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowAmlPdf(true)} disabled={!current}>📄 Download as PDF</button>
-              <button style={c.bsm()} onClick={()=>setShowAmlHistory(true)} disabled={versions.length===0}>📜 View Version History ({versions.length})</button>
+
+            {/* Card 2 — DRAFT */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.orange}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:10}}>📝 DRAFT (in progress)</div>
+              {hasDraft?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Saved: {fmtDateTime(prog.draft.savedAt)}{prog.draft.savedBy?" by "+sS(prog.draft.savedBy):""}</div>
+                  <div style={{color:T.muted,marginTop:2}}>Status: not yet approved</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.btn(T.gold,T.bg,{padding:"8px 14px",fontSize:12})} onClick={()=>setShowAmlForm(true)}>📝 Continue editing</button>
+                  <button style={c.bsm(T.redBg,T.red)} onClick={discardDraft}>🗑 Discard draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:current?10:0}}>No draft in progress.</div>
+                {current&&<button style={c.bsm()} onClick={seedDraftFromCurrent}>+ Start a new draft</button>}
+              </>}
+            </div>
+
+            {/* Card 3 — VERSION HISTORY */}
+            <div style={{...c.card({padding:14}),marginBottom:0,borderLeft:"3px solid "+T.border}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.muted,marginBottom:10}}>📜 VERSION HISTORY</div>
+              {versions.length>0?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>{versions.length} approved version{versions.length===1?"":"s"} on file.</div>
+                  {mostRecent&&<div style={{color:T.muted,marginTop:2}}>Most recent: <strong>v{sS(mostRecent.version)}</strong> — {fmtDateTime(mostRecent.savedAt)}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm()} onClick={()=>setShowAmlHistory(true)}>📜 View all versions</button>
+                </div>
+              </>:<div style={{fontSize:12,color:T.muted}}>No versions saved yet. Use the form's <em>Save &amp; Approve</em> button to create the first version.</div>}
             </div>
           </>;
         })()}
