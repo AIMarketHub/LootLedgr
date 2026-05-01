@@ -59,8 +59,15 @@ function FormField({fieldKey,data,setData}){
 }
 
 export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onClose}){
-  // Compute the initial seed once at mount.
-  const seed=useMemo(()=>{
+  // Initial seed at mount + a setter so successful saves can resync
+  // it to the just-saved data. Without the setter, dirty stays
+  // true forever after any save (Save Draft and Save & Approve
+  // both update settings.amlProgram, but seed stays frozen at the
+  // mount-time precedence value, so JSON.stringify(data) !==
+  // JSON.stringify(seed) keeps reading dirty). Resyncing seed to
+  // data on save makes dirty correctly flip back to false until
+  // the next edit.
+  const[seed,setSeed]=useState(()=>{
     const prog=(settings&&settings.amlProgram)||{};
     if(prog.draft&&prog.draft.data)return{...buildDefaults(settings),...prog.draft.data};
     if(Array.isArray(prog.versions)&&prog.currentVersion){
@@ -68,8 +75,7 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
       if(cur&&cur.data)return{...buildDefaults(settings),...cur.data};
     }
     return buildDefaults(settings);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  });
 
   const[data,setData]=useState(seed);
   const[approverName,setApproverName]=useState("");
@@ -86,6 +92,10 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
     try{
       const draft={data,savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")};
       setSettings(p=>({...p,amlProgram:{...(p.amlProgram||{currentVersion:null,versions:[]}),draft}}));
+      // Resync seed to the just-saved data so the dirty flag flips
+      // back to false. Subsequent Cancel won't trigger the discard
+      // prompt unless the user has typed more after this save.
+      setSeed(data);
       pop&&pop("Draft saved.","ok");
     }finally{setSavingDraft(false);}
   };
