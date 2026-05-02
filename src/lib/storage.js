@@ -18,8 +18,26 @@
 //      `sbFetch` and surface as null so the app falls back to the
 //      localStorage cache and remains responsive.
 //
-// SHOP_ID is hardcoded "default" for the single-tenant pre-Phase-3
-// app. Phase 3 (auth) will swap this for a per-user / per-tenant id.
+// SHOP_ID was hardcoded "default" before the Stage 1.A SaaS
+// foundation landed. The migration in 0003_saas_foundation.sql
+// + the auth context in src/components/AuthProvider.jsx + the
+// signup flow in src/lib/auth/saas.js together produce a real
+// shops.id UUID per dealer.
+//
+// Stage 1.A (2026-05-02) — sb / clients module-level reads now
+// route through getCurrentShopId() which returns the live UUID
+// from the cached auth state. Calls before sign-in throw, but in
+// practice every call site is downstream of <RequireAuth/> which
+// blocks render until auth resolves. App.tsx's mount-time
+// useEffect (the one that pulls txList / stock / settings /
+// catalog from Supabase) is the one path that fires before
+// auth.shop is in scope; it now waits for the cached id.
+//
+// SHOP_ID is exported as a fixed sentinel string ("__no_shop__")
+// rather than the legacy "default" so any stray hard-coded
+// callers fail loudly rather than silently writing into the
+// wrong tenant. Tests and dev paths should never reach a state
+// where SHOP_ID is read directly.
 //
 // `checkPhotoSize` is a thin pass-through today; it exists so a real
 // resize/compress step can be added later without changing call
@@ -40,7 +58,21 @@ const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
 // Exported (Phase 2.7.2) so src/lib/clients.js can scope its REST
 // queries to the same shop. Phase 3 swaps this for a per-user /
 // per-tenant id read from the auth session.
-export const SHOP_ID="default";
+export const SHOP_ID="__no_shop__";
+
+// Cached shop id, set by AuthProvider whenever the auth context
+// resolves to a shop. The sb.* methods below use this to scope
+// reads / writes; the cache avoids an async lookup per sb call.
+let _cachedShopId=null;
+export function setCurrentShopId(id){_cachedShopId=id?String(id):null;}
+export function getCurrentShopId(){
+  if(_cachedShopId)return _cachedShopId;
+  // Defensive — surfaces clearly in console and lets the failing
+  // call return null/[] rather than silently writing into a
+  // shop-less row that RLS would reject anyway.
+  console.warn("[storage] getCurrentShopId() called before auth context cached a shop_id; sb.* call will likely fail.");
+  return SHOP_ID;
+}
 
 export const store={
   get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
@@ -105,16 +137,16 @@ const ON_CONFLICT={
 const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(ON_CONFLICT[tbl]||"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
 
 export const sb={
-  saveTx:async tx=>upsSB("transactions",{id:tx.id,shop_id:SHOP_ID,data:tx,updated_at:ts()}),
-  loadTxList:async()=>{const r=await sbFetch("transactions?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=500");return r?r.map(x=>x.data):null;},
-  deleteTx:async id=>sbFetch("transactions?id=eq."+id,{method:"DELETE"}),
-  saveStock:async item=>upsSB("stock",{id:item.id,shop_id:SHOP_ID,data:item,updated_at:ts()}),
-  loadStock:async()=>{const r=await sbFetch("stock?shop_id=eq."+SHOP_ID+"&order=updated_at.desc&limit=2000");return r?r.map(x=>x.data):null;},
-  deleteStock:async id=>sbFetch("stock?id=eq."+id,{method:"DELETE"}),
-  saveSettings:async s=>upsSB("settings",{shop_id:SHOP_ID,data:s,updated_at:ts()}),
-  loadSettings:async()=>{const r=await sbFetch("settings?shop_id=eq."+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
-  saveCatalog:async cat=>upsSB("catalog",{id:"catalog_"+SHOP_ID,shop_id:SHOP_ID,data:cat,updated_at:ts()}),
-  loadCatalog:async()=>{const r=await sbFetch("catalog?id=eq.catalog_"+SHOP_ID+"&limit=1");return r&&r[0]?r[0].data:null;},
+  saveTx:async tx=>{const sid=getCurrentShopId();return upsSB("transactions",{id:tx.id,shop_id:sid,data:tx,updated_at:ts()});},
+  loadTxList:async()=>{const sid=getCurrentShopId();const r=await sbFetch("transactions?shop_id=eq."+encodeURIComponent(sid)+"&order=updated_at.desc&limit=500");return r&&!r.__sbError&&!r.__sbOk?(Array.isArray(r)?r.map(x=>x.data):null):null;},
+  deleteTx:async id=>sbFetch("transactions?id=eq."+encodeURIComponent(id)+"&shop_id=eq."+encodeURIComponent(getCurrentShopId()),{method:"DELETE"}),
+  saveStock:async item=>{const sid=getCurrentShopId();return upsSB("stock",{id:item.id,shop_id:sid,data:item,updated_at:ts()});},
+  loadStock:async()=>{const sid=getCurrentShopId();const r=await sbFetch("stock?shop_id=eq."+encodeURIComponent(sid)+"&order=updated_at.desc&limit=2000");return r&&!r.__sbError&&!r.__sbOk?(Array.isArray(r)?r.map(x=>x.data):null):null;},
+  deleteStock:async id=>sbFetch("stock?id=eq."+encodeURIComponent(id)+"&shop_id=eq."+encodeURIComponent(getCurrentShopId()),{method:"DELETE"}),
+  saveSettings:async s=>{const sid=getCurrentShopId();return upsSB("settings",{shop_id:sid,data:s,updated_at:ts()});},
+  loadSettings:async()=>{const sid=getCurrentShopId();const r=await sbFetch("settings?shop_id=eq."+encodeURIComponent(sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
+  saveCatalog:async cat=>{const sid=getCurrentShopId();return upsSB("catalog",{id:"catalog_"+sid,shop_id:sid,data:cat,updated_at:ts()});},
+  loadCatalog:async()=>{const sid=getCurrentShopId();const r=await sbFetch("catalog?id=eq."+encodeURIComponent("catalog_"+sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
 };
 
 export const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};

@@ -24,7 +24,7 @@
 // modal. Cancel returns to the form; Proceed saves the partial.
 // This module supplies the predicate; the modal lives in the UI.
 
-import {sbFetch,SHOP_ID} from "./storage.js";
+import {sbFetch,getCurrentShopId} from "./storage.js";
 import {fmtDate} from "./utils.js";
 
 const ts=()=>new Date().toISOString();
@@ -111,7 +111,7 @@ export const clients={
   // List all clients for this shop, newest first. Default 500-row
   // limit matches the loadTxList convention in storage.js.
   async list({limit=500}={}){
-    const r=await sbFetch(`clients?shop_id=eq.${SHOP_ID}&order=updated_at.desc&limit=${limit}`);
+    const r=await sbFetch(`clients?shop_id=eq.${encodeURIComponent(getCurrentShopId())}&order=updated_at.desc&limit=${limit}`);
     return r?r.map(unwrap):[];
   },
 
@@ -125,7 +125,7 @@ export const clients={
   // (2.7.9). Idempotent dedupe key.
   async getByIdNumber(idNumber){
     if(!idNumber)return null;
-    const r=await sbFetch(`clients?shop_id=eq.${SHOP_ID}&data->>idNumber=eq.${encodeURIComponent(idNumber)}&limit=1`);
+    const r=await sbFetch(`clients?shop_id=eq.${encodeURIComponent(getCurrentShopId())}&data->>idNumber=eq.${encodeURIComponent(idNumber)}&limit=1`);
     return r&&r[0]?unwrap(r[0]):null;
   },
 
@@ -141,7 +141,7 @@ export const clients={
     const enc=encodeURIComponent(q);
     const pattern=`*${enc}*`;
     const orParts=SEARCH_FIELDS.map(f=>`data->>${f}.ilike.${pattern}`).join(",");
-    const r=await sbFetch(`clients?shop_id=eq.${SHOP_ID}&or=(${orParts})&order=updated_at.desc&limit=${limit}`);
+    const r=await sbFetch(`clients?shop_id=eq.${encodeURIComponent(getCurrentShopId())}&or=(${orParts})&order=updated_at.desc&limit=${limit}`);
     return r?r.map(unwrap):[];
   },
 
@@ -152,7 +152,7 @@ export const clients={
     const r=await sbFetch(`clients`,{
       method:"POST",
       prefer:"return=representation",
-      body:JSON.stringify({shop_id:SHOP_ID,data,updated_at:ts()}),
+      body:JSON.stringify({shop_id:getCurrentShopId(),data,updated_at:ts()}),
     });
     return r&&r[0]?unwrap(r[0]):null;
   },

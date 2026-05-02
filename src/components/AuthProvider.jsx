@@ -20,6 +20,7 @@
 
 import React,{createContext,useContext,useEffect,useState,useCallback} from "react";
 import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isLockedOut} from "../lib/auth/saas.js";
+import {setCurrentShopId} from "../lib/storage.js";
 
 const AuthCtx=createContext({
   user:null,userRecord:null,shop:null,role:null,
@@ -39,6 +40,7 @@ export function AuthProvider({children}){
     setState(s=>({...s,loading:true}));
     const user=await getCurrentUser();
     if(!user){
+      setCurrentShopId(null);
       setState({user:null,userRecord:null,shop:null,role:null,admin:false,locked:false,loading:false});
       return;
     }
@@ -48,6 +50,10 @@ export function AuthProvider({children}){
       isAdmin(),
       isLockedOut(),
     ]);
+    // Cache the shop id in storage.js so module-level sb.* helpers
+    // can read it synchronously from this point on. Cleared above
+    // when the user signs out.
+    setCurrentShopId(shop&&shop.id||null);
     setState({
       user,
       userRecord,
