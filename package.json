@@ -13,7 +13,8 @@
     "@supabase/supabase-js": "^2.105.1",
     "netlify-cli": "^25.0.1",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
