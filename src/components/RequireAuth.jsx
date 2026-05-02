@@ -8,15 +8,37 @@
 //                          rare — happens when a previous signup
 //                          left the auth row but rolled back the
 //                          shops/users insert)
+//   wrong subdomain      → cross-host redirect to the user's
+//                          actual shop subdomain. Skipped on
+//                          dev hosts (lootledger.netlify.app /
+//                          localhost) where there is no
+//                          subdomain to enforce.
 // Otherwise renders children.
 
-import React from "react";
+import React,{useEffect} from "react";
 import {Navigate,useLocation} from "react-router-dom";
 import {useAuth} from "./AuthProvider.jsx";
+import {detectTenantHost,buildShopUrl} from "../lib/tenancy.js";
 
 export default function RequireAuth({children}){
-  const{user,userRecord,locked,loading}=useAuth();
+  const{user,userRecord,shop,locked,loading}=useAuth();
   const loc=useLocation();
+
+  // Cross-subdomain redirect: when the user's shop slug doesn't
+  // match the current host's subdomain, navigate to the right
+  // host. Runs as a side-effect because the redirect is
+  // window.location.replace, not a router Navigate. Dev hosts
+  // skip this entirely (no real subdomain to enforce).
+  useEffect(()=>{
+    if(loading||!user||!shop||!shop.slug)return;
+    const detected=detectTenantHost(typeof window!=="undefined"?window.location.hostname:"");
+    if(detected.mode!=="tenant")return;
+    if(detected.slug===shop.slug)return;
+    const target=buildShopUrl(shop.slug,{path:loc.pathname+loc.search});
+    if(target&&target!==window.location.href){
+      window.location.replace(target);
+    }
+  },[loading,user,shop&&shop.slug,loc.pathname,loc.search]);
 
   if(loading){
     return <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"60vh",fontFamily:"system-ui",color:"#666"}}>Loading…</div>;

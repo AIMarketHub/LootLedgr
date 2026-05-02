@@ -29,8 +29,15 @@ import ApiDiagnostics from "./modals/ApiDiagnostics.jsx";
 import CatalogEditor from "./modals/CatalogEditor.jsx";
 import LogoManager from "./modals/LogoManager.jsx";
 import ForgotPin from "./modals/ForgotPin.jsx";
+import {useAuth} from "./components/AuthProvider.jsx";
+import {signOut as saasSignOut} from "./lib/auth/saas.js";
 
 export default function Loot(){
+  // Stage 1.A SaaS foundation — auth context provides the
+  // shop the user is signed into. Used for the topbar slug
+  // label and (Commit 6) for replacing SHOP_ID="default" with
+  // the real shop UUID across storage.js / clients.js.
+  const auth=useAuth();
   const[screen,setScreen]=useState("dashboard");
   const[gSpot,setGSpot]=useState(()=>store.get("gSpot",0));
   const[sSpot,setSSpot]=useState(()=>store.get("sSpot",0));
@@ -489,6 +496,21 @@ export default function Loot(){
         </div>
       ):(
       <div>
+        {/* Stage 1.A SaaS-tenant strip. Shows which shop the user
+            is signed into so it's unambiguous from the dealer's
+            point of view. Hidden when auth context isn't loaded
+            yet (defensive — the RequireAuth guard above wouldn't
+            mount this tree otherwise). The strip also offers a
+            Sign-out shortcut so the dealer doesn't have to dig
+            through Settings to switch accounts. */}
+        {auth&&auth.shop&&<div style={{background:T.bg,borderBottom:"1px solid "+T.border,padding:"4px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",fontSize:11,color:T.muted,letterSpacing:"0.04em"}}>
+          <span>Shop: <strong style={{color:T.gold}}>{sS(auth.shop.slug)}</strong>{auth.shop.business_name?" — "+sS(auth.shop.business_name):""}</span>
+          <span style={{display:"flex",gap:10,alignItems:"center"}}>
+            {auth.user&&auth.user.email&&<span style={{color:T.muted}}>{sS(auth.user.email)}</span>}
+            {auth.admin&&<a href="/admin" style={{color:T.gold,textDecoration:"none",fontWeight:"bold"}}>Admin</a>}
+            <button style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:0,textDecoration:"underline"}} onClick={async()=>{await saasSignOut();if(auth.refresh)await auth.refresh();window.location.assign("/login");}}>Sign out</button>
+          </span>
+        </div>}
         <div style={{background:T.surface,borderBottom:"1px solid "+T.border,padding:"0 8px",display:"flex",alignItems:"center",justifyContent:"space-between",minHeight:50,position:"sticky",top:0,zIndex:100}}>
           <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,maxWidth:160}} onClick={()=>{setLogoPinMode(true);setLogoPinVal("");}}>
             <img src={settings.logoImg||SEED_LOGO} alt="logo" style={{width:34,height:34,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
