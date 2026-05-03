@@ -90,27 +90,36 @@ async function safe(fn){
 }
 
 // ──────────────────────────────────────────────────────────────────
-// Sign up — creates auth.users entry + shops row + users row.
-// All three must succeed for the signup to be considered complete.
-// On any failure we attempt to roll back the shop insert (the
-// auth.users entry can stick around — Supabase doesn't expose a
-// client-side delete for the active session, and a stranded auth
-// account without a users row will be re-claimed on next signup
-// attempt with the same email).
+// Sign up — creates auth.users entry, then calls the SECURITY
+// DEFINER signup_shop() RPC to atomically insert the shops + users
+// rows in a single Postgres transaction. The RPC bypasses the
+// shops_insert RLS check (which raced with auth-state propagation
+// in earlier client-side INSERT-shop / INSERT-user attempts) and
+// re-imposes correctness inside the function (auth.uid() check,
+// duplicate-shop guard, slug dedupe).
+//
+// On RPC failure the auth.users entry lingers — Supabase doesn't
+// expose client-side auth-user delete, so a stranded auth account
+// without a shops/users row will be re-claimed on the next signUp
+// retry with the same email (the RPC's "User already has a shop"
+// guard is the safety net there: it'll fire only if a previous
+// retry actually succeeded in creating the users row, which means
+// the shop exists too and there's nothing to roll back).
 // ──────────────────────────────────────────────────────────────────
 export async function signUp({
   email,phone,password,
   firstName,familyName,
-  businessName,abn,dealerLicenceNo,address,
+  businessName,abn,
+  // dealerLicenceNo / address accepted for forward-compat; not
+  // currently passed through to signup_shop. The dealer fills
+  // those in via Settings → Business Details after signup.
 }){
   if(!email)return{ok:false,error:"Email is required."};
   if(!phone)return{ok:false,error:"Phone is required."};
   if(!password||password.length<8)return{ok:false,error:"Password must be at least 8 characters."};
   if(!businessName)return{ok:false,error:"Business name is required."};
 
-  // Step 1 — auth.users via Supabase Auth. Email is primary; phone
-  // goes into user_metadata so the user can sign in with either
-  // (the signIn helpers below check both fields).
+  // Step 1 — auth.users via Supabase Auth.
   const authResult=await safe(()=>supabase.auth.signUp({
     email,
     password,
@@ -123,41 +132,41 @@ export async function signUp({
   const authUser=authResult.data&&authResult.data.user;
   if(!authUser||!authUser.id)return{ok:false,error:"Signup returned no user id."};
 
-  // Step 2 — shops row.
-  const baseSlug=makeSlug(businessName);
-  const slug=await findFreeSlug(baseSlug);
-  const shopInsert=await safe(()=>supabase.from("shops").insert({
-    slug,
-    business_name:businessName,
-    abn:abn||null,
-    dealer_licence_no:dealerLicenceNo||null,
-    address:address||null,
-    phone:phone||null,
-    created_by:authUser.id,
-  }).select().single());
-  if(!shopInsert.ok)return{ok:false,error:"Could not create shop: "+shopInsert.error};
-  const shop=shopInsert.data;
+  // Step 2 — atomic shops + users insert via SECURITY DEFINER RPC.
+  // Returns json: { shop_id, slug, role }. Any failure surfaces
+  // here as r.error; the auth.users row is left in place per the
+  // header comment.
+  const r=await safe(()=>supabase.rpc("signup_shop",{
+    p_business_name:businessName,
+    p_abn:abn||"",
+    p_first_name:firstName||"",
+    p_family_name:familyName||"",
+    p_email:email||"",
+    p_phone:phone||"",
+  }));
+  if(!r.ok)return{ok:false,error:"Could not create shop: "+r.error};
 
-  // Step 3 — users row linking auth.users.id → shops.id, role=owner.
-  const userInsert=await safe(()=>supabase.from("users").insert({
-    id:authUser.id,
-    shop_id:shop.id,
-    role:"owner",
-    first_name:firstName||"",
-    family_name:familyName||"",
-    email:email||"",
-    phone:phone||"",
-  }).select().single());
-  if(!userInsert.ok){
-    // Roll back the shop. The auth user lingers — they can retry
-    // with the same email and the next signUp will return the
-    // existing auth row; we'll create a fresh shop + users row
-    // on the retry.
-    await safe(()=>supabase.from("shops").delete().eq("id",shop.id));
-    return{ok:false,error:"Could not create user record: "+userInsert.error};
-  }
-
-  return{ok:true,data:{user:authUser,shop,userRecord:userInsert.data}};
+  // RPC returned shape: { shop_id, slug, role }. Hydrate to the
+  // legacy {user, shop, userRecord} shape callers expect by doing
+  // a SELECT for the shop. The users row is keyed on auth.uid()
+  // which equals authUser.id; we don't need a round-trip for it.
+  const shopRow=await safe(()=>supabase.from("shops").select("*").eq("id",r.data.shop_id).maybeSingle());
+  return{
+    ok:true,
+    data:{
+      user:authUser,
+      shop:shopRow.ok?shopRow.data:{id:r.data.shop_id,slug:r.data.slug,business_name:businessName},
+      userRecord:{
+        id:authUser.id,
+        shop_id:r.data.shop_id,
+        role:r.data.role,
+        first_name:firstName||"",
+        family_name:familyName||"",
+        email,
+        phone,
+      },
+    },
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────
