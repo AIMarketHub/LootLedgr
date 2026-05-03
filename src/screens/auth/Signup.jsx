@@ -8,7 +8,7 @@
 
 import React,{useState} from "react";
 import {Link,useNavigate} from "react-router-dom";
-import AuthLayout,{authStyles as A} from "./AuthLayout.jsx";
+import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
 import {signUp} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 
@@ -42,6 +42,7 @@ export default function Signup(){
   const[email,setEmail]=useState("");
   const[phone,setPhone]=useState("");
   const[password,setPassword]=useState("");
+  const[passwordConfirm,setPasswordConfirm]=useState("");
   const[err,setErr]=useState("");
   const[info,setInfo]=useState("");
   const[busy,setBusy]=useState(false);
@@ -58,6 +59,7 @@ export default function Signup(){
     const p=normalisePhone(phone);
     if(!p)return "Valid AU phone required (e.g. 0412 345 678).";
     if(password.length<8)return "Password must be at least 8 characters.";
+    if(password!==passwordConfirm)return "Passwords don't match.";
     return null;
   };
 
@@ -118,7 +120,11 @@ export default function Signup(){
       <input id="su-ph" style={A.input} type="tel" autoComplete="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="0412 345 678"/>
 
       <label style={A.label} htmlFor="su-pw">Password</label>
-      <input id="su-pw" style={A.input} type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="8+ characters"/>
+      <PasswordField id="su-pw" autoComplete="new-password" value={password} onChange={setPassword} placeholder="8+ characters"/>
+
+      <label style={A.label} htmlFor="su-pw2">Confirm password</label>
+      <PasswordField id="su-pw2" autoComplete="new-password" value={passwordConfirm} onChange={setPasswordConfirm}/>
+      {password&&passwordConfirm&&password!==passwordConfirm&&<div style={{...A.helper,color:"#933"}}>Passwords don't match.</div>}
 
       {err&&<div style={A.error}>{err}</div>}
       {info&&<div style={A.info}>{info}</div>}

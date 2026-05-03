@@ -48,3 +48,43 @@ export const authStyles={
   info:{padding:"10px 12px",background:"#eef6ff",border:"1px solid #cde",borderRadius:4,fontSize:12,color:"#26568f",marginTop:14},
   helper:{fontSize:11,color:"#888",marginTop:4},
 };
+
+// Password input with an inline 👁 toggle that flips type between
+// "password" (masked) and "text" (visible). Reusable across Login
+// + Signup so both screens share the same affordance.
+//
+// `id` and `autoComplete` flow through to the underlying input so
+// browsers do the right thing for password managers.
+export function PasswordField({id,value,onChange,autoComplete,placeholder,autoFocus}){
+  const[shown,setShown]=React.useState(false);
+  return <div style={{position:"relative"}}>
+    <input
+      id={id}
+      style={{...authStyles.input,paddingRight:42}}
+      type={shown?"text":"password"}
+      autoComplete={autoComplete}
+      autoFocus={autoFocus}
+      placeholder={placeholder}
+      value={value}
+      onChange={e=>onChange(e.target.value)}
+    />
+    <button
+      type="button"
+      onClick={()=>setShown(s=>!s)}
+      aria-label={shown?"Hide password":"Show password"}
+      style={{
+        position:"absolute",
+        right:6,
+        top:"50%",
+        transform:"translateY(-50%)",
+        background:"none",
+        border:"none",
+        cursor:"pointer",
+        fontSize:16,
+        padding:"4px 8px",
+        color:"#888",
+        fontFamily:"inherit",
+      }}
+    >{shown?"🙈":"👁"}</button>
+  </div>;
+}

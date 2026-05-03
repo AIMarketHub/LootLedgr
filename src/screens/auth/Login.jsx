@@ -5,7 +5,7 @@
 
 import React,{useState} from "react";
 import {Link,useNavigate,useLocation} from "react-router-dom";
-import AuthLayout,{authStyles as A} from "./AuthLayout.jsx";
+import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
 import {signIn} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 
@@ -42,7 +42,7 @@ export default function Login(){
       <label style={A.label} htmlFor="auth-id">Email or phone</label>
       <input id="auth-id" style={A.input} type="text" autoComplete="username" autoFocus value={identifier} onChange={e=>setIdentifier(e.target.value)} placeholder="you@example.com or +614…"/>
       <label style={A.label} htmlFor="auth-pw">Password</label>
-      <input id="auth-pw" style={A.input} type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/>
+      <PasswordField id="auth-pw" autoComplete="current-password" value={password} onChange={setPassword}/>
       {err&&<div style={A.error}>{err}</div>}
       <button type="submit" style={A.primary} disabled={busy||!identifier||!password}>{busy?"Signing in…":"Sign In"}</button>
     </form>
