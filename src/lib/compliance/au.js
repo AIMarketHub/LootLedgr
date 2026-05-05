@@ -121,6 +121,82 @@ export const PRIVACY_NOTICE=(biz,abn)=>"PRIVACY NOTICE — "+sS(biz)+"  ABN "+sS
 //   not yet decided — likely an `overrides` Supabase table or a sub-
 //   record on the transaction. Lands fully in Phase 3 (auth + roles);
 //   data shape can land earlier if a small schema change suffices.
+// ============================================================
+// TTR — Threshold Transaction Report rules (statutory)
+// ============================================================
+//
+// Sources:
+//   AML/CTF Act 2006 (Cth) s.43 — TTR for cash transactions.
+//   AML/CTF Rules 2025 Chapter 18 — threshold transaction reports.
+//
+// Three rules this module enforces:
+//
+//   Rule 1 — CASH ONLY. The TTR threshold ($10k) applies to
+//   *physical currency only*. EFTPOS, card, bank transfer,
+//   Stripe, and crypto transactions ≥ $10k do NOT require a
+//   TTR — they're tracked through their own banking systems.
+//   Enforced below by gating the TTR flag on
+//   payment === "cash".
+//
+//   Rule 2 — MIXED PAYMENTS. When a single transaction uses
+//   multiple payment methods, only the CASH portion counts
+//   against the threshold. Example: $15k tx with $5k cash +
+//   $10k EFTPOS → no TTR (cash portion is $5k, below $10k).
+//   The current data model carries a single tx.payment string,
+//   so 100% of buyTotal counts as that method. cashAmountFromTx()
+//   below honours tx.payments[] (array of {method, amount}) when
+//   it lands; until then, the single-method path applies.
+//
+//   Rule 3 — 24-HOUR AGGREGATION. Multiple cash transactions
+//   from the same customer (linked by tx.clientId) within any
+//   rolling 24-hour window that sum to $10k or more count as a
+//   single threshold transaction event for TTR purposes. The
+//   aggregation lookup is async (Supabase round-trip per
+//   finalize) so it lives outside this pure module — see
+//   sb.loadCashTotal24h(clientId) in src/lib/storage.js. The
+//   pure helper isTtrRequired() below combines that prior cash
+//   sum with the current transaction's cash amount and the
+//   ttrEnabled toggle.
+//
+// checkCompliance() runs synchronously at New Tx step 2 to
+// drive the live banner — it sees only the in-progress tx and
+// computes TTR on that alone (Rule 1 + Rule 2 in their current
+// shape, but no Rule 3 because the 24-hour query hasn't run
+// yet). The authoritative TTR flag stored on the tx record is
+// computed at finalize time using isTtrRequired() + the loader,
+// which incorporates Rule 3.
+// ============================================================
+
+// Returns the cash amount of a transaction, respecting
+// tx.payments[] (future shape) when present, falling back to
+// the legacy single-method shape.
+export function cashAmountFromTx(tx){
+  if(!tx)return 0;
+  if(Array.isArray(tx.payments)){
+    return tx.payments.filter(p=>p&&p.method==="cash").reduce((s,p)=>s+sN(p.amount),0);
+  }
+  if(tx.payment==="cash")return sN(tx.buyTotal||tx.total||0);
+  return 0;
+}
+
+// Pure TTR decision. Combines the current tx's cash amount with
+// the prior 24-hour cash sum from the same client and returns
+// {required, eventCash} so callers can both flag the tx and
+// surface the aggregated total in audit messages. ttrEnabled is
+// the dealer-side toggle in Settings (default true; only off
+// when the dealer is exempt).
+export function isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled}){
+  const cur=sN(currentCashAmount);
+  const prior=sN(priorCashIn24h);
+  const eventCash=cur+prior;
+  // Rule 1 implicitly: priorCashIn24h is a sum of prior CASH-only
+  // txs (the loader filters), and currentCashAmount is also cash-
+  // only. If the current tx isn't cash, currentCashAmount is 0.
+  // No cash anywhere → no TTR.
+  const required=(ttrEnabled!==false)&&cur>0&&eventCash>=THRESH.CASH_TTR;
+  return{required,eventCash,priorCashIn24h:prior,currentCashAmount:cur};
+}
+
 export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove=null){
   const isCash=payment==="cash";
   const buys=(items||[]).filter(i=>i.mode==="buy");
@@ -132,6 +208,12 @@ export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove
     flags.push({level:"warn",key:"cash_warn",msg:"⚠️ $"+fmt2(total)+" cash — Admin must acknowledge before proceeding."});
   if(bullionCash>=THRESH.BULLION_CDD&&anyCash<THRESH.CASH_TTR)
     flags.push({level:"block",key:"bullion_cdd",msg:"🔴 $"+fmt2(bullionCash)+" BULLION — AUSTRAC HARD BLOCK: Full KYC/CDD mandatory."});
+  // Rule 1 (cash-only) and Rule 2 (mixed-payment) enforced via
+  // anyCash, which is 0 when isCash is false. Rule 3 (24-hour
+  // aggregation) is layered in at finalize via isTtrRequired();
+  // the live step-2 banner here surfaces the in-progress
+  // single-tx TTR only and is a UX hint, not the authoritative
+  // record.
   if(ttrEnabled&&anyCash>=THRESH.CASH_TTR)
     flags.push({level:"block",key:"ttr",msg:"🔴 $"+fmt2(anyCash)+" cash — AUSTRAC HARD BLOCK: KYC/CDD + TTR required within 10 business days."});
   // Shop-level configurable cash hard-block (Phase 2 step 3c). Stricter
@@ -309,6 +391,8 @@ const region={
   STATE_INFO,
   PRIVACY_NOTICE,
   checkCompliance,
+  cashAmountFromTx,
+  isTtrRequired,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,

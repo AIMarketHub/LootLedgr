@@ -168,6 +168,32 @@ export const sb={
   loadSettings:async()=>{const sid=getCurrentShopId();const r=await sbFetch("settings?shop_id=eq."+encodeURIComponent(sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
   saveCatalog:async cat=>{const sid=getCurrentShopId();return upsSB("catalog",{id:"catalog_"+sid,shop_id:sid,data:cat,updated_at:ts()});},
   loadCatalog:async()=>{const sid=getCurrentShopId();const r=await sbFetch("catalog?id=eq."+encodeURIComponent("catalog_"+sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
+  // Stage 1.C TTR rule 3 (24-hour aggregation). Returns the sum of
+  // buy-total cash payments from prior transactions for the given
+  // clientId in the rolling 24-hour window. Does NOT include the
+  // in-progress transaction (the caller adds that in via
+  // isTtrRequired). Returns 0 on no clientId, no auth, no matches,
+  // or any failure mode — defensive: failure → no aggregation
+  // bonus → the synchronous TTR check stands as the floor.
+  loadCashTotal24h:async(clientId)=>{
+    if(!clientId)return 0;
+    const sid=getCurrentShopId();
+    const since=new Date(Date.now()-24*3600*1000).toISOString();
+    const path="transactions"
+      +"?shop_id=eq."+encodeURIComponent(sid)
+      +"&data->>clientId=eq."+encodeURIComponent(clientId)
+      +"&data->>payment=eq.cash"
+      +"&data->>date=gte."+encodeURIComponent(since)
+      +"&select=data";
+    const r=await sbFetch(path);
+    if(!r||r.__sbError||r.__sbOk||!Array.isArray(r))return 0;
+    return r.reduce((s,row)=>{
+      const d=row&&row.data;
+      if(!d)return s;
+      const v=Number(d.buyTotal);
+      return s+(isFinite(v)?v:0);
+    },0);
+  },
 };
 
 export const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};

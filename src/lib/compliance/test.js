@@ -31,6 +31,18 @@ export function checkCompliance(items,payment){
   return{flags,total,bullionCash:0,anyCash:total,requiresKYC:total>=THRESH.BULLION_CDD};
 }
 
+// Stage 1.C TTR plumbing (2026-05-06) — stub helpers for parity
+// with au.js's new exports. Same shapes; absurd thresholds.
+export function cashAmountFromTx(tx){
+  if(!tx)return 0;
+  if(Array.isArray(tx.payments))return tx.payments.filter(p=>p&&p.method==="cash").reduce((s,p)=>s+(+p.amount||0),0);
+  return tx.payment==="cash"?(+tx.buyTotal||+tx.total||0):0;
+}
+export function isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled}){
+  const cur=+currentCashAmount||0,prior=+priorCashIn24h||0;
+  return{required:(ttrEnabled!==false)&&cur>0&&(cur+prior)>=THRESH.CASH_TTR,eventCash:cur+prior,priorCashIn24h:prior,currentCashAmount:cur};
+}
+
 // Fake required-fields list. Phase 2.7 follow-up (2026-04-29)
 // honours settings.requireIdOnEveryTx for parity with the real
 // regions; everything else stays empty (TEST region has no
@@ -71,6 +83,8 @@ const region={
   STATE_INFO,
   PRIVACY_NOTICE,
   checkCompliance,
+  cashAmountFromTx,
+  isTtrRequired,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,

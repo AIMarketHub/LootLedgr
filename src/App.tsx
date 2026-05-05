@@ -5,7 +5,7 @@ import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SV
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
-import {THRESH,checkCompliance,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
+import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
 import {requireAdminPin} from "./lib/adminGate.js";
 import {LIGHT,T,c} from "./theme.js";
@@ -388,7 +388,22 @@ export default function Loot(){
     const hasPh=!!(phData.idPhoto||Object.keys(phData.itemPhotos||{}).length);
     const photoKey=hasPh?"photos_"+realInv:null;
     if(hasPh)store.set(photoKey,phData);
-    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:compliance.flags.some(f=>f.key==="ttr"),ttrStatus:compliance.flags.some(f=>f.key==="ttr")?"PENDING":null,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
+
+    // Stage 1.C TTR rule 3 — 24-hour rolling cash aggregation per
+    // clientId. Authoritative TTR flag stored on the tx record
+    // accounts for any prior cash from the same client in the
+    // last 24 hours. The live step-2 banner in NewTx is sync and
+    // doesn't see this; it's a UX hint, the line below is the
+    // record-of-truth. priorCashIn24h is 0 when clientId is
+    // missing or the loader can't reach Supabase — defensive:
+    // failure → fall back to the single-tx TTR decision, the
+    // synchronous floor.
+    let priorCashIn24h=0;
+    try{priorCashIn24h=await sb.loadCashTotal24h(clientId);}catch(_){/* fall back to 0 */}
+    const currentCashAmount=cashAmountFromTx({payment:txPay,buyTotal,items:txItems});
+    const ttrDecision=isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled:settings.ttrEnabled!==false});
+
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
     setTxNo(peekInv());setTxStep(6);
