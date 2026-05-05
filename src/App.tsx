@@ -110,6 +110,14 @@ export default function Loot(){
   const[duressActive,setDuressActive]=useState(false);
   const[appUnlocked,setAppUnlocked]=useState(()=>{const s=store.get("settings",{});if(!s.requirePin)return true;const t=s.sessionTimeout||"never";if(t==="never")return !!store.get("sessionActive",false);if(t==="close")return false;const limits={"1h":3600000,"8h":28800000};return Date.now()-store.get("sessionLast",0)<(limits[t]||Infinity);});
   const[appPinInput,setAppPinInput]=useState("");
+  // Stage 1.C lock-screen fix — gates PIN entry on Supabase
+  // settings load. Without this, a stale localStorage cache from a
+  // prior shop (or the DEFAULT_SETTINGS sentinel "1234" on a fresh
+  // browser) could be compared against the user's typed PIN before
+  // the real settings.staffPin lands from Supabase, producing a
+  // silent "Incorrect PIN" pop on the right PIN. Lock screen shows
+  // a Loading state while !settingsHydrated.
+  const[settingsHydrated,setSettingsHydrated]=useState(false);
   const[forgotPinOpen,setForgotPinOpen]=useState(false);
   const[pinModal,setPinModal]=useState(null);
   const[pinVal,setPinVal]=useState("");
@@ -173,7 +181,7 @@ export default function Loot(){
     el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
   useEffect(()=>{const sc=fontSize/14,w=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;const root=document.getElementById("root");if(root){root.style.zoom=sc;root.style.fontWeight=w;}const el=document.getElementById("gf-fontscale")||document.createElement("style");el.id="gf-fontscale";if(!el.parentNode)document.head.appendChild(el);el.textContent="#root,#root *{font-weight:"+w+" !important}#root strong,#root b{font-weight:"+Math.min(w+200,900)+" !important}";},[fontSize]);
-  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}})();},[]);
+  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{setSettingsHydrated(true);}})();},[]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("contrast",contrast),[contrast]);
@@ -460,7 +468,36 @@ export default function Loot(){
 
   const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledgr-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
   const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
-  const unlockApp=()=>{if(appPinInput===settings.staffPin){setAppUnlocked(true);store.set("sessionActive",true);store.set("sessionLast",Date.now());setAppPinInput("");}else pop("Incorrect PIN","err");};
+  // Stage 1.C lock-screen fix — defensive PIN comparison.
+  //
+  //   - .trim() both sides so a stray whitespace from autofill /
+  //     paste doesn't silently fail.
+  //   - String() coerces in case settings.staffPin came back as a
+  //     number from a settings shape that lost type fidelity in a
+  //     round-trip somewhere.
+  //   - Refuses to compare while !settingsHydrated — the lock
+  //     screen hides the input in that state, so the user
+  //     shouldn't see this path, but the guard belt-and-braces.
+  //   - Dev-only console.log surfaces what was compared when the
+  //     bug recurs. Vite strips it from prod builds via
+  //     import.meta.env.DEV.
+  const unlockApp=()=>{
+    if(!settingsHydrated){pop("Still loading settings…","warn");return;}
+    const typed=String(appPinInput||"").trim();
+    const expected=String(settings.staffPin||"").trim();
+    if(import.meta.env.DEV){
+      // eslint-disable-next-line no-console
+      console.log("[lock] PIN check",{typedLen:typed.length,expectedLen:expected.length,requirePin:settings.requirePin,hydrated:settingsHydrated});
+    }
+    if(typed&&expected&&typed===expected){
+      setAppUnlocked(true);
+      store.set("sessionActive",true);
+      store.set("sessionLast",Date.now());
+      setAppPinInput("");
+    }else{
+      pop("Incorrect PIN","err");
+    }
+  };
   const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
   // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
   //   Today policeHold is binary. Per state law it has a 21-day default
@@ -496,10 +533,12 @@ export default function Loot(){
           <div style={c.card({padding:32,maxWidth:320,width:"100%",textAlign:"center"})}>
             <div style={{fontSize:32,marginBottom:12}}>🔒</div>
             <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
-            <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
-            <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={12} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
-            <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
-            {settings.adminRecoveryPassphraseHash&&<button style={{background:"none",border:"none",color:T.muted,fontSize:11,marginTop:14,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setForgotPinOpen(true)}>Forgot PIN?</button>}
+            {!settingsHydrated?<div style={{fontSize:12,color:T.muted,marginTop:14,marginBottom:14}}>Loading settings…</div>:<>
+              <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
+              <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={12} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>
+              <button style={{...c.btn(T.gold,T.bg),width:"100%"}} onClick={unlockApp}>Unlock</button>
+              {settings.adminRecoveryPassphraseHash&&<button style={{background:"none",border:"none",color:T.muted,fontSize:11,marginTop:14,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setForgotPinOpen(true)}>Forgot PIN?</button>}
+            </>}
           </div>
           {forgotPinOpen&&<ForgotPin
             settings={settings}
