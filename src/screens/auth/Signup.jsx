@@ -10,6 +10,7 @@ import React,{useState} from "react";
 import {Link,useNavigate} from "react-router-dom";
 import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
 import {signUp} from "../../lib/auth/saas.js";
+import {translateAuthError} from "../../lib/auth/errorMessages.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 
 // AU ABN — 11 digits with weighted modulo-89 checksum.
@@ -80,10 +81,11 @@ export default function Signup(){
     });
     setBusy(false);
     if(!r.ok){
-      // Friendly nudge on the most common failure (email already
-      // registered).
-      if(/already|registered|exists/i.test(r.error))setErr("That email is already registered. Try signing in instead.");
-      else setErr(r.error||"Signup failed.");
+      // translateAuthError handles the entire matrix of known
+      // Supabase / RPC error patterns, including "already
+      // registered" → "Try signing in instead." Falls back to a
+      // length-capped version of the original for unknown errors.
+      setErr(translateAuthError(r.error||"Signup failed."));
       return;
     }
     await refresh();

@@ -8,6 +8,7 @@ import React,{useState} from "react";
 import {Link} from "react-router-dom";
 import AuthLayout,{authStyles as A} from "./AuthLayout.jsx";
 import {resetPasswordViaEmail} from "../../lib/auth/saas.js";
+import {translateAuthError} from "../../lib/auth/errorMessages.js";
 
 export default function ForgotPassword(){
   const[email,setEmail]=useState("");
@@ -22,7 +23,7 @@ export default function ForgotPassword(){
     setBusy(true);
     const r=await resetPasswordViaEmail(email.trim());
     setBusy(false);
-    if(!r.ok){setErr(r.error||"Could not send reset email.");return;}
+    if(!r.ok){setErr(translateAuthError(r.error||"Could not send reset email."));return;}
     setInfo("Check your email for a reset link. It may take a minute to arrive — also check spam.");
   };
 

@@ -7,6 +7,7 @@ import React,{useState} from "react";
 import {Link,useNavigate,useLocation} from "react-router-dom";
 import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
 import {signIn} from "../../lib/auth/saas.js";
+import {translateAuthError} from "../../lib/auth/errorMessages.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 
 export default function Login(){
@@ -25,7 +26,7 @@ export default function Login(){
     setBusy(true);
     const r=await signIn({identifier:identifier.trim(),password});
     setBusy(false);
-    if(!r.ok){setErr(r.error||"Sign in failed.");return;}
+    if(!r.ok){setErr(translateAuthError(r.error||"Sign in failed."));return;}
     await refresh();
     nav(next,{replace:true});
   };
