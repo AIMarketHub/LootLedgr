@@ -52,6 +52,7 @@
 // inline photos to transactions whose photoKey was saved separately.
 
 import {APP_VERSION,SEED_LOGO} from "./constants.js";
+import {supabase} from "./auth/saas.js";
 
 const SB_URL=import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
@@ -101,9 +102,29 @@ export const store={
 // objects come back undefined → falsy → graceful fallback).
 // Callers that distinguish success from failure should test with
 // the sbOk helper below rather than `r == null`.
+//
+// Stage 1.B (2026-05-06) — Authorization header now carries the
+// user's JWT (session.access_token) when signed in, falling back
+// to the anon key when there isn't a session. Before Stage 1.A
+// the request used the anon key for both apikey and Authorization;
+// that worked because the dev_allow_all_* RLS policies didn't
+// look at auth.uid(). After Stage 1.A switched to per-shop
+// tenant-isolation policies (current_shop_id() / current_is_admin())
+// the anon key by itself produces auth.uid() = NULL → 401 on
+// every request to a shop-scoped table. The JWT lets PostgREST
+// resolve auth.uid() and apply the right policy.
+//
+// supabase.auth.getSession() reads from in-memory session storage
+// (no network round-trip). One extra await per sbFetch call;
+// negligible cost.
 export const sbFetch=async(path,opts={})=>{
   try{
-    const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+SB_KEY,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});
+    let token=SB_KEY;
+    try{
+      const{data}=await supabase.auth.getSession();
+      if(data&&data.session&&data.session.access_token)token=data.session.access_token;
+    }catch(_){/* fall back to anon key */}
+    const r=await fetch(SB_URL+"/rest/v1/"+path,{...opts,headers:{"apikey":SB_KEY,"Authorization":"Bearer "+token,"Content-Type":"application/json","Prefer":opts.prefer||"",...opts.headers}});
     if(!r.ok)return{__sbError:r.status};
     const t=await r.text();
     if(!t)return{__sbOk:true};
