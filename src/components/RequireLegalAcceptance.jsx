@@ -1,27 +1,49 @@
 // LootLedger — RequireLegalAcceptance gate.
-// Pre-launch (2026-05-06). Sits between RequireAuth and the App,
-// inside Router.jsx. After auth + trial gates pass, this gate
-// compares the signed-in user's stamped acceptance versions
-// against the shop's current approved Terms of Service and
-// Privacy Policy. If either is out of sync, it blocks the app
-// behind a re-acceptance modal until the user re-accepts.
+// Pre-launch (2026-05-06; Stage 1.D fix 2026-05-06). Sits between
+// RequireAuth and the App, inside Router.jsx. After auth + trial
+// gates pass, this gate enforces clickwrap acceptance of the
+// current Terms of Service + Privacy Policy.
 //
-// The gate is best-effort:
-//   • If the settings fetch fails (e.g. RLS hiccup, network),
-//     the gate fails open — the user gets through to the app
-//     rather than being locked out by a transient error. Failing
-//     closed would risk locking out a legitimate user during an
-//     outage.
-//   • If neither doc has any approved version yet (current is
-//     null on both), the gate is a no-op — there's nothing for
-//     the user to accept beyond what they already accepted at
-//     signup.
-//   • If a doc's currentVersion equals the user's accepted
-//     version, that doc is treated as in-sync.
-//   • If the user has no stamped version at all (accepted_at is
-//     null — applies to legacy rows pre-migration 0005, or to
-//     the dev test shop) AND a current version exists, the gate
-//     prompts. This is the catch-up path for pre-migration users.
+// Gate fires (block + show acceptance modal) when ANY of:
+//   (a) user's terms_version_accepted is NULL/empty (never accepted
+//       ToS — applies to pre-migration rows and the dev shop)
+//   (b) user's privacy_policy_version_accepted is NULL/empty (same,
+//       for Privacy Policy)
+//   (c) shop's settings.termsOfService.currentVersion exists AND
+//       user's accepted version ≠ shop's currentVersion (mismatch
+//       after the dealer approved an updated version)
+//   (d) same as (c) but for privacyPolicy
+//
+// Gate does NOT fire when:
+//   • user has accepted both docs at any version AND shop has not
+//     approved a customised version (user accepted "default" and
+//     that's still what would be presented)
+//   • user has accepted both docs AND user's versions match shop's
+//     current versions
+//
+// Modal copy distinguishes two scenarios:
+//   • First-time acceptance (no stamp yet on user row):
+//       "To continue, you must agree to our [docs]."
+//   • Version-update re-acceptance (user has accepted a previous
+//     version, shop now has a newer one):
+//       "Our [docs] [has|have] been updated. Please review and re-
+//        accept to continue."
+//   When both signals apply (one doc first-time + other doc
+//   version-mismatch), the modal uses a generic combined copy.
+//
+// On Accept, stamp:
+//   • users.terms_version_accepted = shop's current version, or
+//     "default" if shop has no currentVersion
+//   • users.privacy_policy_version_accepted = same logic
+//   • users.terms_accepted_at = now()
+//
+// Fail-open posture for the settings fetch: if loadSettings errors
+// (RLS hiccup, network outage), we still let the user through if
+// they've already accepted SOMETHING. This avoids locking out a
+// legitimate user during a transient outage. A user with no stamp
+// at all still gets prompted (the first-time branch doesn't depend
+// on settings — we can stamp "default" without knowing the shop's
+// current version).
 
 import React,{useEffect,useState,useCallback} from "react";
 import {useAuth} from "./AuthProvider.jsx";
@@ -40,8 +62,11 @@ const styles={
   primary:{background:"#e8d18a",color:"#0d1410",border:"none",borderRadius:6,padding:"10px 18px",fontSize:13,fontWeight:"bold",cursor:"pointer"},
   primaryDisabled:{background:"#3a3a35",color:"#666",border:"none",borderRadius:6,padding:"10px 18px",fontSize:13,cursor:"not-allowed"},
   loading:{padding:"40vh 24px 0",textAlign:"center",color:"#9aa39e",fontFamily:"system-ui"},
-  err:{padding:"40vh 24px 0",textAlign:"center",color:"#e8d18a",fontFamily:"system-ui"},
 };
+
+// "default" reads better than "vdefault" wherever we'd otherwise
+// prefix with "v". Used in modal copy + checkbox text.
+function versionLabel(v){return v==="default"?"default template":"v"+v;}
 
 export default function RequireLegalAcceptance({children}){
   const{userRecord,refresh,loading:authLoading}=useAuth();
@@ -58,16 +83,13 @@ export default function RequireLegalAcceptance({children}){
       const[v,s]=await Promise.all([
         getCurrentLegalDocumentVersions(),
         // Fetch settings for the viewer to render the actual
-        // current-version data. The viewer renders the user's
-        // shop's customised versions, not the in-app defaults.
+        // current-version data when one exists. The viewer falls
+        // back to the in-app default template otherwise.
         sb.loadSettings().catch(()=>null),
       ]);
       setCurrentVersions(v||{termsVersion:null,privacyVersion:null});
       setSettingsForViewer(s||{});
     }catch(_){
-      // Failure is fail-open — let the user through with default
-      // versions assumed in-sync. The next session refresh will
-      // try again.
       setCurrentVersions({termsVersion:null,privacyVersion:null});
       setSettingsForViewer({});
     }finally{
@@ -84,52 +106,83 @@ export default function RequireLegalAcceptance({children}){
     return <div style={styles.loading}>Loading…</div>;
   }
 
-  // Decide whether the gate should fire. Re-evaluated every render
-  // because currentVersions / userRecord may change after a
-  // re-acceptance.
-  const tosOutOfSync=!!currentVersions.termsVersion&&currentVersions.termsVersion!==(userRecord&&userRecord.terms_version_accepted);
-  const privacyOutOfSync=!!currentVersions.privacyVersion&&currentVersions.privacyVersion!==(userRecord&&userRecord.privacy_policy_version_accepted);
+  // Resolve the current state for each document. userTosAccepted /
+  // userPrivacyAccepted are coerced to null on empty string so
+  // (!userTosAccepted) cleanly catches both null and "".
+  const userTosAccepted=(userRecord&&userRecord.terms_version_accepted)||null;
+  const userPrivacyAccepted=(userRecord&&userRecord.privacy_policy_version_accepted)||null;
+  const shopTosCurrent=currentVersions.termsVersion;
+  const shopPrivacyCurrent=currentVersions.privacyVersion;
 
-  if(!tosOutOfSync&&!privacyOutOfSync)return children;
+  // First-time = user has never accepted (NULL / empty stamp).
+  // Mismatch  = shop's current version differs from user's accepted.
+  // Either condition triggers the gate; both never apply at once
+  // for the same doc (a first-time user can't have a mismatch).
+  const tosFirstTime=!userTosAccepted;
+  const privacyFirstTime=!userPrivacyAccepted;
+  const tosMismatch=!!shopTosCurrent&&shopTosCurrent!==userTosAccepted;
+  const privacyMismatch=!!shopPrivacyCurrent&&shopPrivacyCurrent!==userPrivacyAccepted;
+  const tosNeedsAcceptance=tosFirstTime||tosMismatch;
+  const privacyNeedsAcceptance=privacyFirstTime||privacyMismatch;
+
+  if(!tosNeedsAcceptance&&!privacyNeedsAcceptance)return children;
+
+  // What to stamp when the user clicks Accept. If the shop has
+  // approved a customised version, stamp that version string;
+  // otherwise stamp the literal "default" sentinel.
+  const tosStampVersion=shopTosCurrent||"default";
+  const privacyStampVersion=shopPrivacyCurrent||"default";
 
   const onAccept=async()=>{
     setErr("");
     if(!ack)return;
     setSaving(true);
     const r=await recordLegalAcceptance({
-      termsVersion:tosOutOfSync?currentVersions.termsVersion:undefined,
-      privacyPolicyVersion:privacyOutOfSync?currentVersions.privacyVersion:undefined,
+      termsVersion:tosNeedsAcceptance?tosStampVersion:undefined,
+      privacyPolicyVersion:privacyNeedsAcceptance?privacyStampVersion:undefined,
     });
     setSaving(false);
     if(!r.ok){setErr(r.error||"Could not record acceptance.");return;}
     // Re-pull the auth context so userRecord carries the new
-    // accepted versions; the gate then becomes a no-op.
+    // accepted versions; the gate re-evaluates and becomes a no-op.
+    // Settings → Account reads from the same userRecord and updates
+    // the same way.
     await refresh();
   };
 
-  // Build a friendly summary of what's being accepted.
+  // Build the per-doc list with first-time/mismatch annotations
+  // for the modal copy below.
   const docList=[];
-  if(tosOutOfSync)docList.push({kind:"tos",label:"Terms of Service",version:currentVersions.termsVersion});
-  if(privacyOutOfSync)docList.push({kind:"privacy",label:"Privacy Policy",version:currentVersions.privacyVersion});
+  if(tosNeedsAcceptance)docList.push({kind:"tos",label:"Terms of Service",version:tosStampVersion,firstTime:tosFirstTime});
+  if(privacyNeedsAcceptance)docList.push({kind:"privacy",label:"Privacy Policy",version:privacyStampVersion,firstTime:privacyFirstTime});
+  const labelsJoined=docList.map(d=>d.label).join(" and ");
+  const allFirstTime=docList.every(d=>d.firstTime);
+  const allUpdates=docList.every(d=>!d.firstTime);
+
+  // Two distinct copy paths per spec; mixed case (one first-time,
+  // one mismatch) gets a sensible combined message.
+  const headline=allFirstTime?"📋 Acceptance required":"📋 Updated terms — your acceptance required";
+  const body=allFirstTime
+    ?"To continue, you must agree to our "+labelsJoined+"."
+    :allUpdates
+      ?"Our "+labelsJoined+(docList.length===1?" has":" have")+" been updated. Please review and re-accept to continue."
+      :"To continue, you must accept the latest version"+(docList.length===1?"":"s")+" of our "+labelsJoined+".";
 
   return <>
     <div style={styles.scrim}>
       <div style={styles.card}>
-        <div style={styles.h}>📋 Updated terms — your acceptance required</div>
-        <div style={styles.sub}>
-          The {docList.length===2?"following documents have":"following document has"} changed since you last accepted.
-          You need to read and accept the current version{docList.length===2?"s":""} to continue using the app.
-        </div>
+        <div style={styles.h}>{headline}</div>
+        <div style={styles.sub}>{body}</div>
         <div style={styles.row}>
           {docList.map(d=>(
             <button key={d.kind} style={styles.link} onClick={()=>setViewerKind(d.kind)}>
-              📄 View {d.label} (v{d.version})
+              📄 View {d.label} ({versionLabel(d.version)})
             </button>
           ))}
         </div>
         <label style={styles.ack}>
           <input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)} style={{marginTop:3}}/>
-          <span>I have read and agree to the current version{docList.length===2?"s":""} of the {docList.map(d=>d.label).join(" and ")}.</span>
+          <span>I have read and agree to the {labelsJoined}.</span>
         </label>
         {err&&<div style={{color:"#d97766",fontSize:11,marginBottom:10}}>{err}</div>}
         <button style={ack&&!saving?styles.primary:styles.primaryDisabled} onClick={onAccept} disabled={!ack||saving}>{saving?"Saving…":"Accept and continue"}</button>

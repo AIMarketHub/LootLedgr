@@ -23,6 +23,16 @@ import {TermsOfServiceRender} from "./TermsOfServicePdf.jsx";
 import {buildDefaults as buildPrivacyDefaults} from "../lib/legal/privacyPolicyDefaults.js";
 import {buildDefaults as buildTosDefaults} from "../lib/legal/termsOfServiceDefaults.js";
 
+// Stage 1.D fix (2026-05-06) — DO NOT add UI banners, disclaimers,
+// or any meta-commentary to the body of this viewer between the
+// Modal opening and the Render component. The Render output is the
+// binding legal document the user agrees to; anything visually
+// inside the modal body that isn't part of the document body
+// becomes ambiguous about whether it's part of the agreement.
+// Version identification (default vs v1.0) is carried by the cover
+// page inside the Render component itself, plus the modal title
+// chrome. That's enough.
+
 // Build a synthetic version object that the existing *Render
 // components can consume. version="default" + null approval
 // metadata signals to the cover page that this is the in-app
@@ -56,10 +66,11 @@ export default function LegalDocsViewer({kind,settings,onClose}){
   const shopName=(settings&&settings.businessName)||"LootLedger";
   const title=kind==="tos"?"📜 Terms of Service":"🔒 Privacy Policy";
   const isDefault=version.version==="default";
+  // Modal title chrome carries the version label so the staff
+  // viewer (Settings → Account) can tell which version they're
+  // looking at. This is window chrome, not document body — the
+  // user is not "agreeing to the modal title".
   return <Modal title={title+(isDefault?" — Default template":" v"+version.version)} onClose={onClose} wide>
-    {isDefault&&<div style={{...c.bnr("info"),marginBottom:14,fontSize:11,lineHeight:1.5}}>
-      This is the default in-app template. The shop has not yet approved a customised version. Once a customised version is approved, that version will appear here instead.
-    </div>}
     {kind==="tos"
       ?<TermsOfServiceRender version={version} shopName={shopName}/>
       :<PrivacyPolicyRender version={version} shopName={shopName}/>}
