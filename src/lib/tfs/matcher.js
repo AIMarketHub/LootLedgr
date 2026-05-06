@@ -49,7 +49,12 @@
 // them to tfs_screen_log for audit) but the UI treats them as
 // non-blocking.
 
-import {normalizeName} from "./parser.js";
+// Imports from ./normalize.js (NOT ./parser.js) on purpose —
+// matcher is loaded into the dealer-facing App chunk; parser.js
+// statically imports xlsx (~115 kB gzipped) which we don't want
+// in that chunk. parser.js re-exports these helpers for callers
+// that prefer the historical entry point.
+import {normalizeName} from "./normalize.js";
 
 // Levenshtein distance with early-exit on threshold. Returns the
 // distance if ≤ maxDistance, otherwise returns maxDistance + 1
@@ -318,6 +323,6 @@ export function screenCustomer({name,dob,citizenship}={},tfsList){
 }
 
 // Re-export normalizeName so callers don't need to import from
-// parser.js separately. The matcher and parser must use the
+// normalize.js separately. The matcher and parser must use the
 // SAME normalizer — keeping them in lockstep is essential.
-export {normalizeName} from "./parser.js";
+export {normalizeName} from "./normalize.js";

@@ -7,6 +7,7 @@ import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
+import {syncTfsCache,getCachedTfsList,getCachedMetadata} from "./lib/tfs/storage.js";
 import {requireAdminPin} from "./lib/adminGate.js";
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
@@ -67,6 +68,18 @@ export default function Loot(){
   // tx.vicMinersRightNumber. NOT a new transaction type. KYC / TTR
   // / SMR / privacy / retention are identical to a commercial buy;
   // only the accounting export branches on the flag.
+  // TFS Commit 3 — sanctions screening. App owns the cached list +
+  // metadata (loaded once at boot via syncTfsCache + IDB read), the
+  // running tally of all matches from the most recent screen
+  // (including LOW results so finalize can audit-log them), and the
+  // override flags that get written into the persisted tx record.
+  // NewTx owns the local UI state (which matches surfaced, whether
+  // staff has reviewed, modal open/closed).
+  const[tfsCachedList,setTfsCachedList]=useState([]);
+  const[tfsCacheMeta,setTfsCacheMeta]=useState(null);
+  const[tfsAllMatches,setTfsAllMatches]=useState([]);
+  const[tfsOverrideApplied,setTfsOverrideApplied]=useState(false);
+  const[tfsOverrideReason,setTfsOverrideReason]=useState("");
   const[isHobbyProspector,setIsHobbyProspector]=useState(false);
   const[vicMinersRightNumber,setVicMinersRightNumber]=useState("");
   const[photo,setPhoto]=useState(null);
@@ -189,6 +202,35 @@ export default function Loot(){
   },[]);
   useEffect(()=>{const sc=fontSize/14,w=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;const root=document.getElementById("root");if(root){root.style.zoom=sc;root.style.fontWeight=w;}const el=document.getElementById("gf-fontscale")||document.createElement("style");el.id="gf-fontscale";if(!el.parentNode)document.head.appendChild(el);el.textContent="#root,#root *{font-weight:"+w+" !important}#root strong,#root b{font-weight:"+Math.min(w+200,900)+" !important}";},[fontSize]);
   useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{setSettingsHydrated(true);}})();},[]);
+  // TFS Commit 3 — boot the sanctions screening cache. Two-phase:
+  //   1. Read whatever's already in IndexedDB (instant; lets the
+  //      Client step screen the customer without waiting for the
+  //      network round-trip).
+  //   2. Call syncTfsCache() to refresh from Supabase if newer.
+  //      Re-pull the cache into state once sync completes so the
+  //      matcher uses the latest list.
+  // Both phases are non-throwing — the screening flow falls back
+  // to whatever is loaded (possibly empty on a brand-new browser
+  // before the first sync; in that case the matcher returns no
+  // matches and the Client step proceeds without flags. Commit 4
+  // surfaces the staleness state so staff sees the warning.)
+  useEffect(()=>{(async()=>{
+    try{
+      const[cached,meta]=await Promise.all([getCachedTfsList(),getCachedMetadata()]);
+      if(Array.isArray(cached))setTfsCachedList(cached);
+      if(meta)setTfsCacheMeta(meta);
+    }catch(_){}
+    try{
+      const r=await syncTfsCache();
+      if(r&&r.synced){
+        const[cached,meta]=await Promise.all([getCachedTfsList(),getCachedMetadata()]);
+        if(Array.isArray(cached))setTfsCachedList(cached);
+        if(meta)setTfsCacheMeta(meta);
+      }else if(r&&r.metadata&&!tfsCacheMeta){
+        setTfsCacheMeta(r.metadata);
+      }
+    }catch(_){}
+  })();},[]);
   useEffect(()=>store.set("zoom",zoom),[zoom]);
   useEffect(()=>store.set("simp",simp),[simp]);
   useEffect(()=>store.set("contrast",contrast),[contrast]);
@@ -424,7 +466,33 @@ export default function Loot(){
     // record the flag when the tx contains at least one buy item.
     const hasBuy=(txItems||[]).some(i=>i.mode==="buy");
     const txIsHobby=!!isHobbyProspector&&hasBuy;
-    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,isHobbyProspector:txIsHobby,vicMinersRightNumber:txIsHobby?sS(vicMinersRightNumber||"").trim():"",deleteAfter:sevenYrsFrom(now)};
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,isHobbyProspector:txIsHobby,vicMinersRightNumber:txIsHobby?sS(vicMinersRightNumber||"").trim():"",tfsOverrideApplied:!!tfsOverrideApplied,tfsOverrideReason:tfsOverrideApplied?sS(tfsOverrideReason||""):"",deleteAfter:sevenYrsFrom(now)};
+    // TFS Commit 3 — audit-log LOW severity matches at finalize.
+    // HIGH and MEDIUM matches are logged at staff-decision time
+    // (block / override). LOW results were never surfaced in the
+    // UI but the spec requires them in the audit trail with
+    // confirmed_match=null, override_applied=false. Failure here
+    // is non-fatal — the tx still finalizes; the dealer can be
+    // alerted via a separate health check.
+    try{
+      const lows=(Array.isArray(tfsAllMatches)?tfsAllMatches:[]).filter(m=>m&&m.severity==="low");
+      for(const m of lows){
+        const r=m.primaryRecord||{};
+        await sb.logTfsScreen({
+          tx_id:realInv,
+          client_id:clientId||null,
+          customer_name:sS(client&&client.fullName)||null,
+          customer_dob:sS(client&&client.dob)||null,
+          customer_citizenship:sS(client&&client.idState)||null,
+          matched:true,
+          match_reference:sS(r.primary_reference||r.reference)||null,
+          confirmed_match:null,
+          override_applied:false,
+          override_reason:null,
+          staff:sS(activeStaff||"Unknown"),
+        });
+      }
+    }catch(_){/* non-fatal — audit gap surfaced via staleness check */}
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
     setTxNo(peekInv());setTxStep(6);
@@ -538,7 +606,61 @@ export default function Loot(){
       pop("Incorrect PIN","err");
     }
   };
-  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");setIsHobbyProspector(false);setVicMinersRightNumber("");};
+  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");setIsHobbyProspector(false);setVicMinersRightNumber("");setTfsAllMatches([]);setTfsOverrideApplied(false);setTfsOverrideReason("");};
+
+  // TFS Commit 3 — staff-decision handlers. Both write a row into
+  // tfs_screen_log with the customer info captured at decision
+  // time (the in-progress client object — pre-finalize, so
+  // tx_id is null and client_id may be null). The block path
+  // also resets the transaction and routes back to dashboard;
+  // the override path mutates state flags that finalize will
+  // pick up and persist on the tx record.
+  //
+  // SMR auto-trigger for the block path is Commit 4's job —
+  // Commit 3 only records the audit log and refuses the tx.
+  const recordTfsBlock=async(matchRef)=>{
+    try{
+      await sb.logTfsScreen({
+        tx_id:null,
+        client_id:selectedClientId||null,
+        customer_name:sS(client&&client.fullName)||null,
+        customer_dob:sS(client&&client.dob)||null,
+        customer_citizenship:sS(client&&client.idState)||null,
+        matched:true,
+        match_reference:sS(matchRef)||null,
+        confirmed_match:true,
+        override_applied:false,
+        override_reason:null,
+        staff:sS(activeStaff||"Unknown"),
+      });
+    }catch(_){/* logging failure is non-fatal — refusal still proceeds */}
+    pop("Transaction refused per TFS sanctions match.","warn");
+    resetTx();
+    setScreen("dashboard");
+  };
+
+  const recordTfsOverride=async(matchRef,reason)=>{
+    try{
+      await sb.logTfsScreen({
+        tx_id:null,
+        client_id:selectedClientId||null,
+        customer_name:sS(client&&client.fullName)||null,
+        customer_dob:sS(client&&client.dob)||null,
+        customer_citizenship:sS(client&&client.idState)||null,
+        matched:true,
+        match_reference:sS(matchRef)||null,
+        confirmed_match:false,
+        override_applied:true,
+        override_reason:sS(reason)||null,
+        staff:sS(activeStaff||"Unknown"),
+      });
+    }catch(_){/* logging failure is non-fatal — staff already authenticated */}
+    setTfsOverrideApplied(true);
+    setTfsOverrideReason(prev=>{
+      const segment=sS(matchRef)+": "+sS(reason);
+      return prev?prev+" | "+segment:segment;
+    });
+  };
   // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
   //   Today policeHold is binary. Per state law it has a 21-day default
   //   life with a single 21-day reissue (total 42). Replace this toggle
@@ -673,6 +795,8 @@ export default function Loot(){
             setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
             isHobbyProspector={isHobbyProspector} setIsHobbyProspector={setIsHobbyProspector}
             vicMinersRightNumber={vicMinersRightNumber} setVicMinersRightNumber={setVicMinersRightNumber}
+            tfsCachedList={tfsCachedList} setTfsAllMatches={setTfsAllMatches}
+            recordTfsBlock={recordTfsBlock} recordTfsOverride={recordTfsOverride}
           />}
 
           {screen==="stock"&&<Stock

@@ -28,6 +28,14 @@
 // =================================================================
 
 import * as XLSX from "xlsx";
+import {normalizeName,parseDobString,normalizePrimaryReference} from "./normalize.js";
+
+// Re-export the pure-JS normalisers for historical callers. New
+// callers (especially anything that's pulled into the dealer-facing
+// App chunk via static imports) should prefer the direct import
+// from ./normalize.js to avoid statically pulling xlsx into their
+// chunk.
+export {normalizeName,parseDobString,normalizePrimaryReference};
 
 // Expected DFAT column structure. The order of these labels matters
 // for the validation step — we look them up by index after reading
@@ -81,138 +89,6 @@ function asBool(v){
   if(s==="yes"||s==="true"||s==="1")return true;
   if(s==="no"||s==="false"||s==="0")return false;
   return null; // unknown value — leave nullable
-}
-
-// "2a" → "2"; "10b" → "10"; "10" → "10"; bare letters → empty.
-// Defensive: returns the trimmed input verbatim if no leading digit
-// chunk is present, so the row still inserts (won't strand because
-// of an exotic reference format).
-export function normalizePrimaryReference(ref){
-  const s=String(ref||"").trim();
-  const m=s.match(/^(\d+)/);
-  return m?m[1]:s;
-}
-
-// Conservative phonetic normalization. The spec calls for collapsing
-// well-known transliteration variants (zh, ph, ck). Aggressive
-// phonetic algorithms (Soundex, Metaphone) collapse genuinely
-// different names and produce false positives on a list this large
-// (~10k entries), so we keep the substitutions to the small set the
-// spec listed plus `kh` which is extremely common in transliterated
-// Arabic / Russian names. Levenshtein distance in the matcher
-// (Commit 2) handles the rest.
-function applyPhoneticFolds(s){
-  return s
-    .replace(/zh/g,"j")
-    .replace(/kh/g,"h")
-    .replace(/ph/g,"f")
-    .replace(/ck/g,"k");
-}
-
-// Lowercase, ASCII-fold, drop punctuation, collapse whitespace,
-// then apply the conservative phonetic folds. Result is what we
-// store in tfs_list.name_normalized and what the matcher compares
-// the customer's normalized name against.
-//
-// "Müller" → "muller"
-// "Mohammad Al-Sharif" → "mohammad alsharif" (then phonetic: "mohammad alsharif")
-// "Zhang" → "zhang" → phonetic: "jang"
-export function normalizeName(name){
-  if(!name)return "";
-  let s=String(name).toLowerCase();
-  // NFD-decompose and strip combining marks. Handles diacritics
-  // across European, Vietnamese, etc. without mangling the base
-  // characters.
-  try{s=s.normalize("NFD").replace(/[̀-ͯ]/g,"");}catch(_){}
-  // Replace any non-alphanumeric with a space, then collapse and
-  // trim. Keeps multi-word names readable but loses punctuation
-  // (apostrophes, hyphens, periods) that vary across spellings.
-  s=s.replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
-  s=applyPhoneticFolds(s);
-  return s;
-}
-
-// Parse a DFAT DOB string into a structured object. DFAT's DOB
-// column is genuinely messy — exact dates, bare years, lists of
-// years, year ranges, "Approximately" / "Circa" qualifiers, mixed
-// formats. The parser is deliberately tolerant: when in doubt, lean
-// toward "this might match" by widening the candidate set rather
-// than skipping. Examples:
-//
-//   "30/01/1972"
-//     → {type:"exact", dates:["1972-01-30"], years:[1972]}
-//
-//   "1945, 1946, 1947"
-//     → {type:"multiple", dates:[], years:[1945,1946,1947]}
-//
-//   "Approximately 1963, 30/01/1972"
-//     → {type:"multiple", dates:["1972-01-30"], years:[1963,1972]}
-//
-//   "1960 to 1966"
-//     → {type:"range", yearsRange:[1960,1966]}
-//
-//   "Between 1955 and 1957"
-//     → {type:"range", yearsRange:[1955,1957]}
-//
-//   "" / null / "Not known"
-//     → {type:"unknown"}
-//
-// The matcher uses dates / years / yearsRange to decide whether the
-// customer's DOB is a possible match. A non-match on any of these
-// signals likely false-positive on the name.
-export function parseDobString(raw){
-  const s=String(raw||"").trim();
-  if(!s||/^not\s+known$/i.test(s)||s==="-")return{type:"unknown"};
-
-  // Range first — keyword anchors avoid swallowing unrelated dates.
-  // Patterns covered:
-  //   "1960 to 1966"
-  //   "1960-1966" or "1960–1966" (en-dash)
-  //   "1960 through 1966"
-  //   "Between 1960 and 1966"
-  const between=s.match(/between\s+(\d{4})\s+and\s+(\d{4})/i);
-  const range=s.match(/\b(\d{4})\s*(?:to|through|[-–—])\s*(\d{4})\b/i);
-  if(between){
-    const a=parseInt(between[1],10),b=parseInt(between[2],10);
-    return{type:"range",yearsRange:[Math.min(a,b),Math.max(a,b)]};
-  }
-  if(range){
-    const a=parseInt(range[1],10),b=parseInt(range[2],10);
-    // Only treat as range if the years are plausible birth years.
-    if(a>=1900&&b>=1900&&a<=2100&&b<=2100&&Math.abs(b-a)<=80){
-      return{type:"range",yearsRange:[Math.min(a,b),Math.max(a,b)]};
-    }
-  }
-
-  // DD/MM/YYYY dates. DFAT uses Australian-format (day first); we
-  // produce ISO YYYY-MM-DD.
-  const dates=[];
-  const dateRe=/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g;
-  let m;
-  while((m=dateRe.exec(s))!==null){
-    const dd=parseInt(m[1],10),mm=parseInt(m[2],10),yy=parseInt(m[3],10);
-    if(dd>=1&&dd<=31&&mm>=1&&mm<=12&&yy>=1900&&yy<=2100){
-      dates.push(yy+"-"+String(mm).padStart(2,"0")+"-"+String(dd).padStart(2,"0"));
-    }
-  }
-
-  // Strip the dates we already captured before scanning for bare
-  // years, so a "30/01/1972" doesn't double-count 1972 as a year.
-  let bareYearSrc=s.replace(dateRe,"");
-  const years=[];
-  const yearRe=/\b(19|20)\d{2}\b/g;
-  while((m=yearRe.exec(bareYearSrc))!==null){
-    const yy=parseInt(m[0],10);
-    if(yy>=1900&&yy<=2100&&!years.includes(yy))years.push(yy);
-  }
-
-  if(dates.length===0&&years.length===0)return{type:"unknown"};
-  if(dates.length===1&&years.length===0)return{type:"exact",dates,years:[parseInt(dates[0].slice(0,4),10)]};
-  // Multiple covers everything else — multiple dates, multiple
-  // years, or a mix. The matcher checks customer DOB against each.
-  const allYears=[...years,...dates.map(d=>parseInt(d.slice(0,4),10))]
-    .filter((y,i,arr)=>arr.indexOf(y)===i);
-  return{type:"multiple",dates,years:allYears};
 }
 
 // Parse a DFAT-format Excel file into normalized records suitable

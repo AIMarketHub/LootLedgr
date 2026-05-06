@@ -48,6 +48,8 @@ import ClientSearch from "../components/ClientSearch.jsx";
 import IdPhotoCapture from "../components/IdPhotoCapture.jsx";
 import Receipt from "../components/Receipt.jsx";
 import {requireBlacklistOverride} from "../lib/blacklistGate.js";
+import {screenCustomer} from "../lib/tfs/matcher.js";
+import TfsMatchModal from "../modals/TfsMatchModal.jsx";
 
 const STEP_LABELS=["Basket","Compliance","Client","Price+Payment","Staff","Done"];
 
@@ -90,6 +92,13 @@ export default function NewTx({
   // effect on KYC / TTR / SMR / privacy / retention).
   isHobbyProspector,setIsHobbyProspector,
   vicMinersRightNumber,setVicMinersRightNumber,
+  // TFS Commit 3 — sanctions screening. App owns the cached list
+  // (loaded at boot) + the all-matches state (read by finalize for
+  // LOW-severity audit logging) + the decision handlers. NewTx
+  // owns the local UI state (which matches are surfaced, whether
+  // staff has reviewed, modal open / closed).
+  tfsCachedList,setTfsAllMatches,
+  recordTfsBlock,recordTfsOverride,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
   // Phase 2.7 follow-up (2026-04-30) — sub-state for the new-client
@@ -99,6 +108,78 @@ export default function NewTx({
   // routing decision inside step 4; nothing downstream cares which
   // method was used once the form is populated.
   const[captureMethod,setCaptureMethod]=useState(null);
+
+  // TFS Commit 3 — local screening UI state. tfsMatches is the
+  // HIGH/MEDIUM subset surfaced in the banner + modal. tfsReviewed
+  // gates the Client step's Next button — when matches exist and
+  // staff hasn't resolved them, advancement is blocked. Modal open
+  // state is purely visual.
+  //
+  // The matcher returns LOW results too; those flow up to App via
+  // setTfsAllMatches so App.finalize can audit-log them silently.
+  // LOW results do NOT raise the banner per the Commit 2 spec.
+  //
+  // Citizenship caveat: the customer's "citizenship" is read from
+  // client.idState (the Issuing State / Country field on the ID).
+  // For foreign passports this typically carries a country name
+  // that substring-matches the DFAT Citizenship column; for
+  // Australian drivers' licences it carries a state code (VIC /
+  // NSW), which won't match "Australia" in the entry. That's
+  // acceptable for Stage 1 — the worst case is more MEDIUM
+  // severities (citizenship not_provided / no_match) instead of
+  // HIGH, which routes through the same review modal anyway. A
+  // dedicated client.citizenship field is a follow-up.
+  const[tfsMatches,setTfsMatches]=useState([]);
+  const[tfsReviewed,setTfsReviewed]=useState(false);
+  const[tfsModalOpen,setTfsModalOpen]=useState(false);
+
+  // Debounced screening effect. Watches the three customer fields
+  // we have signal on (name, DOB, idState) plus the cached list
+  // reference. Re-fires 400ms after the last edit settles. Skips
+  // entirely on empty name or DOB; the matcher needs both to
+  // produce useful results.
+  useEffect(()=>{
+    const name=String(client&&client.fullName||"").trim();
+    const dob=String(client&&client.dob||"").trim();
+    const cit=String(client&&client.idState||"").trim();
+    if(!name||!dob||!Array.isArray(tfsCachedList)||!tfsCachedList.length){
+      setTfsMatches([]);
+      if(typeof setTfsAllMatches==="function")setTfsAllMatches([]);
+      return;
+    }
+    const t=setTimeout(()=>{
+      const all=screenCustomer({name,dob,citizenship:cit},tfsCachedList);
+      const flag=(all||[]).filter(m=>m.severity==="high"||m.severity==="medium");
+      setTfsMatches(flag);
+      // New screening result → reset reviewed so a previous
+      // override doesn't leak forward when the customer's data
+      // changed.
+      setTfsReviewed(false);
+      if(typeof setTfsAllMatches==="function")setTfsAllMatches(all||[]);
+    },400);
+    return ()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[client&&client.fullName,client&&client.dob,client&&client.idState,tfsCachedList]);
+
+  // The block path resets the entire tx via App's recordTfsBlock
+  // handler; we wrap it so the modal can call a single "block"
+  // function and we also navigate the local screen state away
+  // (recordTfsBlock calls setScreen('dashboard') itself).
+  const onTfsBlock=async(matchRef)=>{
+    setTfsModalOpen(false);
+    if(typeof recordTfsBlock==="function")await recordTfsBlock(matchRef);
+  };
+  // The override path mutates App-level flags; we just signal
+  // which match was overridden + the reason. The modal handles
+  // its own resolved-set tracking and auto-closes when every
+  // match has been resolved (signalled via onAllResolved).
+  const onTfsOverride=async(matchRef,reason)=>{
+    if(typeof recordTfsOverride==="function")await recordTfsOverride(matchRef,reason);
+  };
+  const onTfsAllResolved=()=>{
+    setTfsReviewed(true);
+    setTfsModalOpen(false);
+  };
 
   // Phase 2.7 follow-up (2026-04-30) — Cancel transaction confirm.
   // Each in-progress step has a Cancel button that pops this
@@ -513,6 +594,23 @@ export default function NewTx({
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
 
+        {/* TFS Commit 3 — sanctions-screen banner. Sticky red bar
+            above the Client step body when the matcher has
+            surfaced ≥ 1 HIGH or MEDIUM candidate that staff hasn't
+            resolved yet. Non-dismissible; the only way to clear is
+            via the review modal (block / override every match) or
+            by editing the customer fields enough that the screen
+            no longer matches. The Next button at the bottom of
+            this step is disabled until tfsReviewed flips true. */}
+        {tfsMatches.length>0&&!tfsReviewed&&<div style={{...c.bnr("block"),marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",position:"sticky",top:0,zIndex:5}}>
+          <span style={{fontSize:18}}>⚠️</span>
+          <div style={{flex:1,minWidth:200,lineHeight:1.4}}>
+            <div style={{fontWeight:"bold",letterSpacing:"0.05em"}}>POSSIBLE SANCTIONS MATCH</div>
+            <div style={{fontSize:11,marginTop:2}}>{tfsMatches.length} possible match{tfsMatches.length===1?"":"es"} found in the DFAT Consolidated List. Review required before continuing.</div>
+          </div>
+          <button style={c.btn(T.red,T.bg)} onClick={()=>setTfsModalOpen(true)}>Review match{tfsMatches.length===1?"":"es"}</button>
+        </div>}
+
         {clientStep==="search"&&<div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>FIND OR CREATE CLIENT</div>
           <ClientSearch
@@ -659,7 +757,7 @@ export default function NewTx({
           <F label="Date" type="date" required value={client.signatureDate||new Date().toISOString().slice(0,10)} onChange={v=>setClient(p=>({...p,signatureDate:v}))}/>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={()=>{if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Payment →</button>
+          <button style={c.btn(T.gold,undefined,{opacity:(tfsMatches.length>0&&!tfsReviewed)?0.5:1,cursor:(tfsMatches.length>0&&!tfsReviewed)?"not-allowed":"pointer"})} disabled={tfsMatches.length>0&&!tfsReviewed} onClick={()=>{if(tfsMatches.length>0&&!tfsReviewed){pop("Resolve the sanctions match review before continuing.","warn");return;}if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Payment →</button>
           <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
         </div>
@@ -753,6 +851,22 @@ export default function NewTx({
         <button style={c.bsm()} onClick={()=>setCancelOpen(false)}>Keep Editing</button>
       </div>
     </Modal>}
+
+    {/* TFS Commit 3 — sanctions match review modal. Mounted here
+        so the modal overlays the entire NewTx screen. Opens via
+        the banner's Review button in the Client step; closes via
+        the modal's own three-button decision flow or the Close
+        button at the bottom (banner stays visible until staff
+        resolves every match by override or by editing the
+        customer fields enough that the screen no longer matches). */}
+    {tfsModalOpen&&<TfsMatchModal
+      matches={tfsMatches}
+      settings={settings}
+      onBlockConfirmed={onTfsBlock}
+      onOverrideSubmitted={onTfsOverride}
+      onClose={()=>setTfsModalOpen(false)}
+      onAllResolved={onTfsAllResolved}
+    />}
 
     {/* Print prompt — fires after Complete Transaction commits the
         tx via finalize(). Modal blocks dismissal via backdrop /

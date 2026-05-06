@@ -194,6 +194,25 @@ export const sb={
       return s+(isFinite(v)?v:0);
     },0);
   },
+  // TFS screening audit log. Inserts a row into tfs_screen_log per
+  // staff decision (block / override) plus the LOW-severity audit
+  // sweep at finalize. shop_id is set from getCurrentShopId();
+  // delete_after is set to 7 years from now to match the existing
+  // retention pattern. Caller passes the rest of the columns.
+  // Returns sbFetch's success/failure shape so the caller can
+  // surface a warning if logging fails.
+  logTfsScreen:async(payload)=>{
+    const sid=getCurrentShopId();
+    const now=new Date();
+    const deleteAfter=new Date(now.getTime()+7*365.25*24*3600*1000).toISOString();
+    const row={
+      shop_id:sid,
+      created_at:now.toISOString(),
+      delete_after:deleteAfter,
+      ...(payload||{}),
+    };
+    return sbFetch("tfs_screen_log",{method:"POST",body:JSON.stringify(row)});
+  },
 };
 
 export const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};
