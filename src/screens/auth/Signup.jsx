@@ -12,6 +12,7 @@ import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
 import {signUp} from "../../lib/auth/saas.js";
 import {translateAuthError} from "../../lib/auth/errorMessages.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
+import LegalDocsViewer from "../../modals/LegalDocsViewer.jsx";
 
 // AU ABN — 11 digits with weighted modulo-89 checksum.
 // https://abr.business.gov.au/Help/AbnFormat
@@ -44,6 +45,16 @@ export default function Signup(){
   const[phone,setPhone]=useState("");
   const[password,setPassword]=useState("");
   const[passwordConfirm,setPasswordConfirm]=useState("");
+  // Pre-launch — clickwrap acceptance gating. acceptedLegal must
+  // be true to enable submit. legalViewer is the document the user
+  // is currently reading (in a modal); null when no viewer open.
+  // The user has no shop yet so settings is empty — the viewer
+  // falls through to the in-app default template, which is what
+  // they're agreeing to. Stamped as version "default" on the
+  // users row; the re-acceptance gate fires on next session
+  // refresh once the dealer approves a customised version.
+  const[acceptedLegal,setAcceptedLegal]=useState(false);
+  const[legalViewer,setLegalViewer]=useState(null);
   const[err,setErr]=useState("");
   const[info,setInfo]=useState("");
   const[busy,setBusy]=useState(false);
@@ -61,6 +72,7 @@ export default function Signup(){
     if(!p)return "Valid AU phone required (e.g. 0412 345 678).";
     if(password.length<8)return "Password must be at least 8 characters.";
     if(password!==passwordConfirm)return "Passwords don't match.";
+    if(!acceptedLegal)return "You must agree to the Terms of Service and Privacy Policy to continue.";
     return null;
   };
 
@@ -78,6 +90,12 @@ export default function Signup(){
       familyName:familyName.trim(),
       businessName:businessName.trim(),
       abn:abn.replace(/\s+/g,""),
+      // Brand-new shop has no approved versions yet; user agreed
+      // to the in-app default template. Sentinel "default" is
+      // stamped on users row so the re-acceptance gate fires once
+      // a customised version is later approved.
+      termsVersionAccepted:"default",
+      privacyPolicyVersionAccepted:"default",
     });
     setBusy(false);
     if(!r.ok){
@@ -128,10 +146,26 @@ export default function Signup(){
       <PasswordField id="su-pw2" autoComplete="new-password" value={passwordConfirm} onChange={setPasswordConfirm}/>
       {password&&passwordConfirm&&password!==passwordConfirm&&<div style={{...A.helper,color:"#933"}}>Passwords don't match.</div>}
 
+      {/* Pre-launch — mandatory clickwrap acceptance. The links
+          open the in-app default template (no shop exists yet so
+          there's nothing customised to render). Both must be
+          accepted via the single checkbox; submit is disabled
+          until ticked. */}
+      <label style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,marginTop:14,marginBottom:6,cursor:"pointer",lineHeight:1.5,color:"#e8e3d8"}}>
+        <input type="checkbox" checked={acceptedLegal} onChange={e=>setAcceptedLegal(e.target.checked)} style={{marginTop:3}}/>
+        <span>
+          I have read and agree to the{" "}
+          <button type="button" onClick={()=>setLegalViewer("tos")} style={{...A.link,background:"none",border:"none",padding:0,cursor:"pointer",font:"inherit"}}>Terms of Service</button>
+          {" "}and{" "}
+          <button type="button" onClick={()=>setLegalViewer("privacy")} style={{...A.link,background:"none",border:"none",padding:0,cursor:"pointer",font:"inherit"}}>Privacy Policy</button>.
+        </span>
+      </label>
+
       {err&&<div style={A.error}>{err}</div>}
       {info&&<div style={A.info}>{info}</div>}
 
-      <button type="submit" style={A.primary} disabled={busy}>{busy?"Creating…":"Create account & start trial"}</button>
+      <button type="submit" style={A.primary} disabled={busy||!acceptedLegal}>{busy?"Creating…":"Create account & start trial"}</button>
     </form>
+    {legalViewer&&<LegalDocsViewer kind={legalViewer} settings={{}} onClose={()=>setLegalViewer(null)}/>}
   </AuthLayout>;
 }

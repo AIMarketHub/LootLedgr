@@ -46,6 +46,11 @@ import AmlProgramPdf from "./AmlProgramPdf.jsx";
 import PrivacyPolicyForm from "./PrivacyPolicyForm.jsx";
 import PrivacyPolicyHistory from "./PrivacyPolicyHistory.jsx";
 import PrivacyPolicyPdf from "./PrivacyPolicyPdf.jsx";
+import TermsOfServiceForm from "./TermsOfServiceForm.jsx";
+import TermsOfServiceHistory from "./TermsOfServiceHistory.jsx";
+import TermsOfServicePdf from "./TermsOfServicePdf.jsx";
+import LegalDocsViewer from "./LegalDocsViewer.jsx";
+import {useAuth} from "../components/AuthProvider.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 
 // 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
@@ -58,6 +63,52 @@ function formatPassphrase(s){
   return out.join("-");
 }
 function isValidPin(s){return /^\d{4,12}$/.test(String(s||""));}
+
+// Pre-launch — Acceptance history view. Cross-references the user's
+// stamped acceptance versions against every approved version on
+// file for each document, so the user can see (a) which version
+// they currently consent to, and (b) every version that has been
+// approved since they signed up. The current data model only holds
+// a single "currently accepted" pair per user (no per-acceptance
+// audit log) — see Section 3 of the migration 0005 commit message
+// for the trade-off rationale.
+function AcceptanceHistoryModal({settings,userRecord,onClose}){
+  const tosVersions=Array.isArray(settings&&settings.termsOfService&&settings.termsOfService.versions)?[...settings.termsOfService.versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||"")):[];
+  const ppVersions=Array.isArray(settings&&settings.privacyPolicy&&settings.privacyPolicy.versions)?[...settings.privacyPolicy.versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||"")):[];
+  const tosAccepted=userRecord&&userRecord.terms_version_accepted||null;
+  const ppAccepted=userRecord&&userRecord.privacy_policy_version_accepted||null;
+  const acceptedAt=userRecord&&userRecord.terms_accepted_at||null;
+  const renderRow=(v,acceptedVersion)=>(
+    <div key={v.version+"-"+v.savedAt} style={{...c.card({padding:10,background:T.surface}),marginBottom:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+      <div style={{flex:1,minWidth:200}}>
+        <div style={{fontSize:12,fontWeight:"bold",color:T.gold}}>v{sS(v.version)}{acceptedVersion===v.version&&<span style={{...c.badge(T.green),marginLeft:8}}>✓ Your accepted version</span>}</div>
+        <div style={{fontSize:10,color:T.muted,marginTop:2}}>Approved {fmtDateTime(v.approvedAt)}{v.approvedBy?" by "+sS(v.approvedBy):""}</div>
+      </div>
+    </div>
+  );
+  return <Modal title="📋 Acceptance History" onClose={onClose} wide>
+    <div style={{...c.bnr("info"),marginBottom:14}}>
+      Your single most recent acceptance of each document is recorded against your account. The list below cross-references your stamped versions against every approved version on file. To strengthen the audit trail (per-acceptance event log), see deferred work.
+    </div>
+    {acceptedAt&&<div style={{fontSize:12,color:T.muted,marginBottom:14}}>Last acceptance recorded: <strong style={{color:T.text}}>{fmtDateTime(acceptedAt)}</strong></div>}
+
+    <div style={{...c.card({padding:14}),marginBottom:14}}>
+      <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:10}}>📜 TERMS OF SERVICE</div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{tosAccepted?"v"+tosAccepted:"Not recorded"}</strong></div>
+      {tosVersions.length===0?<div style={{fontSize:11,color:T.muted}}>No approved versions on file yet.</div>:tosVersions.map(v=>renderRow(v,tosAccepted))}
+    </div>
+
+    <div style={{...c.card({padding:14}),marginBottom:14}}>
+      <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:10}}>🔒 PRIVACY POLICY</div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{ppAccepted?"v"+ppAccepted:"Not recorded"}</strong></div>
+      {ppVersions.length===0?<div style={{fontSize:11,color:T.muted}}>No approved versions on file yet.</div>:ppVersions.map(v=>renderRow(v,ppAccepted))}
+    </div>
+
+    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <button style={c.bsm()} onClick={onClose}>Close</button>
+    </div>
+  </Modal>;
+}
 import {THRESH} from "../lib/compliance/index.js";
 import {clients} from "../lib/clients.js";
 import {analyzeMigrationTargets,runTestDataMigration} from "../lib/clientsMigration.js";
@@ -139,6 +190,19 @@ export default function Settings({
   const[showPrivacyForm,setShowPrivacyForm]=useState(false);
   const[showPrivacyHistory,setShowPrivacyHistory]=useState(false);
   const[showPrivacyPdf,setShowPrivacyPdf]=useState(false);
+  // Terms of Service — same triplet as Privacy Policy.
+  const[showTosForm,setShowTosForm]=useState(false);
+  const[showTosHistory,setShowTosHistory]=useState(false);
+  const[showTosPdf,setShowTosPdf]=useState(false);
+  // Settings → Account "View ToS / View Privacy" — re-uses the
+  // LegalDocsViewer so the user reads the actual currently-
+  // approved version in the same format the signup viewer used.
+  const[showAccountViewer,setShowAccountViewer]=useState(null);
+  const[showAcceptanceHistory,setShowAcceptanceHistory]=useState(false);
+  // Settings → Account reads the user's stamped acceptance
+  // versions from AuthProvider's userRecord (same source the
+  // gate consults). userRecord is null only during initial load.
+  const{userRecord}=useAuth();
   // Show / Change PIN modals — both gated by the Admin gate on the
   // outer click. The result modals are unconditional once the gate
   // approves, so we don't need a separate "open after PIN" plumb;
@@ -546,6 +610,137 @@ export default function Settings({
           </>;
         })()}
       </div>],
+      ["termsofservice","📜 Terms of Service",<div style={{paddingBottom:14}}>
+        {(()=>{
+          const prog=(settings.termsOfService&&typeof settings.termsOfService==="object")?settings.termsOfService:{currentVersion:null,versions:[],draft:null};
+          const versions=Array.isArray(prog.versions)?prog.versions:[];
+          const current=prog.currentVersion?versions.find(v=>v.version===prog.currentVersion):null;
+          const hasDraft=!!(prog.draft&&prog.draft.data);
+          const mostRecent=versions.length?[...versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]:null;
+          const seedDraftFromCurrent=()=>{
+            if(!current)return;
+            if(hasDraft){
+              if(typeof window!=="undefined"&&window.confirm){
+                if(!window.confirm("A draft already exists. Replace it with a copy of v"+sS(current.version)+"?"))return;
+              }
+            }
+            setSettings(p=>({
+              ...p,
+              termsOfService:{
+                ...(p.termsOfService||{currentVersion:null,versions:[]}),
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+              },
+            }));
+            setShowTosForm(true);
+          };
+          const discardDraft=()=>{
+            if(typeof window!=="undefined"&&window.confirm){
+              if(!window.confirm("Discard the current draft? Edits will be lost. This cannot be undone."))return;
+            }
+            setSettings(p=>({
+              ...p,
+              termsOfService:{...(p.termsOfService||{currentVersion:null,versions:[]}),draft:null},
+            }));
+            pop&&pop("Draft discarded.","warn");
+          };
+          return <>
+            <div style={{...c.bnr("warn"),marginBottom:14,fontSize:11,lineHeight:1.5}}>
+              <strong>⚖ Lawyer review recommended before public launch.</strong> The Australian Consumer Law's non-excludable consumer guarantees override any contract clause that purports to exclude or limit them. The template acknowledges this in Section 14 and limits exposure to the maximum permitted by law, but a contract specialist should review Sections 6 / 7 / 8 against your risk profile before this document goes to fee-paying customers.
+            </div>
+            <div style={{...c.bnr("info"),marginBottom:14}}>
+              <strong>End-User Licence Agreement.</strong> 14 sections covering acceptance, service description, account security, subscription terms, acceptable use, warranty disclaimer, liability cap, indemnification, no-legal-advice, termination, governing law, severability, and the mandatory Australian Consumer Law acknowledgment. Versions are immutable once approved; users re-accept on next sign-in when a new version is approved.
+            </div>
+
+            {/* Card 1 — CURRENT VERSION */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.gold}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📌 CURRENT VERSION</div>
+              {current?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
+                  <div>Saved: {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
+                  {current.approvedBy&&<div>Approved: {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
+                  {current.data&&current.data["s14.policyEffectiveDate"]&&<div style={{color:T.muted,marginTop:4}}>Effective: {sS(current.data["s14.policyEffectiveDate"])}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowTosPdf(true)}>📄 Download PDF</button>
+                  <button style={c.bsm()} onClick={seedDraftFromCurrent}>↺ Edit as new draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:10}}>No Terms of Service approved yet.</div>
+                <button style={c.btn(T.gold,T.bg)} onClick={()=>setShowTosForm(true)}>+ Fill out Terms of Service</button>
+              </>}
+            </div>
+
+            {/* Card 2 — DRAFT */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.orange}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:10}}>📝 DRAFT (in progress)</div>
+              {hasDraft?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Saved: {fmtDateTime(prog.draft.savedAt)}{prog.draft.savedBy?" by "+sS(prog.draft.savedBy):""}</div>
+                  <div style={{color:T.muted,marginTop:2}}>Status: not yet approved</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.btn(T.gold,T.bg,{padding:"8px 14px",fontSize:12})} onClick={()=>setShowTosForm(true)}>📝 Continue editing</button>
+                  <button style={c.bsm(T.redBg,T.red)} onClick={discardDraft}>🗑 Discard draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:current?10:0}}>No draft in progress.</div>
+                {current&&<button style={c.bsm()} onClick={seedDraftFromCurrent}>+ Start a new draft</button>}
+              </>}
+            </div>
+
+            {/* Card 3 — VERSION HISTORY */}
+            <div style={{...c.card({padding:14}),marginBottom:0,borderLeft:"3px solid "+T.border}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.muted,marginBottom:10}}>📜 VERSION HISTORY</div>
+              {versions.length>0?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>{versions.length} approved version{versions.length===1?"":"s"} on file.</div>
+                  {mostRecent&&<div style={{color:T.muted,marginTop:2}}>Most recent: <strong>v{sS(mostRecent.version)}</strong> — {fmtDateTime(mostRecent.savedAt)}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm()} onClick={()=>setShowTosHistory(true)}>📜 View all versions</button>
+                </div>
+              </>:<div style={{fontSize:12,color:T.muted}}>No versions saved yet. Use the form's <em>Save &amp; Approve</em> button to create the first version.</div>}
+            </div>
+          </>;
+        })()}
+      </div>],
+      ["account","👤 Account",<div style={{paddingBottom:14}}>
+        {(()=>{
+          // Pre-launch — Settings → Account section. Surfaces the
+          // user's clickwrap acceptance state, view-document
+          // links, and an acceptance-history view that
+          // cross-references the user's stamped versions against
+          // every version on file for each document.
+          const u=userRecord||{};
+          const tosVersionAccepted=u.terms_version_accepted||null;
+          const privacyVersionAccepted=u.privacy_policy_version_accepted||null;
+          const acceptedAt=u.terms_accepted_at||null;
+          return <>
+            <div style={{...c.bnr("info"),marginBottom:14,fontSize:11,lineHeight:1.5}}>
+              Your acceptance of our legal documents is recorded against your account. When a new version is approved, you'll be asked to re-accept on next sign-in.
+            </div>
+
+            <div style={{...c.card({padding:14}),marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📜 ACCEPTANCE STATUS</div>
+              <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>
+                <div>Terms of Service: <strong style={{color:T.gold}}>{tosVersionAccepted?"v"+tosVersionAccepted:"Not recorded"}</strong></div>
+                <div>Privacy Policy: <strong style={{color:T.gold}}>{privacyVersionAccepted?"v"+privacyVersionAccepted:"Not recorded"}</strong></div>
+                {acceptedAt&&<div style={{color:T.muted,marginTop:2}}>Last accepted: {fmtDateTime(acceptedAt)}</div>}
+              </div>
+            </div>
+
+            <div style={{...c.card({padding:14}),marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📄 VIEW DOCUMENTS</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button style={c.bsm()} onClick={()=>setShowAccountViewer("tos")}>📜 View Terms of Service</button>
+                <button style={c.bsm()} onClick={()=>setShowAccountViewer("privacy")}>🔒 View Privacy Policy</button>
+                <button style={c.bsm()} onClick={()=>setShowAcceptanceHistory(true)}>📋 View acceptance history</button>
+              </div>
+            </div>
+          </>;
+        })()}
+      </div>],
       ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
         {settings.cryptoEnabled&&<div style={c.g2(10)}>
@@ -687,6 +882,11 @@ export default function Settings({
   {showPrivacyForm&&<PrivacyPolicyForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyForm(false)}/>}
   {showPrivacyHistory&&<PrivacyPolicyHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyHistory(false)} onRestoredOpenForm={()=>setShowPrivacyForm(true)}/>}
   {showPrivacyPdf&&<PrivacyPolicyPdf settings={settings} pop={pop} onClose={()=>setShowPrivacyPdf(false)}/>}
+  {showTosForm&&<TermsOfServiceForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowTosForm(false)}/>}
+  {showTosHistory&&<TermsOfServiceHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowTosHistory(false)} onRestoredOpenForm={()=>setShowTosForm(true)}/>}
+  {showTosPdf&&<TermsOfServicePdf settings={settings} pop={pop} onClose={()=>setShowTosPdf(false)}/>}
+  {showAccountViewer&&<LegalDocsViewer kind={showAccountViewer} settings={settings} onClose={()=>setShowAccountViewer(null)}/>}
+  {showAcceptanceHistory&&<AcceptanceHistoryModal settings={settings} userRecord={userRecord} onClose={()=>setShowAcceptanceHistory(false)}/>}
   {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
     <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
     <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>

@@ -110,6 +110,16 @@ export async function signUp({
   email,phone,password,
   firstName,familyName,
   businessName,abn,
+  // Pre-launch — clickwrap consent. The Signup screen captures
+  // both versions strings (the version of the in-app default
+  // template the user just read before ticking the checkbox).
+  // For a brand-new shop with no approved versions yet, the
+  // versions are stamped as the literal string "default" — the
+  // re-acceptance gate then fires once the dealer approves their
+  // first customised version. acceptedAt is the timestamp of the
+  // signup itself.
+  termsVersionAccepted,
+  privacyPolicyVersionAccepted,
   // dealerLicenceNo / address accepted for forward-compat; not
   // currently passed through to signup_shop. The dealer fills
   // those in via Settings → Business Details after signup.
@@ -118,6 +128,7 @@ export async function signUp({
   if(!phone)return{ok:false,error:"Phone is required."};
   if(!password||password.length<8)return{ok:false,error:"Password must be at least 8 characters."};
   if(!businessName)return{ok:false,error:"Business name is required."};
+  if(!termsVersionAccepted||!privacyPolicyVersionAccepted)return{ok:false,error:"Acceptance of Terms of Service and Privacy Policy is required."};
 
   // Step 1 — auth.users via Supabase Auth.
   const authResult=await safe(()=>supabase.auth.signUp({
@@ -145,6 +156,25 @@ export async function signUp({
     p_phone:phone||"",
   }));
   if(!r.ok)return{ok:false,error:"Could not create shop: "+r.error};
+
+  // Stamp legal acceptance on the just-created users row. The RPC
+  // didn't take these as parameters because the consent record
+  // belongs to the natural person, not the shop, and we want the
+  // signup_shop function to stay focused on the shop+users
+  // creation. Failure here is not fatal — log and continue; the
+  // re-acceptance gate will pick it up on next login. The 0005
+  // migration's nullable columns mean an unstamped users row is
+  // valid; the gate treats it as "not accepted" → prompts.
+  const acceptedAt=new Date().toISOString();
+  const updateResult=await safe(()=>supabase.from("users").update({
+    terms_accepted_at:acceptedAt,
+    terms_version_accepted:termsVersionAccepted,
+    privacy_policy_version_accepted:privacyPolicyVersionAccepted,
+  }).eq("id",authUser.id));
+  if(!updateResult.ok&&typeof console!=="undefined"){
+    // eslint-disable-next-line no-console
+    console.warn("[loot] could not stamp legal acceptance on users row:",updateResult.error);
+  }
 
   // RPC returned shape: { shop_id, slug, role }. Hydrate to the
   // legacy {user, shop, userRecord} shape callers expect by doing
@@ -268,4 +298,50 @@ export async function isLockedOut(){
 export function onAuthStateChange(cb){
   const{data}=supabase.auth.onAuthStateChange((event,session)=>cb(event,session));
   return data&&data.subscription;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Pre-launch — legal acceptance helpers.
+// Used by:
+//   • Signup.jsx via signUp() above (signup-time stamp)
+//   • RequireLegalAcceptance gate (re-stamp after re-acceptance)
+//   • Settings → Account section (display current acceptance)
+// ──────────────────────────────────────────────────────────────────
+
+// Update the signed-in user's acceptance metadata. Either argument
+// may be omitted (only the provided ones are updated). The RLS
+// policy users_update USING (id = auth.uid()) permits a user to
+// update their own row. Returns {ok, error} for the caller to act on.
+export async function recordLegalAcceptance({termsVersion,privacyPolicyVersion}={}){
+  const u=await getCurrentUser();
+  if(!u)return{ok:false,error:"Not signed in."};
+  // Migration 0005 added a single shared timestamp column
+  // (terms_accepted_at) that tracks "most recent acceptance event"
+  // across both documents. Any update touches both the relevant
+  // version column and the shared timestamp.
+  if(termsVersion==null&&privacyPolicyVersion==null)return{ok:false,error:"No acceptance versions provided."};
+  const patch={terms_accepted_at:new Date().toISOString()};
+  if(termsVersion!=null)patch.terms_version_accepted=termsVersion;
+  if(privacyPolicyVersion!=null)patch.privacy_policy_version_accepted=privacyPolicyVersion;
+  return safe(()=>supabase.from("users").update(patch).eq("id",u.id));
+}
+
+// Read settings.termsOfService.currentVersion + settings.privacy
+// Policy.currentVersion for the user's shop. Used by the
+// RequireLegalAcceptance gate to compare against the user's
+// stamped versions. Returns {termsVersion, privacyVersion} where
+// each is the string version (e.g. "1.0") or null when no version
+// has been approved yet for this shop.
+export async function getCurrentLegalDocumentVersions(){
+  const ur=await getCurrentUserRecord();
+  if(!ur||!ur.shop_id)return{termsVersion:null,privacyVersion:null};
+  const{data,error}=await supabase.from("settings").select("data").eq("shop_id",ur.shop_id).maybeSingle();
+  if(error||!data)return{termsVersion:null,privacyVersion:null};
+  const d=(data&&data.data)||{};
+  const tos=d.termsOfService||{};
+  const pp=d.privacyPolicy||{};
+  return{
+    termsVersion:tos.currentVersion||null,
+    privacyVersion:pp.currentVersion||null,
+  };
 }

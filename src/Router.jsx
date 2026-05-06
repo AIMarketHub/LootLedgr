@@ -20,6 +20,7 @@ import React,{Suspense,lazy} from "react";
 import {BrowserRouter,Routes,Route,Navigate} from "react-router-dom";
 import {AuthProvider,useAuth} from "./components/AuthProvider.jsx";
 import RequireAuth from "./components/RequireAuth.jsx";
+import RequireLegalAcceptance from "./components/RequireLegalAcceptance.jsx";
 import Login from "./screens/auth/Login.jsx";
 import Signup from "./screens/auth/Signup.jsx";
 import ForgotPassword from "./screens/auth/ForgotPassword.jsx";
@@ -48,7 +49,7 @@ export default function Router(){
           <Route path="/forgot" element={<ForgotPassword/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
           <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>
-          <Route path="/app/*" element={<RequireAuth><App/></RequireAuth>}/>
+          <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
       </Suspense>
