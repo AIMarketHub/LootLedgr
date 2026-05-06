@@ -88,7 +88,7 @@ export default function Loot(){
   const[simp,setSimp]=useState(()=>store.get("simp",false));
   const[contrast,setContrast]=useState(()=>store.get("contrast",0));
   const[fontSize,setFontSize]=useState(()=>store.get("fontSize",14));
-  const[settingsOpen,setSettingsOpen]=useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,compliancethresholds:false,amlprogram:false,crypto:false,ai:false,idautofill:false,integrations:false});
+  const[settingsOpen,setSettingsOpen]=useState({spotfeed:false,appearance:true,business:false,scale:false,security:false,policehelp:false,compliance:false,compliancethresholds:false,amlprogram:false,tfsscreenlog:false,crypto:false,ai:false,idautofill:false,integrations:false});
   const toggleSection=k=>setSettingsOpen(p=>({...p,[k]:!p[k]}));
   const[quickMode,setQuickMode]=useState(false);
   const[qmMode,setQMMode]=useState("buy");
@@ -623,8 +623,19 @@ export default function Loot(){
   // the override path mutates state flags that finalize will
   // pick up and persist on the tx record.
   //
-  // SMR auto-trigger for the block path is Commit 4's job —
-  // Commit 3 only records the audit log and refuses the tx.
+  // TFS Commit 4 — SMR-on-block decision (option B from the spec).
+  // The block path does NOT call finalize — the refused tx never
+  // lands in the transactions table. The tfs_screen_log row with
+  // confirmed_match=true IS the SMR record-of-truth; it carries
+  // the customer name, DOB, citizenship, match reference, and
+  // staff signature, retained 7 years. The Settings → TFS
+  // Screening Log surface filters by status="blocked" to produce
+  // the SMR submission queue. The override path keeps producing
+  // a tx with tfsOverrideApplied=true (audit-log + tx record both
+  // exist), and per spec does NOT auto-set smrFlagged — an
+  // override is staff's affirmative determination that the name
+  // collision is not the same person, so the SMR isn't required
+  // unless other indicators trigger it via the regular SMR flow.
   const recordTfsBlock=async(matchRef)=>{
     try{
       await sb.logTfsScreen({
@@ -766,6 +777,7 @@ export default function Loot(){
             resetTx={resetTx} setScreen={setScreen}
             setShowEOD={setShowEOD} setShowVendors={setShowVendors} setShowStaff={setShowStaff} setShowBackup={setShowBackup} setShowPolice={setShowPolice}
             triggerDuress={triggerDuress}
+            tfsCacheMeta={tfsCacheMeta}
           />}
 
           {screen==="newTx"&&<NewTx

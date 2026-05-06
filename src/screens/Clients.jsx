@@ -172,6 +172,7 @@ export default function Clients({
                 {tx.hasPhotos&&<span style={c.badge(T.green,T.greenBg)}>📷</span>}
                 {isBlacklistedName(tx.client&&tx.client.fullName)&&<span style={c.badge(T.red)}>⛔ BLACKLISTED</span>}
                 {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+                {tx.tfsOverrideApplied&&<span style={c.badge(T.orange)}>TFS-OVERRIDE</span>}
                 {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR</span>}
                 {tx.isHobbyProspector&&<span style={c.badge(T.muted)}>HOBBY</span>}
                 {tx.clientId&&<span style={c.badge(T.gold,T.goldBg)}>🔗 LINKED</span>}

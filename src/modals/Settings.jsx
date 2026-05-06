@@ -50,6 +50,7 @@ import TermsOfServiceForm from "./TermsOfServiceForm.jsx";
 import TermsOfServiceHistory from "./TermsOfServiceHistory.jsx";
 import TermsOfServicePdf from "./TermsOfServicePdf.jsx";
 import LegalDocsViewer from "./LegalDocsViewer.jsx";
+import TfsScreenLogPanel from "./TfsScreenLogPanel.jsx";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 
@@ -230,7 +231,7 @@ export default function Settings({
   // Settings → Account reads the user's stamped acceptance
   // versions from AuthProvider's userRecord (same source the
   // gate consults). userRecord is null only during initial load.
-  const{userRecord}=useAuth();
+  const{userRecord,admin}=useAuth();
   // Show / Change PIN modals — both gated by the Admin gate on the
   // outer click. The result modals are unconditional once the gate
   // approves, so we don't need a separate "open after PIN" plumb;
@@ -545,6 +546,9 @@ export default function Settings({
             </div>
           </>;
         })()}
+      </div>],
+      ["tfsscreenlog","📋 TFS Screening Log",<div style={{paddingBottom:14}}>
+        {admin?<TfsScreenLogPanel/>:<div style={{...c.bnr("info"),marginBottom:0}}>Visible to platform admins only. The TFS audit log is admin-restricted to keep override rationales and customer screening detail off the general staff surface; AML/CTF Compliance Officers retain access via the Admin role.</div>}
       </div>],
       ["privacypolicy","🔒 Privacy Policy",<div style={{paddingBottom:14}}>
         {(()=>{

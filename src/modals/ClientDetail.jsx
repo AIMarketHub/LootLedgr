@@ -336,6 +336,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
                   {tx.voided&&<span style={c.badge(T.muted)}>VOIDED</span>}
                   {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" FILED":" PENDING"}</span>}
                   {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+                  {tx.tfsOverrideApplied&&<span style={c.badge(T.orange)}>TFS-OVERRIDE</span>}
                   {tx.isHobbyProspector&&<span style={c.badge(T.muted)}>HOBBY</span>}
                   {tx.legacyNoId&&<span style={c.badge(T.muted)}>⚠ LEGACY UN-IDED</span>}
                 </div>

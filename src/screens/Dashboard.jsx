@@ -19,8 +19,13 @@
 import React from "react";
 import {T,c} from "../theme.js";
 import {TROY_OZ} from "../lib/constants.js";
-import {fmtAUD,hoursLeft,fmtScaleWeight} from "../lib/utils.js";
+import {fmtAUD,fmtDate,hoursLeft,fmtScaleWeight} from "../lib/utils.js";
 import {calcUnitPrice} from "../lib/compliance/index.js";
+
+// TFS Commit 4 — staleness threshold for the DFAT list. The list
+// is updated by DFAT roughly fortnightly; 35 days gives a clear
+// "you're behind" signal without nagging during normal cadence.
+const TFS_STALE_DAYS=35;
 
 export default function Dashboard({
   settings,gSpot,sSpot,
@@ -31,6 +36,11 @@ export default function Dashboard({
   resetTx,setScreen,
   setShowEOD,setShowVendors,setShowStaff,setShowBackup,setShowPolice,
   triggerDuress,
+  // TFS Commit 4 — App boots syncTfsCache and stores the metadata
+  // (last_updated_at, record_count, source_filename). When the
+  // cache age exceeds TFS_STALE_DAYS, surface a yellow banner so
+  // the dealer knows to re-upload via /admin/tfs.
+  tfsCacheMeta,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
   return <div>
@@ -83,6 +93,18 @@ export default function Dashboard({
         through to the filtered History view. Land alongside the
         Phase 2 dashboard extraction. */}
     {(txList||[]).some(t=>t.ttrStatus==="PENDING")&&<div style={c.bnr("block")}>🔴 AUSTRAC TTR PENDING — {(txList||[]).filter(t=>t.ttrStatus==="PENDING").length} transaction(s) require filing at austrac.gov.au/online</div>}
+    {(()=>{
+      // TFS list freshness reminder. Renders only when we have a
+      // metadata last_updated_at AND it's older than TFS_STALE_DAYS.
+      // No render if metadata is missing entirely (don't pester a
+      // brand-new shop that hasn't uploaded yet — the /admin/tfs
+      // surface itself shows the empty state).
+      const lastIso=tfsCacheMeta&&tfsCacheMeta.last_updated_at;
+      if(!lastIso)return null;
+      const ageDays=Math.floor((Date.now()-new Date(lastIso).getTime())/86400000);
+      if(!isFinite(ageDays)||ageDays<=TFS_STALE_DAYS)return null;
+      return <div style={c.bnr("warn")}>⚠ TFS list update due — {ageDays} days since last refresh ({fmtDate(lastIso)}). Re-upload the latest DFAT Consolidated List via /admin/tfs.</div>;
+    })()}
     <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
       <button style={c.btn(T.gold,T.bg,{flex:2,minWidth:160,padding:"13px 0",fontSize:12})} onClick={()=>{resetTx();setScreen("newTx");}}>＋ New Transaction</button>
       <button style={c.btn(T.border,T.text,{flex:1,minWidth:100,padding:"13px 0",fontSize:12})} onClick={()=>setShowEOD(true)}>📋 EOD</button>

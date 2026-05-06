@@ -213,6 +213,29 @@ export const sb={
     };
     return sbFetch("tfs_screen_log",{method:"POST",body:JSON.stringify(row)});
   },
+  // TFS Commit 4 — read-only audit-log surface for the Settings →
+  // TFS Screening Log panel. Returns rows newest-first, paginated.
+  // status filter mirrors the panel's UI:
+  //   "matched"      → matched=true
+  //   "not_matched"  → matched=false
+  //   "blocked"      → confirmed_match=true (transaction refused)
+  //   "overridden"   → override_applied=true
+  //   anything else  → no extra filter (returns everything)
+  // sinceISO further constrains to created_at >= the given ISO
+  // string. shop_id scoping is enforced server-side by RLS plus a
+  // belt-and-braces eq filter here.
+  loadTfsScreenLog:async({limit=50,offset=0,sinceISO=null,status=null}={})=>{
+    const sid=getCurrentShopId();
+    let path="tfs_screen_log?shop_id=eq."+encodeURIComponent(sid);
+    if(sinceISO)path+="&created_at=gte."+encodeURIComponent(sinceISO);
+    if(status==="matched")path+="&matched=is.true";
+    else if(status==="not_matched")path+="&matched=is.false";
+    else if(status==="blocked")path+="&confirmed_match=is.true";
+    else if(status==="overridden")path+="&override_applied=is.true";
+    path+="&order=created_at.desc&limit="+encodeURIComponent(limit)+"&offset="+encodeURIComponent(offset);
+    const r=await sbFetch(path);
+    return Array.isArray(r)?r:[];
+  },
 };
 
 export const checkPhotoSize=(b64,cb)=>{if(b64)cb(b64);};
