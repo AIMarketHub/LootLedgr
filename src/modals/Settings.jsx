@@ -64,6 +64,29 @@ function formatPassphrase(s){
 }
 function isValidPin(s){return /^\d{4,12}$/.test(String(s||""));}
 
+// Stage 1.D follow-up (2026-05-06) — pretty-print a legal-doc
+// version label. The underlying "default" sentinel reads badly as
+// "vdefault"; this helper resolves it to "version DD.MM.YYYY"
+// using the user's acceptance timestamp (or the version row's
+// approved-at when called for AcceptanceHistoryModal rows).
+//
+// Returns null when no useful label can be produced — caller
+// decides what to fall back to (e.g. "Not recorded" in the
+// Account-status card).
+function legalVersionLabel(version,acceptedAt){
+  if(!version)return null;
+  if(version==="default"){
+    if(!acceptedAt)return "version (date unknown)";
+    const d=new Date(acceptedAt);
+    if(isNaN(d.getTime()))return "version (date unknown)";
+    const dd=String(d.getDate()).padStart(2,"0");
+    const mm=String(d.getMonth()+1).padStart(2,"0");
+    const yy=d.getFullYear();
+    return "version "+dd+"."+mm+"."+yy;
+  }
+  return "v"+version;
+}
+
 // Pre-launch — Acceptance history view. Cross-references the user's
 // stamped acceptance versions against every approved version on
 // file for each document, so the user can see (a) which version
@@ -78,14 +101,19 @@ function AcceptanceHistoryModal({settings,userRecord,onClose}){
   const tosAccepted=userRecord&&userRecord.terms_version_accepted||null;
   const ppAccepted=userRecord&&userRecord.privacy_policy_version_accepted||null;
   const acceptedAt=userRecord&&userRecord.terms_accepted_at||null;
-  const renderRow=(v,acceptedVersion)=>(
-    <div key={v.version+"-"+v.savedAt} style={{...c.card({padding:10,background:T.surface}),marginBottom:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+  const renderRow=(v,acceptedVersion)=>{
+    // For real-numbered versions ("1.0", "1.1") the helper returns
+    // "v1.0"; for the "default" sentinel (theoretical here — the
+    // dealer's Save & Approve always produces a real number via
+    // nextVersion()) it formats the date instead.
+    const lbl=legalVersionLabel(v.version,v.approvedAt||v.savedAt)||sS(v.version);
+    return <div key={v.version+"-"+v.savedAt} style={{...c.card({padding:10,background:T.surface}),marginBottom:6,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
       <div style={{flex:1,minWidth:200}}>
-        <div style={{fontSize:12,fontWeight:"bold",color:T.gold}}>v{sS(v.version)}{acceptedVersion===v.version&&<span style={{...c.badge(T.green),marginLeft:8}}>✓ Your accepted version</span>}</div>
+        <div style={{fontSize:12,fontWeight:"bold",color:T.gold}}>{lbl}{acceptedVersion===v.version&&<span style={{...c.badge(T.green),marginLeft:8}}>✓ Your accepted version</span>}</div>
         <div style={{fontSize:10,color:T.muted,marginTop:2}}>Approved {fmtDateTime(v.approvedAt)}{v.approvedBy?" by "+sS(v.approvedBy):""}</div>
       </div>
-    </div>
-  );
+    </div>;
+  };
   return <Modal title="📋 Acceptance History" onClose={onClose} wide>
     <div style={{...c.bnr("info"),marginBottom:14}}>
       Your single most recent acceptance of each document is recorded against your account. The list below cross-references your stamped versions against every approved version on file. To strengthen the audit trail (per-acceptance event log), see deferred work.
@@ -94,13 +122,13 @@ function AcceptanceHistoryModal({settings,userRecord,onClose}){
 
     <div style={{...c.card({padding:14}),marginBottom:14}}>
       <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:10}}>📜 TERMS OF SERVICE</div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{tosAccepted?"v"+tosAccepted:"Not recorded"}</strong></div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{legalVersionLabel(tosAccepted,acceptedAt)||"Not recorded"}</strong></div>
       {tosVersions.length===0?<div style={{fontSize:11,color:T.muted}}>No approved versions on file yet.</div>:tosVersions.map(v=>renderRow(v,tosAccepted))}
     </div>
 
     <div style={{...c.card({padding:14}),marginBottom:14}}>
       <div style={{fontSize:12,fontWeight:"bold",color:T.gold,marginBottom:10}}>🔒 PRIVACY POLICY</div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{ppAccepted?"v"+ppAccepted:"Not recorded"}</strong></div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>You currently accept: <strong style={{color:T.text}}>{legalVersionLabel(ppAccepted,acceptedAt)||"Not recorded"}</strong></div>
       {ppVersions.length===0?<div style={{fontSize:11,color:T.muted}}>No approved versions on file yet.</div>:ppVersions.map(v=>renderRow(v,ppAccepted))}
     </div>
 
@@ -724,8 +752,8 @@ export default function Settings({
             <div style={{...c.card({padding:14}),marginBottom:12}}>
               <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📜 ACCEPTANCE STATUS</div>
               <div style={{fontSize:12,color:T.text,lineHeight:1.7}}>
-                <div>Terms of Service: <strong style={{color:T.gold}}>{tosVersionAccepted?"v"+tosVersionAccepted:"Not recorded"}</strong></div>
-                <div>Privacy Policy: <strong style={{color:T.gold}}>{privacyVersionAccepted?"v"+privacyVersionAccepted:"Not recorded"}</strong></div>
+                <div>Terms of Service: <strong style={{color:T.gold}}>{legalVersionLabel(tosVersionAccepted,acceptedAt)||"Not recorded"}</strong></div>
+                <div>Privacy Policy: <strong style={{color:T.gold}}>{legalVersionLabel(privacyVersionAccepted,acceptedAt)||"Not recorded"}</strong></div>
                 {acceptedAt&&<div style={{color:T.muted,marginTop:2}}>Last accepted: {fmtDateTime(acceptedAt)}</div>}
               </div>
             </div>

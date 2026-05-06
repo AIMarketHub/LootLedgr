@@ -64,9 +64,29 @@ const styles={
   loading:{padding:"40vh 24px 0",textAlign:"center",color:"#9aa39e",fontFamily:"system-ui"},
 };
 
-// "default" reads better than "vdefault" wherever we'd otherwise
-// prefix with "v". Used in modal copy + checkbox text.
-function versionLabel(v){return v==="default"?"default template":"v"+v;}
+// Stage 1.D follow-up — pretty-print version label in the gate's
+// View buttons. Mirrors legalVersionLabel in Settings.jsx (kept
+// in sync by hand; the helper is small enough that a shared lib
+// import isn't worth the wiring).
+//
+// Returns null when no useful label can be produced — caller hides
+// the parens. In the gate context, version="default" almost always
+// means "first-time acceptance, no prior acceptedAt", which routes
+// through the null branch and gives a clean "View Terms of
+// Service" with no version label.
+function versionLabel(version,acceptedAt){
+  if(!version)return null;
+  if(version==="default"){
+    if(!acceptedAt)return null;
+    const d=new Date(acceptedAt);
+    if(isNaN(d.getTime()))return null;
+    const dd=String(d.getDate()).padStart(2,"0");
+    const mm=String(d.getMonth()+1).padStart(2,"0");
+    const yy=d.getFullYear();
+    return "version "+dd+"."+mm+"."+yy;
+  }
+  return "v"+version;
+}
 
 export default function RequireLegalAcceptance({children}){
   const{userRecord,refresh,loading:authLoading}=useAuth();
@@ -174,11 +194,18 @@ export default function RequireLegalAcceptance({children}){
         <div style={styles.h}>{headline}</div>
         <div style={styles.sub}>{body}</div>
         <div style={styles.row}>
-          {docList.map(d=>(
-            <button key={d.kind} style={styles.link} onClick={()=>setViewerKind(d.kind)}>
-              📄 View {d.label} ({versionLabel(d.version)})
-            </button>
-          ))}
+          {docList.map(d=>{
+            // userRecord.terms_accepted_at is the single shared
+            // acceptance timestamp (migration 0005). When the
+            // version-to-stamp is "default" (first-time accept),
+            // there's no prior acceptedAt → versionLabel returns
+            // null → the parenthetical is omitted, leaving a
+            // clean "📄 View Terms of Service".
+            const lbl=versionLabel(d.version,userRecord&&userRecord.terms_accepted_at);
+            return <button key={d.kind} style={styles.link} onClick={()=>setViewerKind(d.kind)}>
+              📄 View {d.label}{lbl?" ("+lbl+")":""}
+            </button>;
+          })}
         </div>
         <label style={styles.ack}>
           <input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)} style={{marginTop:3}}/>
