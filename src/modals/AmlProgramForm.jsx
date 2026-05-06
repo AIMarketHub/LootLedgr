@@ -36,6 +36,62 @@ function todayPlus3YearsISODate(){
   return d.toISOString().slice(0,10);
 }
 
+// Stage 1.C — AUSTRAC Compliance Officer notification popup.
+//
+// Fires immediately after a Save & Approve completes. Two-step UX:
+//
+//   1. Pre-click: explains the obligation and presents two buttons —
+//      "Go to AUSTRAC Online" (opens online.austrac.gov.au in a new
+//      tab) or "I'll do it later" (closes; the persistent banner in
+//      Settings → AML/CTF Program takes over).
+//
+//   2. Post-click: the same modal reveals a confirmation checkbox.
+//      Ticking + Confirm stamps austracCoNotified + austracCoNotifiedAt
+//      on the just-approved version entry inside settings.amlProgram.
+//      versions[]. The banner suppresses itself once stamped.
+//
+// The version's data block stays immutable — only the lifecycle
+// metadata around it (notified flag + timestamp) mutates, in the same
+// way savedAt / approvedAt do at approval time. When a new version is
+// approved, that new version starts un-notified; the user is re-
+// prompted in case the Compliance Officer changed (the popup name
+// pulls from s2.officerName so this is visible in the wording).
+function AustracNotifyPopup({officerName,version,onMarkNotified,onClose}){
+  const[linkClicked,setLinkClicked]=useState(false);
+  const[ack,setAck]=useState(false);
+  const openAustrac=()=>{
+    if(typeof window!=="undefined")window.open("https://online.austrac.gov.au","_blank","noopener");
+    setLinkClicked(true);
+  };
+  return <Modal title="✓ Program approved — one more step" onClose={onClose}>
+    <div style={{...c.bnr("info"),marginBottom:14}}>
+      <strong>You're nearly there.</strong> AUSTRAC requires you to formally notify them of your AML/CTF Compliance Officer{officerName?" ("+sS(officerName)+")":""}.
+    </div>
+    <div style={{fontSize:12,color:T.text,lineHeight:1.6,marginBottom:14}}>
+      Notification must be submitted within 14 days of appointment, or by your transitional deadline:
+      <ul style={{marginTop:8,paddingLeft:20,color:T.muted}}>
+        <li>If you were enrolled with AUSTRAC before 31 March 2026: deadline <strong>30 May 2026</strong></li>
+        <li>If newly regulated (precious metals dealer post-1 July 2026): deadline <strong>29 July 2026</strong> or 14 days from appointment, whichever later</li>
+      </ul>
+    </div>
+    {!linkClicked?<div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+      <button style={c.btn(T.gold,T.bg)} onClick={openAustrac}>🔗 Go to AUSTRAC Online to notify</button>
+      <button style={c.bsm()} onClick={onClose}>I'll do it later — close</button>
+    </div>:<>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10,lineHeight:1.5}}>AUSTRAC Online opened in a new tab. Once you've submitted your notification there, come back and tick the box below to record it against v{sS(version)}.</div>
+      <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",fontSize:12,marginBottom:14,lineHeight:1.5}}>
+        <input type="checkbox" checked={ack} onChange={e=>setAck(e.target.checked)} style={{marginTop:3}}/>
+        <span>I have notified AUSTRAC of the Compliance Officer for v{sS(version)}.</span>
+      </label>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        <button style={c.btn(T.green,T.bg)} disabled={!ack} onClick={onMarkNotified}>✓ Confirm notification</button>
+        <button style={c.bsm()} onClick={openAustrac}>🔗 Re-open AUSTRAC Online</button>
+        <button style={c.bsm()} onClick={onClose}>I'll do it later — close</button>
+      </div>
+    </>}
+  </Modal>;
+}
+
 // Renders a single field by key. Reads from the form-data map and
 // writes back via setData. Type derived from FIELD_META; falls back
 // to a single-line text input.
@@ -83,6 +139,13 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
   const[savingDraft,setSavingDraft]=useState(false);
   const[approving,setApproving]=useState(false);
   const[showApprovePanel,setShowApprovePanel]=useState(false);
+  // Stage 1.C — version just approved (drives the AUSTRAC CO
+  // notification popup). null until Save & Approve commits; the
+  // popup unmounts when this resets to null. Form-level onClose is
+  // deferred until the popup closes — closing the popup either
+  // way (Confirm or "I'll do it later") then closes the form.
+  const[approvedVersion,setApprovedVersion]=useState(null);
+  const[officerNameAtApprove,setOfficerNameAtApprove]=useState("");
 
   const dirty=useMemo(()=>JSON.stringify(data)!==JSON.stringify(seed),[data,seed]);
   const sections=Object.keys(SECTION_TITLES);
@@ -128,8 +191,37 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
       const versions=Array.isArray(prog.versions)?prog.versions:[];
       setSettings(p=>({...p,amlProgram:{currentVersion:newVersion,versions:[...versions,entry],draft:null}}));
       pop&&pop("Approved as v"+newVersion+".","ok");
-      onClose&&onClose();
+      // Stage 1.C — instead of closing the form, surface the
+      // AUSTRAC CO notification popup. Officer name is captured
+      // here so the popup wording stays correct even if the user
+      // edits the form while the popup is open.
+      setApprovedVersion(newVersion);
+      setOfficerNameAtApprove(sS(finalData["s2.officerName"]||""));
     }finally{setApproving(false);}
+  };
+
+  // Stage 1.C — stamp austracCoNotified on the just-approved
+  // version, then close popup + form. The version's data block is
+  // immutable; this is lifecycle metadata that mutates after
+  // approval, same way savedAt / approvedAt do at approval time.
+  const onMarkAustracNotified=()=>{
+    setSettings(p=>{
+      const prog=p&&p.amlProgram?p.amlProgram:{currentVersion:null,versions:[],draft:null};
+      const versions=Array.isArray(prog.versions)?prog.versions:[];
+      const stampedAt=nowISO();
+      return{...p,amlProgram:{...prog,versions:versions.map(v=>v.version===approvedVersion?{...v,austracCoNotified:true,austracCoNotifiedAt:stampedAt}:v)}};
+    });
+    pop&&pop("AUSTRAC notification recorded against v"+sS(approvedVersion)+".","ok");
+    setApprovedVersion(null);
+    onClose&&onClose();
+  };
+
+  // Either button on the popup that doesn't tick the checkbox
+  // (the "I'll do it later" path or window-close on the modal)
+  // routes through here. Form closes; banner takes over.
+  const onPopupClose=()=>{
+    setApprovedVersion(null);
+    onClose&&onClose();
   };
 
   const onCancel=()=>{
@@ -186,5 +278,15 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
       <button style={c.bsm()} onClick={onCancel}>Cancel</button>
       {dirty&&<span style={{fontSize:10,color:T.orange,padding:"6px 0"}}>• Unsaved changes</span>}
     </div>
+
+    {/* Stage 1.C — AUSTRAC CO notification popup. Mounted only after
+        a successful Save & Approve. Modal-on-modal: this overlays
+        the form modal, and onPopupClose closes both. */}
+    {approvedVersion&&<AustracNotifyPopup
+      officerName={officerNameAtApprove}
+      version={approvedVersion}
+      onMarkNotified={onMarkAustracNotified}
+      onClose={onPopupClose}
+    />}
   </Modal>;
 }

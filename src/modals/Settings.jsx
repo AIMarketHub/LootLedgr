@@ -354,19 +354,51 @@ export default function Settings({
             }));
             pop&&pop("Draft discarded.","warn");
           };
+          // Stage 1.C — AUSTRAC Compliance Officer notification.
+          // Banner fires when there's a current approved version
+          // that hasn't been stamped austracCoNotified. The
+          // post-approve popup is the primary path; this banner is
+          // the fallback for "I'll do it later" plus the place
+          // where the user can stamp after the fact (or after a
+          // version was approved without seeing the popup, e.g.
+          // legacy data). "Mark as notified" stamps in place.
+          const markCurrentNotified=()=>{
+            if(!current)return;
+            const stampedAt=nowISO();
+            setSettings(p=>{
+              const pp=p&&p.amlProgram?p.amlProgram:{currentVersion:null,versions:[],draft:null};
+              const vs=Array.isArray(pp.versions)?pp.versions:[];
+              return{...p,amlProgram:{...pp,versions:vs.map(v=>v.version===current.version?{...v,austracCoNotified:true,austracCoNotifiedAt:stampedAt}:v)}};
+            });
+            pop&&pop("AUSTRAC notification recorded against v"+sS(current.version)+".","ok");
+          };
+          const austracNotified=!!(current&&current.austracCoNotified);
           return <>
             <div style={{...c.bnr("info"),marginBottom:14}}>
               <strong>AUSTRAC obligation.</strong> Tranche-2 reporting entities (precious metals & stones dealers) must maintain a written AML/CTF Program from 1 July 2026. This form pre-fills statutory-correct defaults — you confirm or edit each section, save & approve, then download as PDF for AUSTRAC audits. Versions are immutable once approved.
             </div>
+
+            {/* Stage 1.C — AUSTRAC CO notification banner. Visible
+                only when a current version exists and hasn't been
+                stamped notified. */}
+            {current&&!austracNotified&&<div style={{...c.bnr("warn"),marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <span style={{flex:1,minWidth:200}}>⚠ <strong>AUSTRAC notification pending</strong> for v{sS(current.version)} — formally notify AUSTRAC of your AML/CTF Compliance Officer.</span>
+              <a href="https://online.austrac.gov.au" target="_blank" rel="noopener noreferrer" style={{color:T.gold,fontSize:12,fontWeight:"bold",textDecoration:"underline"}}>🔗 AUSTRAC Online</a>
+              <button style={c.bsm(T.greenBg||T.surface,T.green)} onClick={markCurrentNotified}>✓ Mark as notified</button>
+            </div>}
 
             {/* Card 1 — CURRENT VERSION */}
             <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.gold}}>
               <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📌 CURRENT VERSION</div>
               {current?<>
                 <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
-                  <div>Version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span>Version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></span>
+                    {austracNotified&&<span style={c.badge(T.green)}>✓ AUSTRAC notified</span>}
+                  </div>
                   <div>Saved: {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
                   {current.approvedBy&&<div>Approved: {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
+                  {austracNotified&&current.austracCoNotifiedAt&&<div style={{color:T.muted,marginTop:2}}>AUSTRAC notified: {fmtDateTime(current.austracCoNotifiedAt)}</div>}
                   {nextReview&&<div style={{color:T.muted,marginTop:4}}>Next independent review due: {nextReview}</div>}
                 </div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
