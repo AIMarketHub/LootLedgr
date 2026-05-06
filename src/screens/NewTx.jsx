@@ -640,9 +640,13 @@ export default function NewTx({
                 },
               });
             }}
-            onCreateNew={()=>{
+            onCreateNew={(prefillName)=>{
               setSelectedClientId(null);
-              setClient({});
+              // Carry the search query into the new client form's
+              // Full Name field so staff doesn't retype it. Empty
+              // / whitespace-only queries fall through to {} so
+              // the form starts blank exactly as before.
+              setClient(prefillName?{fullName:prefillName}:{});
               setPhoto(null);
               setCaptureMethod(null);
               setClientStep("new");

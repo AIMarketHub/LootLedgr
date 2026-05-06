@@ -56,7 +56,13 @@ export default function ClientSearch({onSelect,onCreateNew,autoFocus=false}){
 
   const close=()=>setResults(null);
   const pick=cl=>{onSelect&&onSelect(cl);close();};
-  const create=()=>{onCreateNew&&onCreateNew();close();};
+  // Pass the current trimmed query up so the create-new path can
+  // pre-fill the customer's name in the form. Saves staff typing
+  // it twice (once into the search bar, once into Full Name).
+  // Caller decides what to do with it (empty / whitespace-only
+  // queries arrive as ""; the receiver should treat that as
+  // "no pre-fill").
+  const create=()=>{onCreateNew&&onCreateNew(query.trim());close();};
 
   // One-line summary of identifying info: ID type/number then phone.
   const fmtLine=cl=>{
