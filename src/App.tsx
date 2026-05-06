@@ -62,6 +62,13 @@ export default function Loot(){
   const[kycDone,setKycDone]=useState(false);
   const[privAck,setPrivAck]=useState(false);
   const[idSighted,setIdSighted]=useState(false);
+  // Stage 1.C — hobby prospector flag. Tax-treatment marker on
+  // existing buy transactions: tx.isHobbyProspector + optional
+  // tx.vicMinersRightNumber. NOT a new transaction type. KYC / TTR
+  // / SMR / privacy / retention are identical to a commercial buy;
+  // only the accounting export branches on the flag.
+  const[isHobbyProspector,setIsHobbyProspector]=useState(false);
+  const[vicMinersRightNumber,setVicMinersRightNumber]=useState("");
   const[photo,setPhoto]=useState(null);
   const[itemPhotos,setItemPhotos]=useState({});
   const[zoom,setZoom]=useState(()=>store.get("zoom",100));
@@ -411,7 +418,13 @@ export default function Loot(){
     const currentCashAmount=cashAmountFromTx({payment:txPay,buyTotal,items:txItems});
     const ttrDecision=isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled:settings.ttrEnabled!==false});
 
-    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,deleteAfter:sevenYrsFrom(now)};
+    // Stage 1.C — persist hobby flag on the tx. Hobby is a buy-only
+    // concept (sells don't carry it — the tax-exempt status is a
+    // property of the seller, not our outbound sale), so we only
+    // record the flag when the tx contains at least one buy item.
+    const hasBuy=(txItems||[]).some(i=>i.mode==="buy");
+    const txIsHobby=!!isHobbyProspector&&hasBuy;
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,isHobbyProspector:txIsHobby,vicMinersRightNumber:txIsHobby?sS(vicMinersRightNumber||"").trim():"",deleteAfter:sevenYrsFrom(now)};
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
     setTxNo(peekInv());setTxStep(6);
@@ -453,13 +466,40 @@ export default function Loot(){
     const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
     const esc=v=>{const str=sS(v).replace(/[\r\n]+/g," ");const Q='"';return Q+str.split(Q).join(Q+Q)+Q;};
     const csv=rows=>rows.map(r=>r.map(esc).join(",")).join("\n");
-    const s1=[["TRANSACTION REGISTER"],["Spot: "+sn],["Invoice","Date","Client","Item","Metal","Purity","Wt(g)","Bought($)","Sold($)","Margin($)","GST","GST Est($)","Status"]];
-    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{const b=it.mode==="buy"?sN(it.price):0,sv=it.mode==="sell"?sN(it.price):0,m=sv-b;const gst=it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin":"Standard 10%";const ge=it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,m/11):sv*0.1;s1.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS((it.product&&it.product.label)||it.description||"—"),sS((it.product&&it.product.cat)||"—"),sS(it.purity||((it.product&&it.product.carat)&&it.product.carat+"ct")||"—"),sS(it.qty||"—"),b||"",sv||"",m||"",gst,ge.toFixed(2),tx.voided?"VOIDED":"OK"]);}));
+    // Stage 1.C — Hobby prospector accounting treatment.
+    //   • Hobby buys are tax-exempt under personal-use provisions:
+    //     GST=0, posted to settings.xeroBuyCodeHobby (default 315)
+    //     instead of the standard buy code (310). Hobby sells don't
+    //     exist as a concept (the flag is a property of the seller),
+    //     so on a tx with the flag set we still treat any sell items
+    //     under standard GST.
+    //   • The Hobby column + Account Code column are appended to
+    //     preserve existing column order for downstream parsers.
+    //   • A note row is appended at the end so the bookkeeper sees
+    //     the policy without having to read the column headers.
+    const s1=[["TRANSACTION REGISTER"],["Spot: "+sn],["Invoice","Date","Client","Item","Metal","Purity","Wt(g)","Bought($)","Sold($)","Margin($)","GST","GST Est($)","Status","Hobby","Account Code"]];
+    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
+      const isBuy=it.mode==="buy",isSell=it.mode==="sell";
+      const hobby=isBuy&&!!tx.isHobbyProspector;
+      const b=isBuy?sN(it.price):0,sv=isSell?sN(it.price):0,m=sv-b;
+      const gst=hobby?"Hobby (exempt)":it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin":"Standard 10%";
+      const ge=hobby?0:it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,m/11):sv*0.1;
+      const code=hobby?sS(settings.xeroBuyCodeHobby||"315"):isBuy?sS(settings.xeroBuyCode||"310"):isSell?sS(settings.xeroSellCode||"200"):"";
+      s1.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS((it.product&&it.product.label)||it.description||"—"),sS((it.product&&it.product.cat)||"—"),sS(it.purity||((it.product&&it.product.carat)&&it.product.carat+"ct")||"—"),sS(it.qty||"—"),b||"",sv||"",m||"",gst,ge.toFixed(2),tx.voided?"VOIDED":"OK",hobby?"YES":"",code]);
+    }));
+    s1.push([]);
+    s1.push(["Note: Hobby prospector — personal-use exemption (income tax nil, GST nil, CGT exempt under personal-use). Account code: "+sS(settings.xeroBuyCodeHobby||"315")+"."]);
     const s2=[["STOCK VALUATION"],["Spot: "+sn],["Item","Invoice","Metal","Purity","Wt(g)","Bought($)","Melt($)","P&L($)","GST","Days","Status"]];
     (stock||[]).filter(x=>!x.sold).forEach(s=>{const mv=calcMeltFn(s,frozenSnap,sp.g,sp.s),b=sN(s.price),d=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;s2.push([sS(s.description||((s.product&&s.product.label))||"—"),sS(s.txId||"—"),sS((s.product&&s.product.cat)||"—"),sS(s.purity||"—"),sS(s.weight_g||"—"),b.toFixed(2),mv!=null?mv.toFixed(2):"—",mv!=null?(mv-b).toFixed(2):"—",s.gstApplicable===false?"GST-Free":"Taxable",d,s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready"]);});
-    let tS=0,tP=0,tMG=0,tSG=0;
-    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{if(it.mode==="sell"&&it.gstApplicable!==false){tS+=sN(it.price);if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);else tSG+=sN(it.price)*0.1;}if(it.mode==="buy")tP+=sN(it.price);}));
-    const s3=[["GST SUMMARY"],["Period: "+(frozenSnap?frozenSnap.frozenAt:todayStr())],["Total Sales","$"+tS.toFixed(2)],["Total Purchases","$"+tP.toFixed(2)],["Standard GST (10%)","$"+tSG.toFixed(2)],["Margin Scheme GST","$"+tMG.toFixed(2)],["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],["",""],["Estimate only — confirm with registered tax agent",""]];
+    // Stage 1.C — GST summary excludes hobby buys from "Total
+    // Purchases" and surfaces them on a separate line so the
+    // bookkeeper can see the split. Standard / margin GST were
+    // already sell-side only (no buy-GST liability under the AU
+    // second-hand goods regime), so hobby has no effect on those
+    // two lines — just on the buy total.
+    let tS=0,tP=0,tHP=0,tMG=0,tSG=0;
+    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{if(it.mode==="sell"&&it.gstApplicable!==false){tS+=sN(it.price);if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);else tSG+=sN(it.price)*0.1;}if(it.mode==="buy"){if(tx.isHobbyProspector)tHP+=sN(it.price);else tP+=sN(it.price);}}));
+    const s3=[["GST SUMMARY"],["Period: "+(frozenSnap?frozenSnap.frozenAt:todayStr())],["Total Sales","$"+tS.toFixed(2)],["Total Purchases (commercial)","$"+tP.toFixed(2)],["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)],["Standard GST (10%)","$"+tSG.toFixed(2)],["Margin Scheme GST","$"+tMG.toFixed(2)],["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],["",""],["Estimate only — confirm with registered tax agent",""]];
     const s4=[["COMPLIANCE LOG"],["Invoice","Date","Client","TTR Status","SMR","KYC","Police Hold","Voided"]];
     (txList||[]).forEach(tx=>s4.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS(tx.ttrStatus||"N/A"),tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",(tx.items||[]).some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
     dlFile("LOOT LEDGR — ACCOUNTING EXPORT\nBusiness: "+sS(settings.businessName)+"  ABN: "+sS(settings.abn)+"\nExported: "+todayStr()+"  Spot: "+sn+"\n\n1. TRANSACTION REGISTER\n"+csv(s1)+"\n\n2. STOCK VALUATION\n"+csv(s2)+"\n\n3. GST SUMMARY\n"+csv(s3)+"\n\n4. COMPLIANCE LOG\n"+csv(s4),"lootledgr-accounting-"+todayStr()+".csv","text/csv");
@@ -498,7 +538,7 @@ export default function Loot(){
       pop("Incorrect PIN","err");
     }
   };
-  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");};
+  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");setIsHobbyProspector(false);setVicMinersRightNumber("");};
   // TODO (briefing §9 Gap 8) — Police notice 21-day countdown.
   //   Today policeHold is binary. Per state law it has a 21-day default
   //   life with a single 21-day reissue (total 42). Replace this toggle
@@ -631,6 +671,8 @@ export default function Loot(){
             selectedClientId={selectedClientId} setSelectedClientId={setSelectedClientId}
             clientStep={clientStep} setClientStep={setClientStep}
             setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
+            isHobbyProspector={isHobbyProspector} setIsHobbyProspector={setIsHobbyProspector}
+            vicMinersRightNumber={vicMinersRightNumber} setVicMinersRightNumber={setVicMinersRightNumber}
           />}
 
           {screen==="stock"&&<Stock
@@ -693,6 +735,10 @@ export default function Loot(){
         </div>}
 
         {selTx&&<Modal title={"Transaction — "+selTx.id} onClose={()=>setSelTx(null)} wide>
+          {selTx.isHobbyProspector&&<div style={{marginBottom:10,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <span style={c.badge(T.muted)}>HOBBY</span>
+            <span style={{fontSize:11,color:T.muted}}>Hobby prospector — tax-treatment marker only{selTx.vicMinersRightNumber?" · Vic Miner's Right "+sS(selTx.vicMinersRightNumber):""}</span>
+          </div>}
           <div style={c.g2(14)}>
             {[{l:"Date",v:fmtDate(selTx.date)},{l:"Client",v:selTx.client&&selTx.client.fullName,col:T.white},{l:"Buy Total",v:fmtAUD(selTx.buyTotal),col:T.green},{l:"Sell Total",v:fmtAUD(selTx.sellTotal),col:T.gold},{l:"Net",v:fmtAUD(Math.abs(selTx.net||0))+" "+(sN(selTx.net)>=0?"(client pays)":"(we pay)")},{l:"Payment",v:sS(selTx.payment).toUpperCase()},{l:"KYC",v:selTx.kycDone?"COMPLETED":"N/A",col:selTx.kycDone?T.green:T.muted},{l:"TTR",v:sS(selTx.ttrStatus||"N/A"),col:selTx.ttrRequired?T.red:T.muted},{l:"Delete After",v:fmtDate(selTx.deleteAfter),col:T.muted}].map(row=><div key={row.l}><div style={c.lbl}>{row.l}</div><div style={{color:row.col||T.text}}>{sS(row.v)}</div></div>)}
           </div>

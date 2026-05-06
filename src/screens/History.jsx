@@ -30,6 +30,7 @@ export default function History({
               <span style={{fontSize:11,color:T.muted}}>{fmtDate(tx.date)}</span>
               {tx.ttrRequired&&<span style={c.badge(T.red)}>TTR{tx.ttrStatus==="FILED"?" FILED":" PENDING"}</span>}
               {tx.smrFlagged&&<span style={c.badge(T.orange)}>SMR</span>}
+              {tx.isHobbyProspector&&<span style={c.badge(T.muted)}>HOBBY</span>}
               {tx.voided&&<span style={c.badge(T.muted)}>VOIDED</span>}
               {tx.legacyNoId&&<span style={c.badge(T.muted)}>⚠ LEGACY UN-IDED</span>}
             </div>

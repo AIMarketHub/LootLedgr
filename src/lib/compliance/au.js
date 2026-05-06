@@ -344,6 +344,12 @@ export function makeReceiptFn(tx,settings){
   if(tx.sellTotal>0)L.push("SELL TOTAL: "+fmtAUD(tx.sellTotal));
   L.push("NET:        "+fmtAUD(Math.abs(tx.net||0))+(sN(tx.net)>=0?" (client pays)":" (we pay)"));
   L.push("PAYMENT:    "+sS(tx.payment).toUpperCase(),"========================================","Signature: _____________________________","Date:      _____________________________","========================================","Licensed — SHD Act 1989 (Vic) | AUSTRAC entity");
+  // Stage 1.C — hobby prospector footer (tax-treatment marker only;
+  // KYC / TTR / SMR / privacy posture identical to a commercial buy).
+  if(tx.isHobbyProspector){
+    L.push("Hobby prospector transaction — tax-exempt under personal-use provisions");
+    if(tx.vicMinersRightNumber)L.push("Vic Miner's Right: "+sS(tx.vicMinersRightNumber));
+  }
   return L.join("\n");
 }
 
@@ -364,8 +370,14 @@ export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,sett
   // Act §21A): police must locate held items on demand without a
   // treasure hunt. Tx-level location (set by staff at the buy step,
   // App.tsx:877) is recorded against every item in that transaction.
-  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Storage","Notes"]];
-  txs.forEach(tx=>{const cl=tx.client||{},stf=tx.staff||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(stf.storageLocation||"—"),sS(it.note)]);});});
+  // Stage 1.C — Hobby + Miner's Right columns appended to the row
+  // schema (Vic SHD Act §21A is silent on hobby flagging, but
+  // surfacing it on the police register is harmless and matches the
+  // dealer's internal record). The columns are appended at the end
+  // so existing column order is preserved for any consumer that
+  // parses by index.
+  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Storage","Notes","Hobby","Vic Miner's Right"]];
+  txs.forEach(tx=>{const cl=tx.client||{},stf=tx.staff||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(stf.storageLocation||"—"),sS(it.note),tx.isHobbyProspector?"YES":"",tx.isHobbyProspector?sS(tx.vicMinersRightNumber||""):""]);});});
   if(rows.length<=15)rows.push(["(No qualifying buy transactions in this period)"]);
   return rows.map(r=>r.map(v=>'"'+sS(v).replace(/"/g,'""')+'"').join(",")).join("\n");
 }

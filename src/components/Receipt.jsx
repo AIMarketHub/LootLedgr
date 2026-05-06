@@ -98,6 +98,10 @@ export default function Receipt({tx,settings}){
       <div>Payment: {String(tx.payment||"").toUpperCase()}</div>
     </section>
     {tx.ttrRequired&&<div style={{padding:"6px 8px",border:"2px solid #000",fontWeight:"bold",margin:"10px 0",textAlign:"center"}}>TTR REQUIRED — filed with AUSTRAC</div>}
+    {tx.isHobbyProspector&&<div style={{marginTop:8,fontSize:10,color:"#444",fontStyle:"italic",textAlign:"center"}}>
+      Hobby prospector transaction — tax-exempt under personal-use provisions
+      {tx.vicMinersRightNumber?<><br/>Vic Miner's Right: {tx.vicMinersRightNumber}</>:null}
+    </div>}
     <hr style={dashed}/>
     <section style={{marginTop:20,marginBottom:14}}>
       <div style={{marginBottom:30}}>

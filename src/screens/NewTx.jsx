@@ -86,6 +86,10 @@ export default function NewTx({
   // Phase 2.7.11 — blacklist soft-block gate (reuses the existing
   // setPinModal pattern; activeStaff drives audit-entry staffId).
   setPinModal,setPinVal,activeStaff,
+  // Stage 1.C — hobby prospector flag (tax-treatment marker; no
+  // effect on KYC / TTR / SMR / privacy / retention).
+  isHobbyProspector,setIsHobbyProspector,
+  vicMinersRightNumber,setVicMinersRightNumber,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
   // Phase 2.7 follow-up (2026-04-30) — sub-state for the new-client
@@ -451,6 +455,23 @@ export default function NewTx({
             )}
           </>;
         })()}
+        {/* Stage 1.C — Hobby prospector flag. Buy-only — sells
+            don't carry a hobby-prospector concept (the tax-exempt
+            treatment is a property of the seller, not the dealer's
+            outbound sale). The flag is purely a tax-treatment
+            marker; KYC / TTR / SMR / privacy / retention are
+            unaffected — see AML/CTF Program s5 monitoring text. */}
+        {(txItems||[]).some(i=>i.mode==="buy")&&(
+          <div style={c.card({padding:14,marginTop:14})}>
+            <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",fontSize:12,lineHeight:1.5}}>
+              <input type="checkbox" checked={!!isHobbyProspector} onChange={e=>{const v=e.target.checked;setIsHobbyProspector(v);if(!v)setVicMinersRightNumber("");}} style={{marginTop:3}}/>
+              <span><strong>Hobby Prospector</strong> — selling own gold from personal recreational prospecting. Tax-exempt treatment under personal-use provisions; same KYC/TTR/SMR requirements as a commercial buy.</span>
+            </label>
+            {isHobbyProspector&&<div style={{marginTop:10}}>
+              <F label="Vic Miner's Right Number (optional)" value={vicMinersRightNumber||""} onChange={setVicMinersRightNumber} placeholder="e.g. 12345"/>
+            </div>}
+          </div>
+        )}
         <div style={{display:"flex",gap:10,marginTop:10}}>
           <button style={c.bsm(T.redBg,T.red)} onClick={()=>setShowFlag(true)}>🚩 Flag SMR (internal)</button>
           <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
