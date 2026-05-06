@@ -43,6 +43,9 @@ import AdminPinSetup from "./AdminPinSetup.jsx";
 import AmlProgramForm from "./AmlProgramForm.jsx";
 import AmlProgramHistory from "./AmlProgramHistory.jsx";
 import AmlProgramPdf from "./AmlProgramPdf.jsx";
+import PrivacyPolicyForm from "./PrivacyPolicyForm.jsx";
+import PrivacyPolicyHistory from "./PrivacyPolicyHistory.jsx";
+import PrivacyPolicyPdf from "./PrivacyPolicyPdf.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 
 // 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
@@ -130,6 +133,12 @@ export default function Settings({
   const[showAmlForm,setShowAmlForm]=useState(false);
   const[showAmlHistory,setShowAmlHistory]=useState(false);
   const[showAmlPdf,setShowAmlPdf]=useState(false);
+  // Privacy Policy — same three-modal pattern as the AML/CTF
+  // Program. Form (edit + Save & Approve), History (immutable
+  // version list with Restore-as-draft), Pdf (export current).
+  const[showPrivacyForm,setShowPrivacyForm]=useState(false);
+  const[showPrivacyHistory,setShowPrivacyHistory]=useState(false);
+  const[showPrivacyPdf,setShowPrivacyPdf]=useState(false);
   // Show / Change PIN modals — both gated by the Admin gate on the
   // outer click. The result modals are unconditional once the gate
   // approves, so we don't need a separate "open after PIN" plumb;
@@ -445,6 +454,98 @@ export default function Settings({
           </>;
         })()}
       </div>],
+      ["privacypolicy","🔒 Privacy Policy",<div style={{paddingBottom:14}}>
+        {(()=>{
+          const prog=(settings.privacyPolicy&&typeof settings.privacyPolicy==="object")?settings.privacyPolicy:{currentVersion:null,versions:[],draft:null};
+          const versions=Array.isArray(prog.versions)?prog.versions:[];
+          const current=prog.currentVersion?versions.find(v=>v.version===prog.currentVersion):null;
+          const hasDraft=!!(prog.draft&&prog.draft.data);
+          const mostRecent=versions.length?[...versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]:null;
+          const seedDraftFromCurrent=()=>{
+            if(!current)return;
+            if(hasDraft){
+              if(typeof window!=="undefined"&&window.confirm){
+                if(!window.confirm("A draft already exists. Replace it with a copy of v"+sS(current.version)+"?"))return;
+              }
+            }
+            setSettings(p=>({
+              ...p,
+              privacyPolicy:{
+                ...(p.privacyPolicy||{currentVersion:null,versions:[]}),
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+              },
+            }));
+            setShowPrivacyForm(true);
+          };
+          const discardDraft=()=>{
+            if(typeof window!=="undefined"&&window.confirm){
+              if(!window.confirm("Discard the current draft? Edits will be lost. This cannot be undone."))return;
+            }
+            setSettings(p=>({
+              ...p,
+              privacyPolicy:{...(p.privacyPolicy||{currentVersion:null,versions:[]}),draft:null},
+            }));
+            pop&&pop("Draft discarded.","warn");
+          };
+          return <>
+            <div style={{...c.bnr("info"),marginBottom:14}}>
+              <strong>Privacy Act 1988 (Cth) obligation.</strong> APP 1 requires every entity covered by the Act to have a clearly expressed and up-to-date privacy policy. This form pre-fills statutory-correct defaults across 14 sections covering APPs 1-13 + the Notifiable Data Breaches scheme. You confirm or edit each section, save &amp; approve, then download as PDF for customer transparency. Versions are immutable once approved.
+            </div>
+
+            {/* Card 1 — CURRENT VERSION */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.gold}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>📌 CURRENT VERSION</div>
+              {current?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Version: <strong style={{color:T.gold}}>v{sS(current.version)}</strong></div>
+                  <div>Saved: {fmtDateTime(current.savedAt)}{current.savedBy?" by "+sS(current.savedBy):""}</div>
+                  {current.approvedBy&&<div>Approved: {fmtDateTime(current.approvedAt)} by <strong>{sS(current.approvedBy)}</strong></div>}
+                  {current.data&&current.data["s14.policyEffectiveDate"]&&<div style={{color:T.muted,marginTop:4}}>Effective: {sS(current.data["s14.policyEffectiveDate"])}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowPrivacyPdf(true)}>📄 Download PDF</button>
+                  <button style={c.bsm()} onClick={seedDraftFromCurrent}>↺ Edit as new draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:10}}>No Privacy Policy approved yet.</div>
+                <button style={c.btn(T.gold,T.bg)} onClick={()=>setShowPrivacyForm(true)}>+ Fill out Privacy Policy</button>
+              </>}
+            </div>
+
+            {/* Card 2 — DRAFT */}
+            <div style={{...c.card({padding:14}),marginBottom:12,borderLeft:"3px solid "+T.orange}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.orange,marginBottom:10}}>📝 DRAFT (in progress)</div>
+              {hasDraft?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>Saved: {fmtDateTime(prog.draft.savedAt)}{prog.draft.savedBy?" by "+sS(prog.draft.savedBy):""}</div>
+                  <div style={{color:T.muted,marginTop:2}}>Status: not yet approved</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.btn(T.gold,T.bg,{padding:"8px 14px",fontSize:12})} onClick={()=>setShowPrivacyForm(true)}>📝 Continue editing</button>
+                  <button style={c.bsm(T.redBg,T.red)} onClick={discardDraft}>🗑 Discard draft</button>
+                </div>
+              </>:<>
+                <div style={{fontSize:12,color:T.muted,marginBottom:current?10:0}}>No draft in progress.</div>
+                {current&&<button style={c.bsm()} onClick={seedDraftFromCurrent}>+ Start a new draft</button>}
+              </>}
+            </div>
+
+            {/* Card 3 — VERSION HISTORY */}
+            <div style={{...c.card({padding:14}),marginBottom:0,borderLeft:"3px solid "+T.border}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.muted,marginBottom:10}}>📜 VERSION HISTORY</div>
+              {versions.length>0?<>
+                <div style={{fontSize:12,color:T.text,lineHeight:1.6}}>
+                  <div>{versions.length} approved version{versions.length===1?"":"s"} on file.</div>
+                  {mostRecent&&<div style={{color:T.muted,marginTop:2}}>Most recent: <strong>v{sS(mostRecent.version)}</strong> — {fmtDateTime(mostRecent.savedAt)}</div>}
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                  <button style={c.bsm()} onClick={()=>setShowPrivacyHistory(true)}>📜 View all versions</button>
+                </div>
+              </>:<div style={{fontSize:12,color:T.muted}}>No versions saved yet. Use the form's <em>Save &amp; Approve</em> button to create the first version.</div>}
+            </div>
+          </>;
+        })()}
+      </div>],
       ["crypto","₿ Cryptocurrency Payments",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.cryptoEnabled} onChange={e=>setSettings(p=>({...p,cryptoEnabled:e.target.checked}))}/>Enable cryptocurrency payment option</label>
         {settings.cryptoEnabled&&<div style={c.g2(10)}>
@@ -583,6 +684,9 @@ export default function Settings({
   {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
   {showAmlHistory&&<AmlProgramHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlHistory(false)} onRestoredOpenForm={()=>setShowAmlForm(true)}/>}
   {showAmlPdf&&<AmlProgramPdf settings={settings} pop={pop} onClose={()=>setShowAmlPdf(false)}/>}
+  {showPrivacyForm&&<PrivacyPolicyForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyForm(false)}/>}
+  {showPrivacyHistory&&<PrivacyPolicyHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyHistory(false)} onRestoredOpenForm={()=>setShowPrivacyForm(true)}/>}
+  {showPrivacyPdf&&<PrivacyPolicyPdf settings={settings} pop={pop} onClose={()=>setShowPrivacyPdf(false)}/>}
   {passphraseShown!=null&&<Modal title="🔑 Recovery Passphrase" onClose={()=>setPassphraseShown(null)}>
     <div style={{...c.bnr("warn"),marginBottom:14}}>Save this somewhere safe. It is the only PIN-reset path until Phase 3 wires up SMS recovery.</div>
     <div style={{background:T.surface,border:"1px solid "+T.border,borderRadius:6,padding:14,fontFamily:"monospace",fontSize:18,letterSpacing:"0.08em",textAlign:"center",color:T.white,marginBottom:14}}>{formatPassphrase(passphraseShown)}</div>
