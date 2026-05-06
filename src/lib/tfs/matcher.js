@@ -21,29 +21,33 @@
 //   4. For each candidate, evaluate DOB and citizenship against
 //      the primary record. Compute a severity.
 //
-// Severity decision (clarifying the spec ambiguity)
-// =================================================
-// The original spec described HIGH and MEDIUM with overlapping
-// conditions. The MEDIUM line's "→ ask staff to request
-// citizenship" signal makes the intent clear: MEDIUM is the state
-// where staff needs to gather more info (citizenship) before the
-// gate reaches HIGH. Resolved as:
+// Severity decision (per the resume-Commit-2 spec table)
+// ======================================================
 //
-//   HIGH    name match (distance ≤ 2 or substring) AND DOB matches
+//   HIGH    name match (distance ≤ 2 or substring) AND DOB match
 //           AND citizenship explicitly matches → block transaction.
-//   MEDIUM  name + DOB match, citizenship unknown / not provided
-//           → prompt staff to ask the customer for citizenship.
-//   MEDIUM  name match, DOB inconclusive (entry has no DOB, or
-//           customer's DOB unknown) → can't disprove → escalate.
-//   LOW     name match but DOB explicitly different → likely a
-//           false positive (different person with similar name).
-//   LOW     name + DOB match but citizenship explicitly different
-//           → also likely false positive.
+//   MEDIUM  name + DOB match, citizenship not_provided OR
+//           inconclusive → prompt staff to ask the customer.
+//   MEDIUM  name + DOB match, citizenship explicitly different
+//           → not specified by the spec; resolved conservatively
+//           as MEDIUM (sanctions evaders sometimes claim
+//           different citizenships, and the cost of a false
+//           negative is criminal liability). Staff can override
+//           via the "Different person" PIN path in Commit 3 if
+//           they're confident.
+//   LOW     name match, DOB inconclusive (entry has no DOB on
+//           file, or customer's DOB unknown) — entry is surfaced
+//           for audit but does NOT raise a UI flag.
+//   SKIP    name match BUT DOB explicitly different → likely a
+//           false positive (different person with the same name).
+//           Not returned by screenCustomer at all.
 //   SKIP    no name match (Levenshtein > 2 and no substring) →
-//           not returned by findCandidateMatches at all.
+//           not even reached by findCandidateMatches.
 //
-// The UI in Commit 3 raises a flag for HIGH or MEDIUM. LOW is
-// logged in tfs_screen_log but doesn't block the transaction.
+// The UI in Commit 3 raises a red banner for HIGH or MEDIUM. LOW
+// results are returned by screenCustomer (so the caller can log
+// them to tfs_screen_log for audit) but the UI treats them as
+// non-blocking.
 
 import {normalizeName} from "./parser.js";
 
@@ -242,24 +246,22 @@ export function matchesCitizenship(customerCit,entryCit){
   return "no_match";
 }
 
-// Decide severity from the three component matches. See module
-// header for the resolved spec ambiguity. Inputs are the matchesDob
-// / matchesCitizenship return strings.
+// Decide severity from the two component matches. See module
+// header for the full spec table. Returns null to signal "drop
+// this candidate from the result list" (the dobMatch=no_match
+// false-positive case).
 function decideSeverity(dobMatch,citMatch){
-  if(dobMatch==="no_match")return "low";
-  // dob is 'match' or 'inconclusive' beyond this point. Name
-  // already matched (we wouldn't be here otherwise).
-  if(dobMatch==="match"){
-    if(citMatch==="match")return "high";
-    if(citMatch==="no_match")return "low";
-    // not_provided or inconclusive → staff needs more info.
-    return "medium";
-  }
-  // dobMatch === 'inconclusive': name matches, can't confirm or
-  // deny via DOB. Escalate so staff investigates rather than miss
-  // a real match. Citizenship-explicit-different still demotes to
-  // low (different person likely).
-  if(citMatch==="no_match")return "low";
+  // SKIP — drop the candidate. Different person with the same
+  // name; not worth surfacing.
+  if(dobMatch==="no_match")return null;
+  // LOW — name matched but the entry has no DOB on file (or the
+  // customer's DOB is unknown). Surface for audit; UI doesn't
+  // flag.
+  if(dobMatch==="inconclusive")return "low";
+  // dobMatch === "match" beyond this point.
+  if(citMatch==="match")return "high";
+  // not_provided / inconclusive / no_match all route to MEDIUM
+  // → staff prompted to gather more info or override.
   return "medium";
 }
 
@@ -271,9 +273,12 @@ function decideSeverity(dobMatch,citMatch){
 //   2. Calls screenCustomer() on customer-name blur and on ID
 //      scan completion.
 //   3. Filters the result for severity in {high, medium} to
-//      decide whether to raise the red banner.
-//   4. Renders TfsMatchModal with the full result set so staff
-//      sees every candidate, not just the highest-severity one.
+//      decide whether to raise the red banner. Results with
+//      severity 'low' are returned by screenCustomer and should
+//      be logged to tfs_screen_log for audit, but the UI does
+//      not flag them.
+//   4. Renders TfsMatchModal with the high+medium subset so
+//      staff sees every blocking-or-investigation candidate.
 //
 // Result shape per spec:
 //   {
@@ -288,21 +293,28 @@ function decideSeverity(dobMatch,citMatch){
 export function screenCustomer({name,dob,citizenship}={},tfsList){
   if(!name||!Array.isArray(tfsList))return [];
   const candidates=findCandidateMatches(name,tfsList);
-  return candidates.map(cand=>{
+  const results=[];
+  for(const cand of candidates){
     const primaryDob=cand.primaryRecord&&cand.primaryRecord.dob_parsed;
     const primaryCit=cand.primaryRecord&&cand.primaryRecord.citizenship;
     const dobMatch=matchesDob(dob,primaryDob);
     const citMatch=matchesCitizenship(citizenship,primaryCit);
-    return{
+    const severity=decideSeverity(dobMatch,citMatch);
+    // SKIP — decideSeverity returns null when the DOB explicitly
+    // mismatches. Drop the candidate entirely so callers don't
+    // surface or log it.
+    if(severity==null)continue;
+    results.push({
       primaryRecord:cand.primaryRecord,
       aliases:cand.aliases,
       matchedVia:cand.matchedVia,
       nameDistance:cand.nameDistance,
       dobMatch,
       citizenshipMatch:citMatch,
-      severity:decideSeverity(dobMatch,citMatch),
-    };
-  });
+      severity,
+    });
+  }
+  return results;
 }
 
 // Re-export normalizeName so callers don't need to import from
