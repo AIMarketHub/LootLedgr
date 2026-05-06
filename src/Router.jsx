@@ -28,6 +28,7 @@ import ForgotPassword from "./screens/auth/ForgotPassword.jsx";
 const App=lazy(()=>import("./App.tsx"));
 const TrialExpired=lazy(()=>import("./screens/TrialExpired.jsx"));
 const AdminPanel=lazy(()=>import("./screens/admin/AdminPanel.jsx"));
+const TfsListAdmin=lazy(()=>import("./screens/admin/TfsListAdmin.jsx"));
 const RequireAdmin=lazy(()=>import("./components/RequireAdmin.jsx"));
 
 function RootRedirect(){
@@ -48,6 +49,7 @@ export default function Router(){
           <Route path="/signup" element={<Signup/>}/>
           <Route path="/forgot" element={<ForgotPassword/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
+          <Route path="/admin/tfs" element={<RequireAdmin><TfsListAdmin/></RequireAdmin>}/>
           <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>
           <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
