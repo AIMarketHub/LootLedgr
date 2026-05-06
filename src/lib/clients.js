@@ -84,6 +84,7 @@ export const isClientMandatoryComplete=c=>getMissingMandatoryFields(c).length===
 export const CLIENT_RECORD_FIELDS=[
   "fullName","middleName","dob","address","phone","email",
   "idType","idNumber","idPhoto",
+  "citizenship",
   "pepCheck","tfsCheck","riskRating",
   "sourceOfFunds","sourceOfWealth",
   "internalNotes","blacklisted",

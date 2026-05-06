@@ -1,24 +1,32 @@
 // LootLedger — NewTx screen.
-// Phase 2.7.9a — flow REORDERED per the Phase 2.7 spec:
+// Phase 2.7.9a + 2026-05-06 reorder — flow:
 //
-//   step 1 — Basket           (catalog or quick-item entry, basket table)
-//   step 2 — Price + Payment  (was previously step 5)
-//   step 3 — Conditional      (only the fields getRequiredFields()
-//            Compliance        returns + flags banner + SMR flag)
-//   step 4 — Client            (privacy ack, declaration, ID,
-//                                signature; ClientSearch + photo-
-//                                first integration arrives in 2.7.9b)
-//   step 5 — Staff             (ID-sighted + 168hr hold + storage —
-//                                KYC fields stripped from this step,
-//                                they're now in step 3)
-//   step 6 — Done              (summary + finalize)
+//   step 1 — Basket            (catalog or quick-item entry,
+//                                 basket table)
+//   step 2 — Client             (ClientSearch / IdPhotoCapture /
+//                                 manual; privacy ack, declaration,
+//                                 ID + new citizenship field,
+//                                 signature)
+//   step 3 — Conditional        (only the fields getRequiredFields()
+//            Compliance         returns + flags banner + SMR flag +
+//                                 hobby prospector toggle)
+//   step 4 — Price + Payment    (cash hard-block / $2k cash-warn
+//                                 PIN gate runs on the Next click)
+//   step 5 — Staff              (ID-sighted + 168hr hold + storage)
+//   step 6 — Done               (summary + finalize)
 //
-// Step 3 reads getRequiredFields(tx, settings) (added in 2.7.8) to
-// decide which compliance fields to render. With dealer-side
-// threshold tightening from 2.7.4b, fields appear earlier than the
-// AUSTRAC defaults. With nothing tightened and a sub-threshold tx,
-// step 3 may show no fields at all — just a "no extra fields
-// required" notice.
+// 2026-05-06 step swap — Client (was step 3) now precedes
+// Compliance (was step 2). Compliance can't run useful checks
+// (TTR 24h aggregation, TFS screening, CDD requirements) without
+// knowing WHO the customer is, so the customer-identity step has
+// to land first.
+//
+// Step 3 reads getRequiredFields(tx, settings) to decide which
+// compliance fields to render. With dealer-side threshold
+// tightening from 2.7.4b, fields appear earlier than the AUSTRAC
+// defaults. With nothing tightened and a sub-threshold tx, step 3
+// may show no fields at all — just a "no extra fields required"
+// notice.
 //
 // Compliance step-3 fields write to the CLIENT object per the
 // Phase 2.7 client schema (pepCheck/tfsCheck/riskRating/
@@ -28,14 +36,10 @@
 // staff-side values; new ones write to client. Defensive readers
 // (receipt, police report) tolerate both shapes.
 //
-// 2.7.9b will integrate ClientSearch + IdPhotoCapture into step 4
-// and wire finalize() for client linking + auto-create. This
-// commit is purely the reorder + getRequiredFields integration.
-//
 // The basket-row inline-edit state (adjId / adjVal) and the
 // existing photo-input ref (fileRef) stay where they are.
 
-import React,{useState,useEffect} from "react";
+import React,{useState,useEffect,useRef} from "react";
 import {T,c} from "../theme.js";
 import {F,SF,HoldTimer,Modal} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
@@ -51,7 +55,7 @@ import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 import {screenCustomer} from "../lib/tfs/matcher.js";
 import TfsMatchModal from "../modals/TfsMatchModal.jsx";
 
-const STEP_LABELS=["Basket","Compliance","Client","Price+Payment","Staff","Done"];
+const STEP_LABELS=["Basket","Client","Compliance","Price+Payment","Staff","Done"];
 
 export default function NewTx({
   txStep,setTxStep,
@@ -78,7 +82,7 @@ export default function NewTx({
   qf,setQF,
   qmMode,setQMMode,
   catalog,settings,scaleStatus,scaleLive,fileRef,
-  handleAddItem,handleToCompliance,handleToStaff,
+  handleAddItem,handleToClient,handleToStaff,
   resetTx,finalize,
   pop,
   setShowFlag,setShowCat,setScreen,
@@ -110,38 +114,41 @@ export default function NewTx({
   const[captureMethod,setCaptureMethod]=useState(null);
 
   // TFS Commit 3 — local screening UI state. tfsMatches is the
-  // HIGH/MEDIUM subset surfaced in the banner + modal. tfsReviewed
-  // gates the Client step's Next button — when matches exist and
-  // staff hasn't resolved them, advancement is blocked. Modal open
-  // state is purely visual.
+  // HIGH/MEDIUM subset surfaced in the alert popup + detail modal.
+  // tfsReviewed gates the Client step's Next button — when matches
+  // exist and staff hasn't resolved them, advancement is blocked.
+  // tfsAlertDismissed lets staff Close the alert popup so they can
+  // keep working on the form without the visual wall, while the
+  // Next gate (which keys off tfsReviewed only) remains active.
+  // Modal open state is purely visual.
   //
   // The matcher returns LOW results too; those flow up to App via
   // setTfsAllMatches so App.finalize can audit-log them silently.
-  // LOW results do NOT raise the banner per the Commit 2 spec.
+  // LOW results do NOT raise the alert per the Commit 2 spec.
   //
-  // Citizenship caveat: the customer's "citizenship" is read from
-  // client.idState (the Issuing State / Country field on the ID).
-  // For foreign passports this typically carries a country name
-  // that substring-matches the DFAT Citizenship column; for
-  // Australian drivers' licences it carries a state code (VIC /
-  // NSW), which won't match "Australia" in the entry. That's
-  // acceptable for Stage 1 — the worst case is more MEDIUM
-  // severities (citizenship not_provided / no_match) instead of
-  // HIGH, which routes through the same review modal anyway. A
-  // dedicated client.citizenship field is a follow-up.
+  // Citizenship is read from client.citizenship (a dedicated field
+  // added 2026-05-06) with a fallback to client.idState for
+  // backward compatibility with the period when staff filled the
+  // country into the issuing-state slot.
   const[tfsMatches,setTfsMatches]=useState([]);
   const[tfsReviewed,setTfsReviewed]=useState(false);
   const[tfsModalOpen,setTfsModalOpen]=useState(false);
+  const[tfsAlertDismissed,setTfsAlertDismissed]=useState(false);
+  // Fingerprint of the most recent match-set so the dismiss flag
+  // can persist while matches stay the same and reset only when
+  // the screening produces a different list (different primary
+  // refs, different severities, or empty).
+  const tfsAlertFpRef=useRef("");
 
-  // Debounced screening effect. Watches the three customer fields
-  // we have signal on (name, DOB, idState) plus the cached list
-  // reference. Re-fires 400ms after the last edit settles. Skips
-  // entirely on empty name or DOB; the matcher needs both to
-  // produce useful results.
+  // Debounced screening effect. Watches the customer fields we
+  // have signal on (name, DOB, citizenship, idState) plus the
+  // cached list reference. Re-fires 400ms after the last edit
+  // settles. Skips entirely on empty name or DOB; the matcher
+  // needs both to produce useful results.
   useEffect(()=>{
     const name=String(client&&client.fullName||"").trim();
     const dob=String(client&&client.dob||"").trim();
-    const cit=String(client&&client.idState||"").trim();
+    const cit=String((client&&client.citizenship)||(client&&client.idState)||"").trim();
     if(!name||!dob||!Array.isArray(tfsCachedList)||!tfsCachedList.length){
       setTfsMatches([]);
       if(typeof setTfsAllMatches==="function")setTfsAllMatches([]);
@@ -159,7 +166,21 @@ export default function NewTx({
     },400);
     return ()=>clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[client&&client.fullName,client&&client.dob,client&&client.idState,tfsCachedList]);
+  },[client&&client.fullName,client&&client.dob,client&&client.citizenship,client&&client.idState,tfsCachedList]);
+
+  // Reset the dismiss flag when the match-set actually changes.
+  // Prevents the alert popup from reappearing after a Close click
+  // if the next screening produces the same list (e.g. staff
+  // edits an unrelated form field). Re-arms (resets to false) on
+  // a fingerprint change so a genuinely new match surfaces a
+  // fresh alert.
+  useEffect(()=>{
+    const fp=(tfsMatches||[]).map(m=>(m.primaryRecord&&m.primaryRecord.reference)+":"+m.severity).join("|");
+    if(fp!==tfsAlertFpRef.current){
+      tfsAlertFpRef.current=fp;
+      setTfsAlertDismissed(false);
+    }
+  },[tfsMatches]);
 
   // The block path resets the entire tx via App's recordTfsBlock
   // handler; we wrap it so the modal can call a single "block"
@@ -401,7 +422,7 @@ export default function NewTx({
         </div>
         {basketTable}
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold)} onClick={handleToCompliance}>Next: Compliance →</button>
+          <button style={c.btn(T.gold)} onClick={handleToClient}>Next: Client →</button>
           <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={resetTx}>Reset</button>
         </div>
@@ -410,13 +431,12 @@ export default function NewTx({
 
     {/* ===================================================================
         STEP 4 — PRICE + PAYMENT
-        Phase 2.7 follow-up (2026-04-30) reorder: Price+Payment moved
-        from step 2 to step 4 so the basket → compliance → client →
-        payment sequence matches real shop reality. Picking the
-        payment method here drives the cash gates that fire on the
-        Next click via handleToStaff (formerly handleToClient — the
-        cash hardblock + $2k cash-warn PIN gate; advances to Staff
-        on success).
+        Picking the payment method here drives the cash gates that
+        fire on the Next click via handleToStaff (cash hardblock +
+        $2k cash-warn PIN gate; advances to Staff on success).
+        Reordered into step 4 in Phase 2.7 follow-up (2026-04-30);
+        sequence Basket → Client → Compliance → Payment finalised
+        in the 2026-05-06 step swap.
         =================================================================== */}
     {txStep===4&&(
       <div>
@@ -499,7 +519,7 @@ export default function NewTx({
     )}
 
     {/* ===================================================================
-        STEP 2 — CONDITIONAL COMPLIANCE (Phase 2.7 spec)
+        STEP 3 — CONDITIONAL COMPLIANCE (Phase 2.7 spec)
         Renders the AUSTRAC flag banners (statutory; from
         checkCompliance) plus only the fields getRequiredFields
         returns for the current tx + settings. With dealer-side
@@ -507,11 +527,13 @@ export default function NewTx({
         AUSTRAC defaults. With nothing tightened and a small tx,
         this step may have no fields at all — just a notice.
 
-        Phase 2.7 follow-up (2026-04-30) reorder: Compliance now
-        runs immediately after Basket so the dealer sees the AML
-        picture before identifying the client.
+        2026-05-06 step swap: Compliance now sits AFTER Client
+        (was step 2, now step 3). The compliance evaluation needs
+        a known customer identity — TTR aggregation, sanctions
+        screening, CDD requirements — so it can't run usefully
+        before the Client step.
         =================================================================== */}
-    {txStep===2&&(
+    {txStep===3&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
         {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
@@ -558,15 +580,15 @@ export default function NewTx({
           <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
         </div>
         <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button style={c.btn(T.gold)} onClick={()=>setTxStep(3)}>Next: Client →</button>
+          <button style={c.btn(T.gold)} onClick={()=>setTxStep(4)}>Next: Payment →</button>
           <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
         </div>
       </div>
     )}
 
     {/* ===================================================================
-        STEP 3 — CLIENT (Phase 2.7.9b: ClientSearch + IdPhotoCapture
+        STEP 2 — CLIENT (Phase 2.7.9b: ClientSearch + IdPhotoCapture
         integrated alongside the legacy declaration form)
 
         clientStep "search"   → ClientSearch input + popups
@@ -583,33 +605,23 @@ export default function NewTx({
         spec (no in-form Edit toggle for now — read-only-with-toggle
         deferred; flagged in commit message).
 
-        Phase 2.7 follow-up (2026-04-30) reorder: Client now sits
-        between Compliance and Price+Payment. The ID-on-every-tx
-        capture + KYC-field collection happens here under known
-        compliance requirements, before the dealer picks a payment
-        method.
+        2026-05-06 step swap: Client now sits immediately after
+        Basket and BEFORE Compliance — the compliance evaluation
+        in step 3 keys off the customer identity captured here, so
+        Client has to land first.
         =================================================================== */}
-    {txStep===3&&(
+    {txStep===2&&(
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>Client</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:14}}>Invoice #{txNo} — retained for 7 years.</div>
 
-        {/* TFS Commit 3 — sanctions-screen banner. Sticky red bar
-            above the Client step body when the matcher has
-            surfaced ≥ 1 HIGH or MEDIUM candidate that staff hasn't
-            resolved yet. Non-dismissible; the only way to clear is
-            via the review modal (block / override every match) or
-            by editing the customer fields enough that the screen
-            no longer matches. The Next button at the bottom of
-            this step is disabled until tfsReviewed flips true. */}
-        {tfsMatches.length>0&&!tfsReviewed&&<div style={{...c.bnr("block"),marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",position:"sticky",top:0,zIndex:5}}>
-          <span style={{fontSize:18}}>⚠️</span>
-          <div style={{flex:1,minWidth:200,lineHeight:1.4}}>
-            <div style={{fontWeight:"bold",letterSpacing:"0.05em"}}>POSSIBLE SANCTIONS MATCH</div>
-            <div style={{fontSize:11,marginTop:2}}>{tfsMatches.length} possible match{tfsMatches.length===1?"":"es"} found in the DFAT Consolidated List. Review required before continuing.</div>
-          </div>
-          <button style={c.btn(T.red,T.bg)} onClick={()=>setTfsModalOpen(true)}>Review match{tfsMatches.length===1?"":"es"}</button>
-        </div>}
+        {/* TFS Commit 3 — the sanctions-match alert is now a
+            fullscreen modal popup (rendered at the bottom of this
+            file, outside the step blocks) so it overlays the
+            entire screen with a darkened scrim. The Next button
+            at the bottom of this step remains disabled until
+            tfsReviewed flips true; the alert popup's Close button
+            only hides the visual wall, not the gate. */}
 
         {clientStep==="search"&&<div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>FIND OR CREATE CLIENT</div>
@@ -637,7 +649,7 @@ export default function NewTx({
             }}
           />
           <div style={{display:"flex",gap:10,marginTop:14}}>
-            <button style={c.bsm()} onClick={()=>setTxStep(3)}>← Back</button>
+            <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
           </div>
         </div>}
 
@@ -740,6 +752,12 @@ export default function NewTx({
             <F label="ID Number" required value={client.idNumber} onChange={v=>setClient(p=>({...p,idNumber:v}))}/>
             <F label="Issuing State / Country" value={client.idState} onChange={v=>setClient(p=>({...p,idState:v}))}/>
             <F label="Expiry Date" type="date" value={client.idExpiry} onChange={v=>setClient(p=>({...p,idExpiry:v}))}/>
+            {/* Dedicated citizenship/nationality field (added 2026-05-06).
+                Separate from idState because Australian licences carry a
+                state code there (VIC / NSW) which the DFAT sanctions
+                citizenship column won't match. screenCustomer() falls
+                back to idState when this is empty. */}
+            <F label="Citizenship / Nationality" value={client.citizenship||""} onChange={v=>setClient(p=>({...p,citizenship:v}))} placeholder="e.g. Australia, Pakistan, India"/>
           </div>
           <div style={{marginTop:8}}>
             <label style={c.lbl}>ID Document Photo</label>
@@ -757,9 +775,9 @@ export default function NewTx({
           <F label="Date" type="date" required value={client.signatureDate||new Date().toISOString().slice(0,10)} onChange={v=>setClient(p=>({...p,signatureDate:v}))}/>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold,undefined,{opacity:(tfsMatches.length>0&&!tfsReviewed)?0.5:1,cursor:(tfsMatches.length>0&&!tfsReviewed)?"not-allowed":"pointer"})} disabled={tfsMatches.length>0&&!tfsReviewed} onClick={()=>{if(tfsMatches.length>0&&!tfsReviewed){pop("Resolve the sanctions match review before continuing.","warn");return;}if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(4);}}>Next: Payment →</button>
+          <button style={c.btn(T.gold,undefined,{opacity:(tfsMatches.length>0&&!tfsReviewed)?0.5:1,cursor:(tfsMatches.length>0&&!tfsReviewed)?"not-allowed":"pointer"})} disabled={tfsMatches.length>0&&!tfsReviewed} onClick={()=>{if(tfsMatches.length>0&&!tfsReviewed){pop("Resolve the sanctions match review before continuing.","warn");return;}if(!privAck){pop("Client must acknowledge Privacy Notice.","err");return;}if(!client.signature){pop("Client signature required.","err");return;}setTxStep(3);}}>Next: Compliance →</button>
           <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
-          <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
+          <button style={c.bsm()} onClick={()=>setTxStep(1)}>← Back</button>
         </div>
         </>}
       </div>
@@ -852,13 +870,45 @@ export default function NewTx({
       </div>
     </Modal>}
 
-    {/* TFS Commit 3 — sanctions match review modal. Mounted here
-        so the modal overlays the entire NewTx screen. Opens via
-        the banner's Review button in the Client step; closes via
-        the modal's own three-button decision flow or the Close
-        button at the bottom (banner stays visible until staff
-        resolves every match by override or by editing the
-        customer fields enough that the screen no longer matches). */}
+    {/* TFS Commit 3 + 2026-05-06 — fullscreen sanctions-match
+        ALERT popup. Auto-opens whenever the matcher surfaces a
+        HIGH or MEDIUM candidate and staff hasn't yet resolved or
+        dismissed it. Centered card on a darkened scrim, high
+        z-index so it overlays everything including the topbar.
+        Two actions:
+          • Review match(es) — opens TfsMatchModal (the detail
+            modal with block / override / ⏸ flows).
+          • Close — return to transaction — sets
+            tfsAlertDismissed=true so the popup goes away and
+            staff can keep working on the form. The Next-button
+            gate at the bottom of the Client step (which keys off
+            tfsReviewed only) stays active — staff can edit but
+            still can't advance until the matches are resolved.
+        Backdrop click is NOT a dismissal path — the popup is
+        non-dismissible by accident. The fingerprint effect above
+        re-arms the dismiss flag whenever the match-set actually
+        changes, so a genuinely new match surfaces a fresh alert. */}
+    {tfsMatches.length>0&&!tfsReviewed&&!tfsAlertDismissed&&!tfsModalOpen&&(
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:1400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+        <div style={{background:T.bg,border:"2px solid "+T.red,borderRadius:8,padding:24,maxWidth:480,width:"100%",boxShadow:"0 12px 36px #000c"}}>
+          <div style={{fontSize:32,textAlign:"center",marginBottom:8}}>⚠️</div>
+          <div style={{fontSize:16,fontWeight:"bold",color:T.red,letterSpacing:"0.05em",textAlign:"center",marginBottom:10}}>POSSIBLE SANCTIONS MATCH</div>
+          <div style={{fontSize:13,color:T.text,lineHeight:1.5,marginBottom:18,textAlign:"center"}}>
+            {tfsMatches.length} possible match{tfsMatches.length===1?"":"es"} found in the DFAT Consolidated List. Review required before continuing.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <button style={{...c.btn(T.red,T.bg),width:"100%",padding:"12px"}} onClick={()=>setTfsModalOpen(true)}>Review match{tfsMatches.length===1?"":"es"} →</button>
+            <button style={{...c.bsm(T.border,T.muted),width:"100%",padding:"10px"}} onClick={()=>setTfsAlertDismissed(true)}>Close — return to transaction</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* TFS Commit 3 — sanctions match review DETAIL modal. Opens
+        via the alert popup's Review button. Closes via its own
+        three-button decision flow or the Close button at the
+        bottom. The alert popup re-shows after this closes if any
+        matches remain unresolved (and not dismissed). */}
     {tfsModalOpen&&<TfsMatchModal
       matches={tfsMatches}
       settings={settings}

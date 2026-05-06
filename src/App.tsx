@@ -361,7 +361,14 @@ export default function Loot(){
   // every time. When settings.requirePin is false the gate is a
   // pass-through, so single-operator dev mode stays frictionless.
   const withAdminGate=(reason,fn)=>{requireAdminPin({reason,callbacks:{settings,pop,setPinModal,setPinVal},onApproved:fn});};
-  const handleToCompliance=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
+  // Step-1 → step-2 advance. Phase 2.7 follow-up (2026-05-06):
+  // step 2 is now CLIENT (was Compliance) per the reordered flow
+  // — Client must precede Compliance so the AML/CTF + sanctions
+  // checks have a customer identity to evaluate. The function
+  // body is unchanged (still setTxStep(2)); only the destination
+  // step's content changed. Renamed from handleToCompliance to
+  // match the new landing step.
+  const handleToClient=()=>{if((txItems||[]).length===0){pop("Add at least one item.","warn");return;}setTxStep(2);};
   // Phase 2.7 follow-up (2026-04-30) reorder: gates the
   // Price+Payment → Staff transition (new step 4 → step 5). The
   // cash hardblock and $2k cash-warn PIN gates apply here because
@@ -786,7 +793,7 @@ export default function Loot(){
             qf={qf} setQF={setQF}
             qmMode={qmMode} setQMMode={setQMMode}
             catalog={catalog} settings={settings} scaleStatus={scaleStatus} scaleLive={scaleLive} fileRef={fileRef}
-            handleAddItem={handleAddItem} handleToCompliance={handleToCompliance} handleToStaff={handleToStaff}
+            handleAddItem={handleAddItem} handleToClient={handleToClient} handleToStaff={handleToStaff}
             resetTx={resetTx} finalize={finalize}
             pop={pop}
             setShowFlag={setShowFlag} setShowCat={setShowCat} setScreen={setScreen}
