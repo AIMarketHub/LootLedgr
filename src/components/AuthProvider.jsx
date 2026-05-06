@@ -18,7 +18,7 @@
 // that should be auth-gated wrap their children in <RequireAuth>
 // (src/components/RequireAuth.jsx).
 
-import React,{createContext,useContext,useEffect,useState,useCallback} from "react";
+import React,{createContext,useContext,useEffect,useState,useCallback,useRef} from "react";
 import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isLockedOut} from "../lib/auth/saas.js";
 import {setCurrentShopId} from "../lib/storage.js";
 
@@ -35,15 +35,22 @@ export function AuthProvider({children}){
     user:null,userRecord:null,shop:null,role:null,
     admin:false,locked:false,loading:true,
   });
+  // Tracks whether we currently have a signed-in user. Used to
+  // distinguish a real SIGNED_IN transition (logged-out → logged-in)
+  // from a session-restore SIGNED_IN that Supabase fires when a tab
+  // regains focus. See the onAuthStateChange handler below.
+  const hadUserRef=useRef(false);
 
   const refresh=useCallback(async()=>{
     setState(s=>({...s,loading:true}));
     const user=await getCurrentUser();
     if(!user){
+      hadUserRef.current=false;
       setCurrentShopId(null);
       setState({user:null,userRecord:null,shop:null,role:null,admin:false,locked:false,loading:false});
       return;
     }
+    hadUserRef.current=true;
     const[userRecord,shop,admin,locked]=await Promise.all([
       getCurrentUserRecord(),
       getCurrentShop(),
@@ -68,10 +75,28 @@ export function AuthProvider({children}){
   useEffect(()=>{
     refresh();
     const{data}=supabase.auth.onAuthStateChange((event)=>{
-      // SIGNED_IN / SIGNED_OUT / TOKEN_REFRESHED / USER_UPDATED
-      // all warrant a re-fetch. Skip INITIAL_SESSION because
-      // refresh() above already covers the mount-time pull.
-      if(event!=="INITIAL_SESSION")refresh();
+      // Production blocker fix (2026-05-06): Supabase fires
+      // TOKEN_REFRESHED (and sometimes SIGNED_IN) when a browser
+      // tab regains focus. The previous handler re-fetched on
+      // every event except INITIAL_SESSION, which set
+      // loading=true, caused RequireAuth to swap children for a
+      // Loading fallback, unmounted the App tree, and reset all
+      // in-memory state — losing in-progress transactions every
+      // time staff switched tabs / minimised the window.
+      //
+      // Re-fetch only on real auth transitions:
+      //   • SIGNED_OUT — must clear state.
+      //   • SIGNED_IN  — only when we don't already have a user
+      //                  (a true logged-out → logged-in event).
+      //                  A SIGNED_IN that fires while we already
+      //                  have a user is a session-restore /
+      //                  tab-focus event; the session is
+      //                  unchanged for the user.
+      // INITIAL_SESSION is covered by the mount-time refresh().
+      // TOKEN_REFRESHED / USER_UPDATED are silent token-rotation
+      // events; nothing the user sees should change.
+      if(event==="SIGNED_OUT"){refresh();return;}
+      if(event==="SIGNED_IN"&&!hadUserRef.current){refresh();return;}
     });
     return()=>{if(data&&data.subscription)data.subscription.unsubscribe();};
   // eslint-disable-next-line react-hooks/exhaustive-deps
