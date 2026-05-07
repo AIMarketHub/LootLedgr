@@ -30,6 +30,7 @@ import ApiDiagnostics from "./modals/ApiDiagnostics.jsx";
 import CatalogEditor from "./modals/CatalogEditor.jsx";
 import LogoManager from "./modals/LogoManager.jsx";
 import ForgotPin from "./modals/ForgotPin.jsx";
+import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
 import {useAuth} from "./components/AuthProvider.jsx";
 import {signOut as saasSignOut} from "./lib/auth/saas.js";
 
@@ -90,6 +91,23 @@ export default function Loot(){
   const[structuringOverrideReason,setStructuringOverrideReason]=useState("");
   const[isHobbyProspector,setIsHobbyProspector]=useState(false);
   const[vicMinersRightNumber,setVicMinersRightNumber]=useState("");
+  // Section 9 Gap 4 polish (2026-05-07) — recent-storage-location
+  // suggestions. Localised to localStorage so each browser /
+  // workstation builds its own list of bays / safes / trays. On
+  // every successful tx finalize, the staff.storageLocation is
+  // pushed into this list (most-recent-first, deduped, capped at
+  // 10). Surfaced as a datalist on the Staff step's storage
+  // location input so subsequent buys autocomplete.
+  const[recentStorageLocations,setRecentStorageLocations]=useState(()=>{
+    const v=store.get("storageLocations",[]);
+    return Array.isArray(v)?v:[];
+  });
+  // Section 9 Gap 8 (2026-05-07) — police hold modal state.
+  // {stockId, mode: "set"|"manage"} | null. Mode "set" opens the
+  // capture form (notice received date + ref); "manage" opens the
+  // current-state view with reissue / release actions. Set from
+  // StockCard's hold-button click; cleared on modal close.
+  const[policeHoldModal,setPoliceHoldModal]=useState(null);
   const[photo,setPhoto]=useState(null);
   const[itemPhotos,setItemPhotos]=useState({});
   const[zoom,setZoom]=useState(()=>store.get("zoom",100));
@@ -269,6 +287,11 @@ export default function Loot(){
   useEffect(()=>store.set("fontSize",fontSize),[fontSize]);
   useEffect(()=>store.set("gSpot",gSpot),[gSpot]);
   useEffect(()=>store.set("sSpot",sSpot),[sSpot]);
+  // Section 9 Gap 4 polish — persist the recent-storage-location
+  // list so the Staff step's datalist still autocompletes after a
+  // page reload. localStorage only — no Supabase mirror; this is
+  // a per-workstation operator hint.
+  useEffect(()=>store.set("storageLocations",recentStorageLocations),[recentStorageLocations]);
   // Phase 2.7 follow-up — Supabase mirror writes are best-effort;
   // local state is the primary truth. The on_conflict shape was
   // fixed in commit c7d9ebd; sbFetch was given a 3-way return shape
@@ -575,6 +598,17 @@ export default function Loot(){
     }catch(_){/* non-fatal — audit gap surfaced via staleness check */}
     const newStock=(txItems||[]).filter(i=>i.mode==="buy").map(i=>({id:uid(),txId:realInv,date:now,product:i.product,qty:i.qty,price:i.price,description:sS(i.note||i.product&&i.product.label),purity:i.purity||(i.product&&i.product.purity)||null,carat:i.carat||(i.product&&i.product.carat)||null,weight_g:i.weight_g||(i.product&&i.product.unit==="g"?i.qty:null),holdUntil:i.holdUntil,policeHold:!!i.policeHold,suspicious:!!i.suspicious,storageLocation:sS(staff.storageLocation),deleteAfter:sevenYrsFrom(now)}));
     setTxList(p=>[tx,...p].slice(0,500));setStock(p=>[...newStock,...p]);
+    // Section 9 Gap 4 polish — remember the storage location used
+    // for this finalize. Only when at least one new stock record
+    // was created (no point on a sell-only tx where storage doesn't
+    // apply) AND the location is non-empty.
+    const usedLoc=sS(staff&&staff.storageLocation).trim();
+    if(usedLoc&&newStock.length){
+      setRecentStorageLocations(prev=>{
+        const without=(prev||[]).filter(x=>x&&x.toLowerCase()!==usedLoc.toLowerCase());
+        return [usedLoc,...without].slice(0,10);
+      });
+    }
     setTxNo(peekInv());setTxStep(6);
     pushIntegrations(settings,tx).then(msgs=>{if(msgs&&msgs.length)pop(msgs.join(" | ").slice(0,200),"ok");}).catch(()=>{});
   };
@@ -893,6 +927,7 @@ export default function Loot(){
             setStructuringOverrideApplied={setStructuringOverrideApplied}
             structuringOverrideReason={structuringOverrideReason}
             setStructuringOverrideReason={setStructuringOverrideReason}
+            recentStorageLocations={recentStorageLocations}
           />}
 
           {screen==="stock"&&<Stock
@@ -900,6 +935,7 @@ export default function Loot(){
             dlAccounting={dlAccounting} setPinModal={setPinModal} setFrozenSnap={setFrozenSnap} pop={pop}
             togglePoliceHold={togglePoliceHold} setPinVal={setPinVal} setStock={setStock}
             setEditStockId={setEditStockId} setEditStockVal={setEditStockVal}
+            setPoliceHoldModal={setPoliceHoldModal}
           />}
 
           {screen==="clients"&&<Clients
@@ -1038,7 +1074,20 @@ export default function Loot(){
           txList={txList} pop={pop} setShowApi={setShowApi}
         />}
 
-        {showPolice&&<PoliceReport settings={settings} txList={txList} dlFile={dlFile} pop={pop} setShowPolice={setShowPolice}/>}
+        {showPolice&&<PoliceReport settings={settings} txList={txList} stock={stock} dlFile={dlFile} pop={pop} setShowPolice={setShowPolice}/>}
+
+        {/* Section 9 Gap 8 — police-hold capture / management modal.
+            Opened from StockCard via setPoliceHoldModal. The
+            "manage" mode is reached only after the existing
+            Admin-PIN gate clears (StockCard wraps it in
+            setPinModal). Modal dispatches setStock patches itself. */}
+        {policeHoldModal&&<PoliceHoldModal
+          stockItem={(stock||[]).find(s=>s.id===policeHoldModal.stockId)||null}
+          mode={policeHoldModal.mode}
+          setStock={setStock}
+          onClose={()=>setPoliceHoldModal(null)}
+          pop={pop}
+        />}
 
         {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={dlAccounting} setShowEOD={setShowEOD}/>}
 

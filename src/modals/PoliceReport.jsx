@@ -19,7 +19,7 @@ import {sS,todayStr} from "../lib/utils.js";
 import {STATE_INFO,genPoliceReport} from "../lib/compliance/index.js";
 import {Modal,F} from "../components/ui";
 
-export default function PoliceReport({settings,txList,dlFile,pop,setShowPolice}){
+export default function PoliceReport({settings,txList,stock,dlFile,pop,setShowPolice}){
   return <Modal title="🚔 Police Report Generator" onClose={()=>setShowPolice(false)} wide>
     {(()=>{
       const[dateFrom,setDateFrom]=React.useState(new Date(Date.now()-7*86400000).toISOString().slice(0,10));
@@ -39,8 +39,8 @@ export default function PoliceReport({settings,txList,dlFile,pop,setShowPolice})
         </div>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={suspicious} onChange={e=>setSuspicious(e.target.checked)}/>Only include SMR-flagged transactions</label>
         <div style={{display:"flex",gap:10}}>
-          <button style={c.btn(T.gold,T.bg)} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);dlFile(csv,"police-report-"+todayStr()+".csv","text/csv");pop("Police report downloaded.","ok");}}>⬇ Download Report CSV</button>
-          <button style={c.bsm()} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings);const subject="Secondhand Dealer Transaction Report — "+sS(settings.businessName);window.location.href="mailto:"+(settings.policeEmail||st.defaultEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent("Please find attached the transaction register.\n\nBusiness: "+sS(settings.businessName)+"\nABN: "+sS(settings.abn)+"\nLicence: "+sS(settings.dealerLicenceNo));pop("Email client opened.","ok");}}>✉ Email to Station</button>
+          <button style={c.btn(T.gold,T.bg)} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings,stock);dlFile(csv,"police-report-"+todayStr()+".csv","text/csv");pop("Police report downloaded.","ok");}}>⬇ Download Report CSV</button>
+          <button style={c.bsm()} onClick={()=>{const csv=genPoliceReport(new Date(dateFrom),new Date(dateTo),suspicious,sc,txList,settings,stock);const subject="Secondhand Dealer Transaction Report — "+sS(settings.businessName);window.location.href="mailto:"+(settings.policeEmail||st.defaultEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent("Please find attached the transaction register.\n\nBusiness: "+sS(settings.businessName)+"\nABN: "+sS(settings.abn)+"\nLicence: "+sS(settings.dealerLicenceNo));pop("Email client opened.","ok");}}>✉ Email to Station</button>
         </div>
       </div>;
     })()}

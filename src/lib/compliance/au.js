@@ -275,6 +275,96 @@ export function isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled}){
 //     don't, because the existing model uses buyTotal not
 //     sellTotal in cashAmountFromTx. This mirrors the existing
 //     TTR behaviour — known limitation, document in s5.
+// Section 9 Gap 7 — TTR day-7 / day-9 escalation helper.
+// Counts business days (Mon-Fri) elapsed between the given ISO
+// date and "now". The TTR filing deadline is 10 business days
+// from the transaction date per AML/CTF Act s.43; the dashboard
+// uses this to escalate banners as a TTR ages.
+//
+// Returns 0 for invalid / future dates so callers can treat
+// "no signal" as "do nothing" without a special branch.
+export function businessDaysSince(dateISO){
+  if(!dateISO)return 0;
+  const start=new Date(dateISO);
+  if(isNaN(start.getTime()))return 0;
+  const end=new Date();
+  if(start>=end)return 0;
+  // Walk one day at a time. The N is small (a TTR aged > 30
+  // days is implausible — staff would have filed or escalated
+  // long before). Premature optimisation isn't warranted.
+  let days=0;
+  const cursor=new Date(start);
+  while(cursor<end){
+    cursor.setDate(cursor.getDate()+1);
+    const d=cursor.getDay();
+    if(d!==0&&d!==6)days++;
+  }
+  return days;
+}
+
+// Section 9 Gap 8 — calendar-day delta between two ISO dates.
+// Police-notice timing under the Vic Second-Hand Dealers and
+// Pawnbrokers Act s.21 is calendar-day based (21 days +
+// optional 21-day reissue), NOT business days like TTR. Returns
+// the integer number of full calendar days from `fromISO` to
+// `toISO`; negative when toISO is in the past relative to
+// fromISO, null for invalid input.
+export function calendarDaysBetween(fromISO,toISO){
+  if(!fromISO||!toISO)return null;
+  const a=new Date(fromISO);
+  const b=new Date(toISO);
+  if(isNaN(a.getTime())||isNaN(b.getTime()))return null;
+  // Round, not floor — DST transitions push the raw ms delta
+  // a fraction of a day off a clean integer. Round produces
+  // the count a human would intuitively give.
+  return Math.round((b.getTime()-a.getTime())/(24*3600*1000));
+}
+
+// Section 9 Gap 8 — derive the current police-hold lifecycle
+// state of a stock item. Pure function: pass the item + an
+// optional "now" anchor (Date or ms) for testability.
+//
+// Returns:
+//   {status, daysRemaining, expiryDate}
+// where status is one of:
+//   "none"           — item is not on hold
+//   "released"       — hold was released (court order, lifted, etc.)
+//   "active-legacy"  — policeHold=true but no notice metadata
+//                      (records from before Gap 8 landed)
+//   "active"         — within the first 21-day window
+//   "expired-first"  — first window expired, no reissue captured
+//   "reissue-active" — within the second 21-day reissue window
+//   "expired-final"  — second window expired
+//
+// daysRemaining is signed: positive while inside a window,
+// negative once expired (so banners can read "expired N days
+// ago" naturally). null when there's no clock (legacy / none /
+// released).
+export function policeHoldState(item,nowMs){
+  const now=nowMs!=null?Number(nowMs):Date.now();
+  if(!item)return{status:"none",daysRemaining:null,expiryDate:null};
+  if(item.policeReleasedAt&&!item.policeHold)return{status:"released",daysRemaining:null,expiryDate:null};
+  if(!item.policeHold)return{status:"none",daysRemaining:null,expiryDate:null};
+  const dayMs=24*3600*1000;
+  // Reissue window takes precedence when set.
+  if(item.policeReissueExpiryDate){
+    const exp=new Date(item.policeReissueExpiryDate).getTime();
+    if(!isFinite(exp))return{status:"active-legacy",daysRemaining:null,expiryDate:null};
+    const days=Math.ceil((exp-now)/dayMs);
+    return{status:days>=0?"reissue-active":"expired-final",daysRemaining:days,expiryDate:item.policeReissueExpiryDate};
+  }
+  if(item.policeNoticeExpiryDate){
+    const exp=new Date(item.policeNoticeExpiryDate).getTime();
+    if(!isFinite(exp))return{status:"active-legacy",daysRemaining:null,expiryDate:null};
+    const days=Math.ceil((exp-now)/dayMs);
+    return{status:days>=0?"active":"expired-first",daysRemaining:days,expiryDate:item.policeNoticeExpiryDate};
+  }
+  // policeHold=true but no metadata — legacy record from before
+  // Gap 8 landed. UI surfaces "active (no expiry recorded)" and
+  // offers staff a "Capture notice details" action.
+  return{status:"active-legacy",daysRemaining:null,expiryDate:null};
+}
+
 export function evaluateStructuring({currentCashAmount,priorCash30d,threshold}={}){
   const cur=sN(currentCashAmount);
   const prior=sN(priorCash30d);
@@ -458,7 +548,7 @@ export function makeTxt(tx){
   ].join("\n");
 }
 
-export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings){
+export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,settings,stock){
   const sc=stateCode||sS(settings.state)||"VIC";
   const st=STATE_INFO[sc]||STATE_INFO.VIC;
   const txs=(txList||[]).filter(t=>{if(!t.date)return false;if(suspicious)return t.smrFlagged;const d=new Date(t.date);return d>=dateFrom&&d<=dateTo;});
@@ -475,6 +565,36 @@ export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,sett
   const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Storage","Notes","Hobby","Vic Miner's Right"]];
   txs.forEach(tx=>{const cl=tx.client||{},stf=tx.staff||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(stf.storageLocation||"—"),sS(it.note),tx.isHobbyProspector?"YES":"",tx.isHobbyProspector?sS(tx.vicMinersRightNumber||""):""]);});});
   if(rows.length<=15)rows.push(["(No qualifying buy transactions in this period)"]);
+  // Section 9 Gap 8 — police-hold register. Appended as a
+  // separate block (NOT a new column on the existing schema —
+  // CSV consumers parse the transaction register by index).
+  // Lists every stock item currently flagged with policeHold,
+  // plus its notice metadata + lifecycle state. `stock` is an
+  // optional argument so existing callers that haven't updated
+  // their invocation still produce a valid report (just without
+  // this block).
+  const heldStock=Array.isArray(stock)?stock.filter(s=>s&&s.policeHold):[];
+  if(heldStock.length){
+    rows.push([]);
+    rows.push(["POLICE HOLD REGISTER"]);
+    rows.push(["Item","Linked Tx","Notice Received","Notice Ref","First Expiry","Reissue Date","Reissue Expiry","Status","Days Remaining","Storage"]);
+    heldStock.forEach(s=>{
+      const ph=policeHoldState(s);
+      const fmtIso=v=>v?new Date(v).toLocaleDateString("en-AU"):"—";
+      rows.push([
+        sS(s.description||(s.product&&s.product.label)||"—"),
+        sS(s.txId||"—"),
+        fmtIso(s.policeNoticeReceivedDate),
+        sS(s.policeNoticeRef||"—"),
+        fmtIso(s.policeNoticeExpiryDate),
+        fmtIso(s.policeReissueDate),
+        fmtIso(s.policeReissueExpiryDate),
+        sS(ph.status||"—").toUpperCase(),
+        ph.daysRemaining==null?"—":String(ph.daysRemaining),
+        sS(s.storageLocation||"—"),
+      ]);
+    });
+  }
   return rows.map(r=>r.map(v=>'"'+sS(v).replace(/"/g,'""')+'"').join(",")).join("\n");
 }
 
@@ -502,6 +622,9 @@ const region={
   cashAmountFromTx,
   isTtrRequired,
   evaluateStructuring,
+  businessDaysSince,
+  calendarDaysBetween,
+  policeHoldState,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,

@@ -96,6 +96,10 @@ export default function NewTx({
   // effect on KYC / TTR / SMR / privacy / retention).
   isHobbyProspector,setIsHobbyProspector,
   vicMinersRightNumber,setVicMinersRightNumber,
+  // Section 9 Gap 4 polish — recent storage locations for the
+  // Staff step's datalist autocomplete. App.tsx owns the list
+  // (localStorage-persisted, capped at 10, deduped on push).
+  recentStorageLocations,
   // TFS Commit 3 — sanctions screening. App owns the cached list
   // (loaded at boot) + the all-matches state (read by finalize for
   // LOW-severity audit logging) + the decision handlers. NewTx
@@ -1007,7 +1011,26 @@ export default function NewTx({
             <div><div style={c.lbl}>Hold Start</div><div style={{fontSize:12,color:T.white}}>{new Date().toLocaleString("en-AU")}</div></div>
             <div><div style={c.lbl}>Hold Expiry (+168 hrs)</div><div style={{fontSize:12,color:T.orange}}>{new Date(Date.now()+168*3600000).toLocaleString("en-AU")}</div></div>
           </div>
-          <F label="Storage Location (bay / safe / tray)" required value={staff.storageLocation} onChange={v=>setStaff(p=>({...p,storageLocation:v}))} placeholder="e.g. Safe A, Tray 3"/>
+          {/* Section 9 Gap 4 polish — emphasised label + datalist
+              autocomplete from the most-recent storage locations
+              this workstation has used. Free-text retained;
+              datalist is suggestions only, not a closed list. */}
+          <div style={{marginBottom:14}}>
+            <label style={{...c.lbl,fontWeight:"bold",color:T.gold,fontSize:11}}>📍 Storage Location (bay / safe / tray) <span style={{color:T.red}}> *</span></label>
+            <input
+              style={{...c.inp(),borderColor:sS(staff.storageLocation).trim()?T.border:T.orange}}
+              type="text"
+              value={staff.storageLocation||""}
+              onChange={e=>setStaff(p=>({...p,storageLocation:e.target.value}))}
+              placeholder="e.g. Safe A, Tray 3"
+              list="storage-location-suggestions"
+              autoComplete="off"
+            />
+            {Array.isArray(recentStorageLocations)&&recentStorageLocations.length>0&&<datalist id="storage-location-suggestions">
+              {recentStorageLocations.map(loc=><option key={loc} value={loc}/>)}
+            </datalist>}
+            <div style={{fontSize:10,color:T.muted,marginTop:3}}>Police inspection requires per-item location on demand (Vic SHD Act §21A). Recently used locations autocomplete from this workstation.</div>
+          </div>
         </div>
         <div style={{display:"flex",gap:10}}>
           <button style={c.btn(T.green,T.bg)} onClick={()=>setTxStep(6)}>Next: Finalise →</button>

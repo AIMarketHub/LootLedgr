@@ -56,6 +56,27 @@ export function evaluateStructuring({currentCashAmount,priorCash30d,threshold}={
   else if(total>=t*0.8)level="warn";
   return{level,total,pct:t>0?(total/t)*100:0,threshold:t,priorCash30d:prior,currentCashAmount:cur,message:level==="ok"?null:"TEST region structuring "+level+" — total $"+total};
 }
+// Section 9 C3 region-parity stubs. Same shape as au.js so a TEST-
+// region swap doesn't expose `undefined` to call sites.
+export function businessDaysSince(dateISO){
+  if(!dateISO)return 0;
+  const start=new Date(dateISO),end=new Date();
+  if(isNaN(start.getTime())||start>=end)return 0;
+  let days=0;
+  const cursor=new Date(start);
+  while(cursor<end){cursor.setDate(cursor.getDate()+1);const d=cursor.getDay();if(d!==0&&d!==6)days++;}
+  return days;
+}
+export function calendarDaysBetween(fromISO,toISO){
+  if(!fromISO||!toISO)return null;
+  const a=new Date(fromISO),b=new Date(toISO);
+  if(isNaN(a.getTime())||isNaN(b.getTime()))return null;
+  return Math.round((b.getTime()-a.getTime())/(24*3600*1000));
+}
+export function policeHoldState(item){
+  if(!item||!item.policeHold)return{status:"none",daysRemaining:null,expiryDate:null};
+  return{status:"active-legacy",daysRemaining:null,expiryDate:null};
+}
 
 // Fake required-fields list. Phase 2.7 follow-up (2026-04-29)
 // honours settings.requireIdOnEveryTx for parity with the real
@@ -100,6 +121,9 @@ const region={
   cashAmountFromTx,
   isTtrRequired,
   evaluateStructuring,
+  businessDaysSince,
+  calendarDaysBetween,
+  policeHoldState,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,

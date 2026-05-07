@@ -12,7 +12,7 @@
 
 import React from "react";
 import {T,c} from "../theme.js";
-import {sN,fmtAUD,hoursLeft,todayStr} from "../lib/utils.js";
+import {sN,sS,fmtAUD,hoursLeft,todayStr} from "../lib/utils.js";
 import {AIGhost} from "../components/ui";
 import StockCard from "../components/StockCard.jsx";
 
@@ -20,6 +20,7 @@ export default function Stock({
   settings,gSpot,sSpot,stock,frozenSnap,
   dlAccounting,setPinModal,setFrozenSnap,pop,
   togglePoliceHold,setPinVal,setStock,setEditStockId,setEditStockVal,
+  setPoliceHoldModal,
 }){
   return <div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -38,7 +39,17 @@ export default function Stock({
       </div>
     )}
     <div style={{fontSize:11,color:T.muted,marginTop:8,marginBottom:12}}>🟠 In hold · 🟢 Ready for sale · 🔴 Police Hold</div>
+    {/* Section 9 Gap 4 polish — top-of-list reminder when stock
+        items lack a storage location. Police-locate-on-demand
+        compliance fails if staff can't point at a bay/tray for
+        every held item. Only counts unsold items (sold items
+        are no longer on premises so location is irrelevant). */}
+    {(()=>{
+      const missing=(stock||[]).filter(s=>s&&!s.sold&&!sS(s.storageLocation).trim()).length;
+      if(!missing)return null;
+      return <div style={{...c.bnr("warn"),marginBottom:12}}>📍 {missing} item{missing===1?"":"s"} missing a storage location. Edit each affected item and set a bay / safe / tray so police can locate on demand (Vic SHD Act §21A).</div>;
+    })()}
     {(stock||[]).length===0?<div style={{color:T.muted,padding:40,textAlign:"center"}}>No stock items yet.</div>
-      :(stock||[]).map(s=><StockCard key={s.id} s={s} frozenSnap={frozenSnap} gSpot={gSpot} sSpot={sSpot} togglePoliceHold={togglePoliceHold} setPinModal={setPinModal} setPinVal={setPinVal} setStock={setStock} setEditStockId={setEditStockId} setEditStockVal={setEditStockVal}/>)}
+      :(stock||[]).map(s=><StockCard key={s.id} s={s} frozenSnap={frozenSnap} gSpot={gSpot} sSpot={sSpot} togglePoliceHold={togglePoliceHold} setPinModal={setPinModal} setPinVal={setPinVal} setStock={setStock} setEditStockId={setEditStockId} setEditStockVal={setEditStockVal} setPoliceHoldModal={setPoliceHoldModal}/>)}
   </div>;
 }

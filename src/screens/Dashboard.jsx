@@ -20,7 +20,7 @@ import React from "react";
 import {T,c} from "../theme.js";
 import {TROY_OZ} from "../lib/constants.js";
 import {fmtAUD,fmtDate,hoursLeft,fmtScaleWeight} from "../lib/utils.js";
-import {calcUnitPrice} from "../lib/compliance/index.js";
+import {calcUnitPrice,businessDaysSince,policeHoldState} from "../lib/compliance/index.js";
 
 // TFS Commit 4 — staleness threshold for the DFAT list. The list
 // is updated by DFAT roughly fortnightly; 35 days gives a clear
@@ -85,14 +85,48 @@ export default function Dashboard({
         </div>
       </div>
     )}
-    {/* TODO (briefing §9 Gap 7) — TTR day-7 / day-9 escalation. The TTR
-        filing deadline is 10 business days from the transaction date.
-        Escalate this banner when any pending TTR is older than 7 days
-        (warn) or 9 days (urgent). Compute days-since-tx per pending
-        entry, surface the worst-case in the banner, and add a click-
-        through to the filtered History view. Land alongside the
-        Phase 2 dashboard extraction. */}
-    {(txList||[]).some(t=>t.ttrStatus==="PENDING")&&<div style={c.bnr("block")}>🔴 AUSTRAC TTR PENDING — {(txList||[]).filter(t=>t.ttrStatus==="PENDING").length} transaction(s) require filing at austrac.gov.au/online</div>}
+    {/* Section 9 Gap 7 (2026-05-07) — severity-tiered TTR
+        escalation banners. The TTR filing deadline is 10 business
+        days from the tx date (AML/CTF Act s.43). Single-banner
+        rendering would fail to differentiate a 1-day-old PENDING
+        from a 9-day-old PENDING; staff need the urgency cue. The
+        click target here is the History screen (setScreen('history'))
+        — no built-in PENDING filter beyond the existing All / SMR /
+        TTR tabs, but the TTR tab pre-filters to PENDING. */}
+    {(()=>{
+      const pending=(txList||[]).filter(t=>t&&t.ttrRequired&&t.ttrStatus==="PENDING");
+      if(!pending.length)return null;
+      const buckets={overdue:0,urgent:0,warn:0,soon:0};
+      pending.forEach(t=>{
+        const d=businessDaysSince(t.date);
+        if(d>=10)buckets.overdue++;
+        else if(d>=9)buckets.urgent++;
+        else if(d>=7)buckets.warn++;
+        else buckets.soon++;
+      });
+      const goHistory=()=>typeof setScreen==="function"?setScreen("history"):null;
+      return <>
+        {buckets.overdue>0&&<div style={{...c.bnr("block"),cursor:"pointer"}} onClick={goHistory}>🔴 OVERDUE TTRs — {buckets.overdue} transaction{buckets.overdue===1?"":"s"} past the 10-business-day deadline. File at austrac.gov.au/online IMMEDIATELY.</div>}
+        {buckets.urgent>0&&<div style={{...c.bnr("warn"),cursor:"pointer",borderLeft:"4px solid "+T.orange,background:T.orangeBg||"#2a1a00",color:T.orange}} onClick={goHistory}>🟠 URGENT TTRs — {buckets.urgent} transaction{buckets.urgent===1?"":"s"} at day 9. File today or tomorrow.</div>}
+        {buckets.warn>0&&<div style={{...c.bnr("warn"),cursor:"pointer"}} onClick={goHistory}>⚠️ TTR DUE SOON — {buckets.warn} transaction{buckets.warn===1?"":"s"} at day 7-8. File within 3 business days.</div>}
+        {buckets.soon>0&&<div style={{...c.bnr("info"),cursor:"pointer"}} onClick={goHistory}>🔵 TTR PENDING — {buckets.soon} transaction{buckets.soon===1?"":"s"} to file (more than 3 business days remaining).</div>}
+      </>;
+    })()}
+    {/* Section 9 Gap 8 (2026-05-07) — police-hold summary. Two
+        tiers: items expiring within 3 days (yellow), and items
+        whose hold has expired without reissue or release (red).
+        Click → Stock screen. */}
+    {(()=>{
+      const held=(stock||[]).filter(s=>s&&s.policeHold).map(s=>({s,ph:policeHoldState(s)}));
+      if(!held.length)return null;
+      const expiring=held.filter(x=>x.ph.daysRemaining!=null&&x.ph.daysRemaining>=0&&x.ph.daysRemaining<=3);
+      const expired=held.filter(x=>x.ph.status==="expired-first"||x.ph.status==="expired-final");
+      const goStock=()=>typeof setScreen==="function"?setScreen("stock"):null;
+      return <>
+        {expired.length>0&&<div style={{...c.bnr("block"),cursor:"pointer"}} onClick={goStock}>🚓 POLICE HOLD EXPIRED — {expired.length} item{expired.length===1?"":"s"} pending action. Confirm reissue, release, or court order.</div>}
+        {expiring.length>0&&<div style={{...c.bnr("warn"),cursor:"pointer"}} onClick={goStock}>🚓 Police hold expiring soon — {expiring.length} item{expiring.length===1?"":"s"} (≤3 days remaining). Ask police if a reissue is forthcoming.</div>}
+      </>;
+    })()}
     {(()=>{
       // TFS list freshness reminder. Renders only when we have a
       // metadata last_updated_at AND it's older than TFS_STALE_DAYS.
