@@ -81,6 +81,46 @@
 //   - Accounting export "COMPLIANCE LOG" sheet (App.tsx:469): owner-
 //     only export, never reaches customer.
 // Re-run this audit before any new external-integration code lands.
+//
+// === TIPPING-OFF RE-AUDIT (last verified 2026-05-07 by Claude Code) ===
+// Re-walked the customer-visible surfaces after the TFS feature
+// (Commits 1-4), the NewTx step swap (commit c736727), the search-
+// query pre-fill (commit 152d2ca), and the persistence race fix
+// (commit a81c029). Files/lines are accurate at audit time but
+// will drift; re-verify if a referenced line range no longer
+// matches.
+//
+// Customer-visible surfaces — confirmed clean of SMR / TFS / flag references:
+//   - Receipt template (src/components/Receipt.jsx, lines 37-121):
+//     no smrFlagged, suspicious, blacklisted, tfsConfirmedMatch,
+//     tfsOverrideApplied, or any flag field. The "TTR REQUIRED"
+//     banner at line 100 is statutorily disclosable — s.123
+//     tipping-off offence covers SMRs only, not TTRs. The
+//     hobby-prospector banner at line 101 is a tax-treatment
+//     marker, not compliance. Clean.
+//   - Square checkout / Square buy / Shopify sell / Shopify buy /
+//     Square Terminal EFTPOS / Linkly EFTPOS / Twilio duress /
+//     generic webhook (src/lib/integrations.js, lines 42-91):
+//     in-file re-audit comment at lines 19-37 still accurate;
+//     re-walked every payload, no compliance flags leak. Clean.
+//
+// Internal staff-only surfaces (intentional disclosure to operator,
+// NOT a tipping-off concern — never customer-visible):
+//   - History row badges (src/screens/History.jsx): SMR + TFS-OVERRIDE.
+//   - Clients row badges, Transactions sub-mode (src/screens/Clients.jsx).
+//   - ClientDetail linked-tx row badges (src/modals/ClientDetail.jsx).
+//   - Settings → TFS Screening Log (src/modals/TfsScreenLogPanel.jsx) —
+//     admin-gated, RLS-enforced.
+// These are operator screens; a customer never sees them.
+//
+// Re-audit triggers — re-run when ANY of:
+//   - a new external integration is added (Stripe Payouts, Xero
+//     per-tx push, eBay listing, customer portal);
+//   - a new payload field is added to an existing integration;
+//   - a new customer-visible artifact is created (e.g. SMS/email
+//     receipt, customer-facing dashboard).
+// See docs/handover/section-9-audit.md for the full Section 9
+// status snapshot at this audit point.
 
 import {sN,sS,fmt2,fmtAUD,fmtDate} from "../utils.js";
 import {TROY_OZ,GOLD_P,SILV_P} from "../constants.js";
