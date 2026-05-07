@@ -51,6 +51,12 @@ export default function Clients({
   const[clientsData,setClientsData]=useState([]);
   const[loading,setLoading]=useState(false);
   const[selectedClient,setSelectedClient]=useState(null);
+  // 2026-05-07 — archived clients are excluded by default from
+  // both the rendered list and the row count in the header.
+  // Staff toggle this on to revisit / restore an archived
+  // record. ClientSearch (used during new tx) filters
+  // archived independently — see src/components/ClientSearch.jsx.
+  const[showArchived,setShowArchived]=useState(false);
 
   const loadClients=async()=>{
     setLoading(true);
@@ -86,6 +92,9 @@ export default function Clients({
 
   const filteredClients=useMemo(()=>{
     let list=[...(clientsData||[])];
+    // Archive filter — applied BEFORE search so the row count
+    // shown in the header reflects the same set the user sees.
+    if(!showArchived)list=list.filter(cl=>!cl.archived);
     if(cliSearch){
       const q=cliSearch.toLowerCase();
       list=list.filter(cl=>SEARCH_FIELDS.some(f=>sS(cl[f]).toLowerCase().includes(q)));
@@ -96,7 +105,8 @@ export default function Clients({
       return sortDir==="desc"?bd-ad:ad-bd;
     });
     return list;
-  },[clientsData,cliSearch,sortDir]);
+  },[clientsData,cliSearch,sortDir,showArchived]);
+  const archivedCount=useMemo(()=>(clientsData||[]).filter(cl=>cl.archived).length,[clientsData]);
 
   const filteredTxs=useMemo(()=>{
     let list=[...(txList||[])];
@@ -131,9 +141,19 @@ export default function Clients({
     </div>
 
     {mode==="clients"&&<div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <div style={{fontSize:11,color:T.muted}}>{filteredClients.length}{cliSearch&&" of "+clientsData.length} client{filteredClients.length===1?"":"s"}</div>
-        <button style={c.bsm()} onClick={loadClients} disabled={loading}>{loading?"Loading…":"↺ Refresh"}</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:11,color:T.muted}}>{filteredClients.length}{cliSearch&&" of "+clientsData.length} client{filteredClients.length===1?"":"s"}{!showArchived&&archivedCount>0?" · "+archivedCount+" archived hidden":""}</div>
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          {/* 2026-05-07 — archived-clients toggle. Off by default
+              so the active list stays uncluttered. Disabled when
+              the shop has zero archived records to avoid an
+              empty-state confusion. */}
+          <label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,color:archivedCount>0?T.muted:T.border,cursor:archivedCount>0?"pointer":"default"}}>
+            <input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)} disabled={archivedCount===0}/>
+            Show archived ({archivedCount})
+          </label>
+          <button style={c.bsm()} onClick={loadClients} disabled={loading}>{loading?"Loading…":"↺ Refresh"}</button>
+        </div>
       </div>
       {filteredClients.length===0&&<div style={{...c.card({padding:24}),textAlign:"center",color:T.muted}}>{loading?"Loading…":clientsData.length===0?"No clients yet. They'll appear here as transactions are completed.":"No clients match this search."}</div>}
       {filteredClients.map(cl=>{
@@ -144,6 +164,7 @@ export default function Clients({
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
               <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{sS(cl.fullName)||"(no name)"}</span>
               {cl.blacklisted&&<span style={c.badge(T.red)}>⛔ BLACKLISTED</span>}
+              {cl.archived&&<span style={c.badge(T.muted)}>📦 ARCHIVED</span>}
               {cl.isTest&&<span style={c.badge(T.muted)}>TEST</span>}
             </div>
             <div style={{fontSize:11,color:T.muted}}>

@@ -88,6 +88,13 @@ export const CLIENT_RECORD_FIELDS=[
   "pepCheck","tfsCheck","riskRating",
   "sourceOfFunds","sourceOfWealth",
   "internalNotes","blacklisted",
+  // 2026-05-07 — soft-archive fields. Once a client has ANY tx
+  // history they cannot be hard-deleted (AML/CTF + Privacy Act
+  // 7-year retention); archive is the only path. archived flips
+  // them out of the active Clients list and the ClientSearch
+  // results during a new tx; the record itself stays intact for
+  // audit retention.
+  "archived","archivedAt","archivedBy",
   "createdAt","lastTxAt","txCount","isTest","deleteAfter",
 ];
 

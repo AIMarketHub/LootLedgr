@@ -84,6 +84,76 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
   };
   const cancelEdit=()=>{setEditing(false);setShowGate(false);};
 
+  // 2026-05-07 — Delete / Archive / Restore.
+  // Tx count is computed from linkedTxs.length further down (the
+  // useMemo lives below this hook block); we recompute the same
+  // filter here on demand inside the action handlers so we don't
+  // re-order hooks. txCount > 0 → archive only (record must
+  // survive 7-year retention). txCount === 0 → hard delete is
+  // safe. Archive sets archived=true + archivedAt; Restore clears
+  // both. All three are Admin-PIN gated through withAdminGate
+  // (same posture as Edit / blacklist toggle / photo erase).
+  const[confirmAction,setConfirmAction]=useState(null);  // null | "delete" | "archive" | "restore"
+  const isArchived=!!(client&&client.archived);
+  const linkedTxCount=Array.isArray(txList)?txList.filter(t=>t&&t.clientId===(client&&client.id)).length:0;
+  const askDestructiveAction=()=>{
+    if(isArchived){
+      adminGate("Restore client from archive: "+sS(client.fullName||"(no name)"),()=>setConfirmAction("restore"));
+      return;
+    }
+    if(linkedTxCount===0){
+      adminGate("Permanently delete client (no transaction history): "+sS(client.fullName||"(no name)"),()=>setConfirmAction("delete"));
+      return;
+    }
+    adminGate("Archive client: "+sS(client.fullName||"(no name)"),()=>setConfirmAction("archive"));
+  };
+  const closeConfirm=()=>setConfirmAction(null);
+  const doArchive=async()=>{
+    setBusy(true);
+    try{
+      const updated=await clients.update(client.id,{
+        archived:true,
+        archivedAt:nowISO(),
+        archivedBy:sS(activeStaff||"")||null,
+      });
+      if(updated){
+        onSave&&onSave(updated);
+        pop&&pop("Client archived.","ok");
+        closeConfirm();
+        onClose&&onClose();
+      }else{
+        pop&&pop("Archive failed — please retry.","err");
+      }
+    }finally{setBusy(false);}
+  };
+  const doRestore=async()=>{
+    setBusy(true);
+    try{
+      const updated=await clients.update(client.id,{archived:false,archivedAt:null});
+      if(updated){
+        onSave&&onSave(updated);
+        pop&&pop("Client restored.","ok");
+        closeConfirm();
+        onClose&&onClose();
+      }else{
+        pop&&pop("Restore failed — please retry.","err");
+      }
+    }finally{setBusy(false);}
+  };
+  const doDelete=async()=>{
+    setBusy(true);
+    try{
+      const ok=await clients.remove(client.id);
+      if(ok){
+        pop&&pop("Client deleted.","ok");
+        closeConfirm();
+        onClose&&onClose();
+      }else{
+        pop&&pop("Delete failed — please retry.","err");
+      }
+    }finally{setBusy(false);}
+  };
+
   const trySave=()=>{
     adminGate("Save client record: "+sS(form.fullName||client.fullName||"(no name)"),()=>{
       if(getMissingMandatoryFields(form).length===0)doSave();
@@ -237,6 +307,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
         <div style={{fontSize:16,fontWeight:"bold",color:T.gold,marginBottom:4}}>{sS(client.fullName)||"(no name)"}</div>
         <div style={{fontSize:11,color:T.muted,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           {client.blacklisted&&<span style={c.badge(T.red)}>⛔ BLACKLISTED</span>}
+          {client.archived&&<span style={c.badge(T.muted)}>📦 ARCHIVED</span>}
           {client.isTest&&<span style={c.badge(T.muted)}>TEST DATA</span>}
           <span>Transactions: {client.txCount||0}</span>
           {lastVisit&&<span>Last visit: {lastVisit}</span>}
@@ -401,9 +472,58 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
         </>:<>
           <button style={c.btn(T.gold,T.bg)} onClick={startEdit}>✎ Edit</button>
           <button style={c.bsm()} onClick={onClose}>Close</button>
+          {/* 2026-05-07 — single button whose label adapts to the
+              client's current state. Archived → Restore (green).
+              No tx history → Delete (red). Otherwise → Archive
+              (orange). The 7-year retention rule under AML/CTF
+              Act + Privacy Act forbids hard-deleting a client
+              with any tx on file; the Archive path keeps the
+              record intact while hiding it from active surfaces. */}
+          {isArchived?
+            <button style={c.bsm(T.greenBg||T.surface,T.green)} onClick={askDestructiveAction} disabled={busy}>♻ Restore Client</button>
+          :linkedTxCount===0?
+            <button style={c.bsm(T.redBg,T.red)} onClick={askDestructiveAction} disabled={busy}>🗑 Delete Client</button>
+          :
+            <button style={c.bsm(T.orangeBg,T.orange)} onClick={askDestructiveAction} disabled={busy}>📦 Archive Client</button>
+          }
         </>}
       </div>
     </Modal>
+
+    {/* 2026-05-07 — Delete / Archive / Restore confirmation modal.
+        Single component, copy varies by action so staff sees the
+        retention rationale before they confirm. busy disables
+        Confirm to prevent double-fire. Cancel just closes. */}
+    {confirmAction&&<Modal title={
+      confirmAction==="delete"?"Delete client — permanent":
+      confirmAction==="archive"?"Archive client":
+      "Restore client"
+    } onClose={closeConfirm}>
+      {confirmAction==="delete"&&<>
+        <div style={{...c.bnr("block"),marginBottom:14}}>This client has no transaction history and will be permanently deleted. <strong>This cannot be undone.</strong></div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:14}}>Client: <strong style={{color:T.text}}>{sS(client.fullName)||"(no name)"}</strong>{client.idNumber?" · "+sS(client.idType).toUpperCase()+" "+sS(client.idNumber):""}</div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={c.btn(T.red,T.white)} onClick={doDelete} disabled={busy}>{busy?"Deleting…":"Yes, delete permanently"}</button>
+          <button style={c.bsm()} onClick={closeConfirm} disabled={busy}>Cancel</button>
+        </div>
+      </>}
+      {confirmAction==="archive"&&<>
+        <div style={{...c.bnr("warn"),marginBottom:14}}>This client has <strong>{linkedTxCount}</strong> transaction{linkedTxCount===1?"":"s"} on file. Archived clients are hidden from active search but kept in the system per AML/CTF 7-year retention requirements. Continue?</div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:14}}>Client: <strong style={{color:T.text}}>{sS(client.fullName)||"(no name)"}</strong>{client.idNumber?" · "+sS(client.idType).toUpperCase()+" "+sS(client.idNumber):""}</div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={c.btn(T.orange,T.bg)} onClick={doArchive} disabled={busy}>{busy?"Archiving…":"Yes, archive"}</button>
+          <button style={c.bsm()} onClick={closeConfirm} disabled={busy}>Cancel</button>
+        </div>
+      </>}
+      {confirmAction==="restore"&&<>
+        <div style={{...c.bnr("info"),marginBottom:14}}>Restoring this client will return them to the active Clients list and re-enable them as a search target during new transactions.</div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:14}}>Client: <strong style={{color:T.text}}>{sS(client.fullName)||"(no name)"}</strong>{client.archivedAt?" · archived "+fmtDate(client.archivedAt):""}</div>
+        <div style={{display:"flex",gap:10}}>
+          <button style={c.btn(T.green,T.bg)} onClick={doRestore} disabled={busy}>{busy?"Restoring…":"Yes, restore"}</button>
+          <button style={c.bsm()} onClick={closeConfirm} disabled={busy}>Cancel</button>
+        </div>
+      </>}
+    </Modal>}
 
     {showGate&&<Modal title="Mandatory information missing" onClose={()=>setShowGate(false)}>
       <div style={{...c.bnr("warn"),marginBottom:14}}>Some information is missing. It is your duty to collect the mandatory information. Proceed anyway?</div>

@@ -48,7 +48,15 @@ export default function ClientSearch({onSelect,onCreateNew,autoFocus=false}){
     setSearching(true);
     try{
       const r=await clients.search(q);
-      setResults(r||[]);
+      // 2026-05-07 — exclude archived clients from new-tx
+      // search results. Archived means "kept for 7-year audit
+      // retention but not in active use"; staff selecting one
+      // by accident would resurface a customer they
+      // intentionally hid. Archived clients are still
+      // reachable via the Clients screen's "Show archived"
+      // toggle and can be Restored from there.
+      const active=(r||[]).filter(cl=>!cl.archived);
+      setResults(active);
     }finally{
       setSearching(false);
     }
