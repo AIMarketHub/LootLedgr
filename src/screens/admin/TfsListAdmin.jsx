@@ -200,7 +200,7 @@ export default function TfsListAdmin(){
         {/* Light bg → DARK variant for visibility (deviation from
             spec which said gold; documented in save block). */}
         <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <Logo variant="dark" height={40}/>
+          <Logo height={40}/>
           <h1 style={styles.h1}>Admin — TFS Consolidated List</h1>
         </div>
         <div style={{fontSize:12,color:"#666"}}>

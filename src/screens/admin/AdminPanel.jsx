@@ -104,7 +104,7 @@ export default function AdminPanel(){
             Spec called for "gold" — using "dark" instead because
             gold-on-white has poor contrast; document in save block. */}
         <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <Logo variant="dark" height={40}/>
+          <Logo height={40}/>
           <h1 style={styles.h1}>Admin — All shops</h1>
         </div>
         <div style={{fontSize:12,color:"#666"}}>

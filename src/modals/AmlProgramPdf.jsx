@@ -65,7 +65,7 @@ export function AmlProgramRender({version,shopName}){
           surface. Custom shop uploads override via the Logo
           component. */}
       <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
-        <Logo variant="dark-large" height={80}/>
+        <Logo height={80}/>
       </div>
       <div style={{fontSize:14,letterSpacing:"0.2em",color:"#666",marginBottom:24}}>AML/CTF PROGRAM</div>
       <h1 style={{fontSize:28,margin:"0 0 8px",fontWeight:"bold"}}>{sS(shopName)||sS(data["s1.businessName"])||"LootLedger"}</h1>

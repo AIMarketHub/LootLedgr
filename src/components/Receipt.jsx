@@ -58,7 +58,7 @@ export default function Receipt({tx,settings}){
           wins via the Logo component (Logo treats SEED_LOGO and
           LOGO_GOLD_48H as "default", everything else as custom). */}
       <div style={{display:"flex",justifyContent:"center",marginBottom:8}}>
-        <Logo variant="dark" height={80} settings={s}/>
+        <Logo height={80} settings={s}/>
       </div>
       <h1 style={{fontSize:18,margin:"0 0 4px",fontWeight:"bold"}}>{s.businessName||"LootLedger"}</h1>
       {s.abn&&<div>ABN: {s.abn}</div>}

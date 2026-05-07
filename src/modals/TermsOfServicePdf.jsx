@@ -37,7 +37,7 @@ export function TermsOfServiceRender({version,shopName}){
       {/* Cover header logo — DARK variant on white printable
           surface. Custom shop uploads override via Logo component. */}
       <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
-        <Logo variant="dark-large" height={80}/>
+        <Logo height={80}/>
       </div>
       <div style={{fontSize:14,letterSpacing:"0.2em",color:"#666",marginBottom:24}}>TERMS OF SERVICE</div>
       <h1 style={{fontSize:28,margin:"0 0 8px",fontWeight:"bold"}}>{sS(shopName)||sS(data["s1.serviceProviderName"])||"LootLedger"}</h1>

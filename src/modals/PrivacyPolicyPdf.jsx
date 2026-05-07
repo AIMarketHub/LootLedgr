@@ -43,7 +43,7 @@ export function PrivacyPolicyRender({version,shopName}){
         variant). Custom shop uploads override via Logo component. */}
     <div style={{textAlign:"center",padding:"40px 0",pageBreakAfter:"always"}}>
       <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
-        <Logo variant="dark-large" height={80}/>
+        <Logo height={80}/>
       </div>
       <div style={{fontSize:14,letterSpacing:"0.2em",color:"#666",marginBottom:24}}>PRIVACY POLICY</div>
       <h1 style={{fontSize:28,margin:"0 0 8px",fontWeight:"bold"}}>{sS(shopName)||sS(data["s1.businessName"])||"LootLedger"}</h1>

@@ -32,7 +32,7 @@ export default function AuthLayout({title,subtitle,children,footer}){
             called this "light" by surface name; we use "dark" by
             asset color to actually be visible. */}
         <div style={{display:"flex",justifyContent:"center",marginBottom:8}}>
-          <Logo variant="dark" height={64}/>
+          <Logo height={64}/>
         </div>
         <div style={{fontSize:18,fontWeight:"bold",color:"#c9a84c",letterSpacing:"0.04em"}}>LOOT LEDGER</div>
         {title&&<h1 style={{fontSize:22,margin:"12px 0 4px",fontWeight:"bold"}}>{title}</h1>}

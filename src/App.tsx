@@ -822,7 +822,7 @@ export default function Loot(){
             {/* Lock screen logo. Dark surface (T.bg) → gold variant.
                 Custom shop uploads still win via the Logo component. */}
             <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
-              <Logo variant="gold" height={64} settings={settings}/>
+              <Logo height={64} settings={settings}/>
             </div>
             <div style={{fontSize:24,marginBottom:8}}>🔒</div>
             <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledger</div>
@@ -865,7 +865,7 @@ export default function Loot(){
                 && !== LOGO_GOLD_48H) take precedence and the
                 LootLedger gold default kicks in for everyone else. */}
             <div style={{width:34,height:34,borderRadius:"50%",border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,boxSizing:"border-box",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-              <Logo variant="gold" height={26} settings={settings}/>
+              <Logo height={26} settings={settings}/>
             </div>
             <div style={{overflow:"hidden"}}>
               <div style={{fontSize:11,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledger</div>
