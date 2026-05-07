@@ -26,18 +26,20 @@ export default function StockCard({s,frozenSnap,gSpot,sSpot,togglePoliceHold,set
     :s.sold?T.muted
     :hoursLeft(s.holdUntil)>0?T.orange
     :T.readyGreen;
-  // Click handler: not-on-hold → "set" modal (free); on-hold →
-  // PIN-gated → "manage" modal. Falls back to the legacy binary
-  // toggle when the modal opener prop isn't wired (defensive —
-  // older call sites still work).
+  // Click handler: not-on-hold → "set" modal (free, no PIN).
+  // On-hold → PIN-gated → "manage" modal (Reissue / Release).
+  //
+  // 2026-05-07 bugfix — the previous version had a legacy
+  // fallback that called the old binary togglePoliceHold when
+  // setPoliceHoldModal wasn't a function. The fallback was dead
+  // code in the current wiring (App.tsx → Stock.jsx → StockCard
+  // all pass the modal opener), but its existence meant a future
+  // wiring regression would silently revert to the pre-Gap-8
+  // binary toggle AND the user-reported "Remove police hold —
+  // Admin PIN required" message had no other code path to reach
+  // it. Removed; any wiring regression now produces a loud
+  // ReferenceError on click.
   const onHoldClick=()=>{
-    if(typeof setPoliceHoldModal!=="function"){
-      // Legacy fallback path (kept for parity with the
-      // pre-Gap-8 toggle behaviour).
-      if(s.policeHold){setPinModal({reason:"Remove police hold — Admin PIN required.",cb:()=>togglePoliceHold(s.id,false)});setPinVal("");}
-      else togglePoliceHold(s.id,true);
-      return;
-    }
     if(s.policeHold){
       setPinModal({reason:"Manage police hold — Admin PIN required.",cb:()=>setPoliceHoldModal({stockId:s.id,mode:"manage"})});
       setPinVal("");
