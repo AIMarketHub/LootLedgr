@@ -192,12 +192,17 @@ export default function NewTx({
   // Section 9 Gap 2 — Same-day linked-tx detection (Client step banner).
   // ========================================================================
   // Debounced fetch (400 ms, parallel to the TFS screening cadence).
-  // Fires on the Client step (txStep===2 after the swap) when the
-  // customer's name + DOB are both populated — same signal the TFS
-  // matcher waits for, since both checks need a real customer.
-  // Uses sb.loadTodayTxByClient when selectedClientId is present
-  // (precise), else sb.loadTodayTxByName as a fuzzy fallback. The
-  // banner is non-blocking; click-through opens a detail modal.
+  // Fires on the Client step (txStep===2 after the swap) whenever
+  // we have an identifier for the customer — either a linked
+  // selectedClientId (precise lookup) or a typed fullName (fuzzy
+  // fallback). DOB is intentionally NOT required: the linked-tx
+  // loader queries by clientId or by name only. (An earlier draft
+  // of this effect copy-pasted the TFS matcher's name+DOB gate,
+  // which was wrong here — DOB is needed by the matcher to score
+  // DFAT entries, but plays no role in same-day tx lookup. Real
+  // bug consequence: clients without a stored DOB — common for
+  // test data and for clients created before DOB was a captured
+  // field — never triggered the banner. Fixed 2026-05-07.)
   const[linkedTxsToday,setLinkedTxsToday]=useState([]);
   const[linkedTxFuzzy,setLinkedTxFuzzy]=useState(false);
   const[linkedTxModalOpen,setLinkedTxModalOpen]=useState(false);
@@ -207,8 +212,7 @@ export default function NewTx({
       return;
     }
     const name=String(client&&client.fullName||"").trim();
-    const dob=String(client&&client.dob||"").trim();
-    if(!name||!dob){
+    if(!selectedClientId&&!name){
       setLinkedTxsToday([]);
       return;
     }
@@ -231,7 +235,7 @@ export default function NewTx({
     },400);
     return ()=>clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[txStep,selectedClientId,client&&client.fullName,client&&client.dob]);
+  },[txStep,selectedClientId,client&&client.fullName]);
 
   // ========================================================================
   // Section 9 Gap 1 — Rolling 30-day structuring detection (Compliance step).
