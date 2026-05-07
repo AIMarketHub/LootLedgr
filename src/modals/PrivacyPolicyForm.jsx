@@ -160,7 +160,7 @@ export default function PrivacyPolicyForm({settings,setSettings,activeStaff,pop,
     <div style={{display:"flex",gap:10,flexWrap:"wrap",position:"sticky",bottom:0,padding:"12px 0",background:T.bg,borderTop:"1px solid "+T.border}}>
       <button style={c.btn(T.gold,T.bg)} onClick={onSaveDraft} disabled={savingDraft}>{savingDraft?"Saving…":"💾 Save Draft"}</button>
       <button style={c.bsm()} onClick={onCancel}>Cancel</button>
-      {dirty&&<span style={{fontSize:10,color:T.orange,padding:"6px 0"}}>• Unsaved changes</span>}
+      {dirty&&<span style={{fontSize:10,color:T.orange,fontWeight:700,padding:"6px 0"}}>• Unsaved changes</span>}
     </div>
   </Modal>;
 }

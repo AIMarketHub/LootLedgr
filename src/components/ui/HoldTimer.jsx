@@ -19,5 +19,5 @@ export default function HoldTimer({holdUntil,policeHold}){
   useEffect(()=>{const t=setInterval(()=>tick(p=>p+1),30000);return()=>clearInterval(t);},[]);
   if(policeHold)return <span style={c.row(5)}><span style={c.dot(T.red)}/><span style={c.badge(T.red)}>POLICE</span></span>;
   if(!holdUntil||hoursLeft(holdUntil)<=0)return <span style={c.row(5)}><span style={c.dot(T.readyGreen)}/><span style={c.badge(T.readyGreen)}>FREE</span></span>;
-  return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange}}>{fmtHold(holdUntil)}</span></span>;
+  return <span style={c.row(5)}><span style={c.dot(T.orange)}/><span style={{fontSize:11,color:T.orange,fontWeight:700}}>{fmtHold(holdUntil)}</span></span>;
 }

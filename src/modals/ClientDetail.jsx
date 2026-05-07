@@ -468,7 +468,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
         {editing?<>
           <button style={c.btn(T.green,T.bg)} onClick={trySave} disabled={busy}>💾 Save</button>
           <button style={c.bsm()} onClick={cancelEdit} disabled={busy}>Cancel</button>
-          {missing.length>0&&<span style={{fontSize:10,color:T.orange,padding:"5px 0"}}>Missing: {missing.join(", ")}</span>}
+          {missing.length>0&&<span style={{fontSize:10,color:T.orange,fontWeight:700,padding:"5px 0"}}>Missing: {missing.join(", ")}</span>}
         </>:<>
           <button style={c.btn(T.gold,T.bg)} onClick={startEdit}>✎ Edit</button>
           <button style={c.bsm()} onClick={onClose}>Close</button>

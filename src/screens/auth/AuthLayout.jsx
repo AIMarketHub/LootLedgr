@@ -31,11 +31,15 @@ export default function AuthLayout({title,subtitle,children,footer}){
             DARK variant (dark logo on light surface). The spec
             called this "light" by surface name; we use "dark" by
             asset color to actually be visible. */}
-        <div style={{display:"flex",justifyContent:"center",marginBottom:8}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
           <Logo height={64}/>
         </div>
-        <div style={{fontSize:18,fontWeight:"bold",color:"#c9a84c",letterSpacing:"0.04em"}}>LOOT LEDGER</div>
-        {title&&<h1 style={{fontSize:22,margin:"12px 0 4px",fontWeight:"bold"}}>{title}</h1>}
+        {/* 2026-05-08 typography swap — wordmark now dominates
+            the action heading. The brand IS the page identity;
+            "Sign In" / "Sign up" / "Forgot password" is the
+            secondary action label. */}
+        <div style={{fontSize:30,fontWeight:700,color:"#c9a84c",letterSpacing:"0.06em",marginBottom:4}}>LOOT LEDGER</div>
+        {title&&<h1 style={{fontSize:17,margin:"14px 0 2px",fontWeight:600,color:"#555"}}>{title}</h1>}
         {subtitle&&<div style={{fontSize:13,color:"#666"}}>{subtitle}</div>}
       </div>
       {children}
@@ -52,7 +56,7 @@ export const authStyles={
   primary:{width:"100%",padding:"12px 16px",background:"#c9a84c",color:"#000",border:"none",borderRadius:4,fontSize:14,fontWeight:"bold",cursor:"pointer",marginTop:20,fontFamily:"inherit"},
   secondary:{width:"100%",padding:"10px 16px",background:"#fff",color:"#444",border:"1px solid #ccc",borderRadius:4,fontSize:13,cursor:"pointer",marginTop:8,fontFamily:"inherit"},
   link:{color:"#c9a84c",textDecoration:"none",fontWeight:600},
-  error:{padding:"10px 12px",background:"#fee",border:"1px solid #fcc",borderRadius:4,fontSize:13,color:"#933",marginTop:14,marginBottom:4},
+  error:{padding:"10px 12px",background:"#fee",border:"1px solid #fcc",borderRadius:4,fontSize:13,color:"#933",fontWeight:700,marginTop:14,marginBottom:4},
   info:{padding:"10px 12px",background:"#eef6ff",border:"1px solid #cde",borderRadius:4,fontSize:12,color:"#26568f",marginTop:14},
   helper:{fontSize:11,color:"#888",marginTop:4},
 };

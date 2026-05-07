@@ -44,7 +44,11 @@ export const c={
   td:(x={})=>({padding:"9px 12px",fontSize:12,borderBottom:"1px solid "+T.border+"22",verticalAlign:"middle",...x}),
   dot:(col)=>({width:10,height:10,borderRadius:"50%",background:col,boxShadow:"0 0 8px "+col+"99",flexShrink:0,display:"inline-block"}),
   badge:(col,bg)=>({display:"inline-block",padding:"2px 7px",borderRadius:4,fontSize:10,fontWeight:"bold",color:col,background:bg||col+"22"}),
-  bnr:(lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6};},
+  // 2026-05-08 — red and orange banners (warn / block) carry
+  // fontWeight:700 so compliance alerts visually outweigh the
+  // surrounding regular text. Info banners (gold) stay at the
+  // default weight; they're informational, not actionable.
+  bnr:(lv)=>{const m={info:[T.gold,T.goldBg],warn:[T.orange,T.orangeBg],block:[T.red,T.redBg]};const[cl,bg]=m[lv]||m.info;const bold=lv==="warn"||lv==="block";return{background:bg,border:"1px solid "+cl+"55",borderRadius:6,padding:"10px 14px",marginBottom:8,fontSize:12,color:cl,lineHeight:1.6,fontWeight:bold?700:undefined};},
   shead:(g)=>({padding:"10px 16px",background:g?T.gold+"18":T.silver+"14",borderBottom:"1px solid "+T.border,fontSize:11,fontWeight:"bold",letterSpacing:"0.12em",textTransform:"uppercase",color:g?T.goldLight:T.silver}),
 };
 

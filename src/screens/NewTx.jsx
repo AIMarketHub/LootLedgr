@@ -1191,7 +1191,7 @@ export default function NewTx({
         />
         <div style={{fontSize:10,color:T.muted,marginTop:4}}>{String(structOverrideReasonInput||"").trim().length} / 20 characters</div>
       </div>
-      {structOverrideErr&&<div style={{color:T.red,fontSize:12,marginTop:10}}>{structOverrideErr}</div>}
+      {structOverrideErr&&<div style={{color:T.red,fontWeight:700,fontSize:12,marginTop:10}}>{structOverrideErr}</div>}
       <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
         <button style={c.btn(T.red,T.bg)} onClick={submitStructOverride}>Submit override</button>
         <button style={c.bsm()} onClick={()=>setStructOverrideOpen(false)}>Cancel</button>
