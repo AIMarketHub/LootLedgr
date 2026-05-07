@@ -31,6 +31,7 @@ import CatalogEditor from "./modals/CatalogEditor.jsx";
 import LogoManager from "./modals/LogoManager.jsx";
 import ForgotPin from "./modals/ForgotPin.jsx";
 import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
+import Logo from "./components/Logo.jsx";
 import {useAuth} from "./components/AuthProvider.jsx";
 import {signOut as saasSignOut} from "./lib/auth/saas.js";
 
@@ -818,7 +819,12 @@ export default function Loot(){
       {locked?(
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}>
           <div style={c.card({padding:32,maxWidth:320,width:"100%",textAlign:"center"})}>
-            <div style={{fontSize:32,marginBottom:12}}>🔒</div>
+            {/* Lock screen logo. Dark surface (T.bg) → gold variant.
+                Custom shop uploads still win via the Logo component. */}
+            <div style={{display:"flex",justifyContent:"center",marginBottom:12}}>
+              <Logo variant="gold" height={64} settings={settings}/>
+            </div>
+            <div style={{fontSize:24,marginBottom:8}}>🔒</div>
             <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
             {!settingsHydrated?<div style={{fontSize:12,color:T.muted,marginTop:14,marginBottom:14}}>Loading settings…</div>:<>
               <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
@@ -854,7 +860,13 @@ export default function Loot(){
         </div>}
         <div style={{background:T.surface,borderBottom:"1px solid "+T.border,padding:"0 8px",display:"flex",alignItems:"center",justifyContent:"space-between",minHeight:50,position:"sticky",top:0,zIndex:100}}>
           <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,maxWidth:160}} onClick={()=>{setLogoPinMode(true);setLogoPinVal("");}}>
-            <img src={settings.logoImg||SEED_LOGO} alt="logo" style={{width:34,height:34,borderRadius:"50%",objectFit:"contain",border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,cursor:"pointer"}}/>
+            {/* Topbar logo. Rendered through the Logo component so
+                custom shop uploads (settings.logoImg !== SEED_LOGO
+                && !== LOGO_GOLD_48H) take precedence and the
+                LootLedger gold default kicks in for everyone else. */}
+            <div style={{width:34,height:34,borderRadius:"50%",border:"2px solid "+T.gold,flexShrink:0,background:"#fff",padding:3,boxSizing:"border-box",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+              <Logo variant="gold" height={26} settings={settings}/>
+            </div>
             <div style={{overflow:"hidden"}}>
               <div style={{fontSize:11,fontWeight:"bold",color:T.gold,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Loot Ledger</div>
               <div style={{fontSize:7.5,color:T.muted,letterSpacing:"0.08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Compliance POS</div>

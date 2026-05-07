@@ -28,6 +28,7 @@
 // minimum-disclosure principle.
 
 import React from "react";
+import Logo from "./Logo.jsx";
 
 function fmt2(n){return Number(n||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fmtAUD(n){return n==null||isNaN(n)?"—":"$"+fmt2(n);}
@@ -52,7 +53,13 @@ export default function Receipt({tx,settings}){
     lineHeight:1.4,
   }}>
     <header style={{textAlign:"center",marginBottom:14}}>
-      {s.logoImg&&<img src={s.logoImg} alt="" style={{maxWidth:80,maxHeight:80,display:"block",margin:"0 auto 8px",borderRadius:"50%"}}/>}
+      {/* Receipt logo — printed on white paper, so the DARK
+          variant of the LootLedger default. A custom shop upload
+          wins via the Logo component (Logo treats SEED_LOGO and
+          LOGO_GOLD_48H as "default", everything else as custom). */}
+      <div style={{display:"flex",justifyContent:"center",marginBottom:8}}>
+        <Logo variant="dark" height={80} settings={s}/>
+      </div>
       <h1 style={{fontSize:18,margin:"0 0 4px",fontWeight:"bold"}}>{s.businessName||"LootLedger"}</h1>
       {s.abn&&<div>ABN: {s.abn}</div>}
       {s.dealerLicenceNo&&<div>Dealer Licence: {s.dealerLicenceNo}</div>}

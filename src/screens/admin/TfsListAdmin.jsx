@@ -28,6 +28,7 @@ import {supabase,signOut} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 import {parseDfatExcel} from "../../lib/tfs/parser.js";
 import {replaceTfsCache} from "../../lib/tfs/storage.js";
+import Logo from "../../components/Logo.jsx";
 
 function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return String(iso);}}
 function daysSince(iso){if(!iso)return null;const d=new Date(iso).getTime();if(isNaN(d))return null;return Math.floor((Date.now()-d)/(24*3600*1000));}
@@ -196,7 +197,12 @@ export default function TfsListAdmin(){
   return <div style={styles.page}>
     <div style={styles.shell}>
       <div style={styles.topbar}>
-        <h1 style={styles.h1}>Admin — TFS Consolidated List</h1>
+        {/* Light bg → DARK variant for visibility (deviation from
+            spec which said gold; documented in save block). */}
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <Logo variant="dark" height={40}/>
+          <h1 style={styles.h1}>Admin — TFS Consolidated List</h1>
+        </div>
         <div style={{fontSize:12,color:"#666"}}>
           Signed in as <strong>{user&&user.email}</strong> ·{" "}
           <Link to="/admin" style={styles.link}>← Back to admin</Link> ·{" "}

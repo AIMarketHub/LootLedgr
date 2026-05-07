@@ -32,6 +32,7 @@ import {T,c} from "../theme.js";
 import {Modal} from "../components/ui";
 import {sS} from "../lib/utils.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META} from "../lib/amlProgram/defaults.js";
+import Logo from "../components/Logo.jsx";
 
 function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return sS(iso);}}
 function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}}
@@ -60,6 +61,12 @@ export function AmlProgramRender({version,shopName}){
   }}>
     {/* Cover page */}
     <div style={{textAlign:"center",padding:"40px 0",pageBreakAfter:"always"}}>
+      {/* Cover header logo — DARK variant on the white printable
+          surface. Custom shop uploads override via the Logo
+          component. */}
+      <div style={{display:"flex",justifyContent:"center",marginBottom:24}}>
+        <Logo variant="dark-large" height={80}/>
+      </div>
       <div style={{fontSize:14,letterSpacing:"0.2em",color:"#666",marginBottom:24}}>AML/CTF PROGRAM</div>
       <h1 style={{fontSize:28,margin:"0 0 8px",fontWeight:"bold"}}>{sS(shopName)||sS(data["s1.businessName"])||"LootLedger"}</h1>
       {data["s1.abn"]&&<div style={{fontSize:13,marginBottom:6}}>ABN: {sS(data["s1.abn"])}</div>}

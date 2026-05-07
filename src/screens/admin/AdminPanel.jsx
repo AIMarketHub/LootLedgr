@@ -18,6 +18,7 @@ import React,{useEffect,useState,useMemo} from "react";
 import {Link,useNavigate} from "react-router-dom";
 import {supabase,signOut} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
+import Logo from "../../components/Logo.jsx";
 
 function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return String(iso);}}
 
@@ -99,7 +100,13 @@ export default function AdminPanel(){
   return <div style={styles.page}>
     <div style={styles.shell}>
       <div style={styles.topbar}>
-        <h1 style={styles.h1}>Admin — All shops</h1>
+        {/* Admin pages render on a light grey bg with white cards.
+            Spec called for "gold" — using "dark" instead because
+            gold-on-white has poor contrast; document in save block. */}
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <Logo variant="dark" height={40}/>
+          <h1 style={styles.h1}>Admin — All shops</h1>
+        </div>
         <div style={{fontSize:12,color:"#666"}}>
           Signed in as <strong>{user&&user.email}</strong> ·{" "}
           <Link to="/admin/tfs" style={styles.link}>TFS list</Link> ·{" "}
