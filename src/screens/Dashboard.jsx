@@ -44,7 +44,7 @@ export default function Dashboard({
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
   return <div>
-    <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:18}}>{settings.businessName||"Loot Ledgr"} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}</div>
+    <div style={{fontSize:17,fontWeight:"bold",color:T.white,marginBottom:18}}>{settings.businessName||"Loot Ledger"} — {new Date().toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"})}</div>
     <div style={c.g2(10)}>
       {[[T.gold,T.goldLight,"⬡ Gold (AUD/oz)",gSpot],[T.silver,T.silver,"◈ Silver (AUD/oz)",sSpot]].map(([col,sub,lbl,spot])=>(
         <div key={lbl} style={{...c.card({padding:"clamp(10px,2vw,20px)"}),minWidth:0}}>

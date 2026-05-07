@@ -384,7 +384,7 @@ export default function Settings({
         <div style={c.g2(8)}>
           {[1,2,3,4,5,6,7,8,9,10].map(n=><F key={n} label={"Contact "+n} value={settings["duressContact"+n]||""} onChange={v=>setSettings(p=>({...p,["duressContact"+n]:v}))} placeholder="+61400000000"/>)}
         </div>
-        <button style={c.btn(T.border,T.text,{fontSize:11,marginTop:10})} onClick={async()=>{const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);if(!contacts.length){pop("No contacts configured.","warn");return;}const r=await sendDuressSMS(settings,contacts[0],"LOOT LEDGR — Test alert from duress system. If received, system is working.");pop(r.msg,r.ok?"ok":"err");}}>Test SMS to Contact 1</button>
+        <button style={c.btn(T.border,T.text,{fontSize:11,marginTop:10})} onClick={async()=>{const contacts=[1,2,3,4,5,6,7,8,9,10].map(n=>sS(settings["duressContact"+n]).trim()).filter(Boolean);if(!contacts.length){pop("No contacts configured.","warn");return;}const r=await sendDuressSMS(settings,contacts[0],"LOOT LEDGER — Test alert from duress system. If received, system is working.");pop(r.msg,r.ok?"ok":"err");}}>Test SMS to Contact 1</button>
       </div>],
       ["compliance","📋 Compliance — TTR",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12}}><input type="checkbox" checked={settings.ttrEnabled!==false} onChange={e=>setSettings(p=>({...p,ttrEnabled:e.target.checked}))}/>Enable TTR check at $10,000 cash threshold</label>
@@ -899,7 +899,7 @@ export default function Settings({
         <div style={{fontSize:11,fontWeight:"bold",color:T.white,marginBottom:8}}>Blacklist ({(blacklist||[]).length})</div>
         {(blacklist||[]).map((b,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,marginBottom:4}}><span>{sS(b.name)}</span><button style={c.bsm(T.border,T.muted)} onClick={()=>setBlacklist(p=>p.filter((_,j)=>j!==i))}>Remove</button></div>)}
       </div>
-      <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledgr v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
+      <div style={{marginTop:14,fontSize:10,color:T.muted}}>Loot Ledger v{APP_VERSION} · github.com/AIMarketHub/LootLedgr · lootledgr.netlify.app</div>
     </div>
   </Modal>
   {/* Nested modals — rendered AFTER the Settings Modal so they win

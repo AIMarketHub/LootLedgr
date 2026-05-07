@@ -212,7 +212,7 @@ export default function Clients({
           </div>
         </div>
       ))}
-      <button style={{...c.bsm(T.border,T.muted),marginTop:10,fontSize:11,width:"100%"}} onClick={()=>{const rows=[["Invoice","Date","Client","DOB","Buy","Sell","Net","Payment","KYC","TTR","SMR","Hobby","Vic Miner's Right"]];(txList||[]).forEach(t=>rows.push([sS(t.id),sS(t.date&&t.date.slice(0,10)),sS(t.client&&t.client.fullName),sS(t.client&&t.client.dob),sS(t.buyTotal),sS(t.sellTotal),sS(t.net),sS(t.payment),t.kycDone?"YES":"",t.ttrRequired?"YES":"",t.smrFlagged?"YES":"",t.isHobbyProspector?"YES":"",sS(t.vicMinersRightNumber||"")]));const Q='"';const esc=v=>Q+sS(v).replace(/"/g,Q+Q)+Q;dlFile(rows.map(r=>r.map(esc).join(",")).join("\n"),"lootledgr-export-"+todayStr()+".csv","text/csv");pop("CSV exported.","ok");}}>⬇ Export All as CSV</button>
+      <button style={{...c.bsm(T.border,T.muted),marginTop:10,fontSize:11,width:"100%"}} onClick={()=>{const rows=[["Invoice","Date","Client","DOB","Buy","Sell","Net","Payment","KYC","TTR","SMR","Hobby","Vic Miner's Right"]];(txList||[]).forEach(t=>rows.push([sS(t.id),sS(t.date&&t.date.slice(0,10)),sS(t.client&&t.client.fullName),sS(t.client&&t.client.dob),sS(t.buyTotal),sS(t.sellTotal),sS(t.net),sS(t.payment),t.kycDone?"YES":"",t.ttrRequired?"YES":"",t.smrFlagged?"YES":"",t.isHobbyProspector?"YES":"",sS(t.vicMinersRightNumber||"")]));const Q='"';const esc=v=>Q+sS(v).replace(/"/g,Q+Q)+Q;dlFile(rows.map(r=>r.map(esc).join(",")).join("\n"),"lootledger-export-"+todayStr()+".csv","text/csv");pop("CSV exported.","ok");}}>⬇ Export All as CSV</button>
     </div>}
 
     {selectedClient&&<ClientDetail

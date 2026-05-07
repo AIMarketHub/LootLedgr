@@ -636,7 +636,7 @@ export default function NewTx({
           <button style={{...c.btn(T.green,T.bg),width:"100%"}} onClick={async()=>{
             pop("Creating Stripe payment link…","ok");
             const buys=(txItems||[]).filter(i=>i.mode==="buy"),sells=(txItems||[]).filter(i=>i.mode==="sell");
-            const desc=(sells.length?"Sale":buys.length?"Purchase":"Loot Ledgr")+" · Loot #"+txNo;
+            const desc=(sells.length?"Sale":buys.length?"Purchase":"Loot Ledger")+" · Loot #"+txNo;
             const r=await createPaymentLink(settings,net,desc);
             if(r.ok&&r.url){
               if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(r.url);

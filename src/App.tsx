@@ -1,4 +1,4 @@
-// LOOT LEDGR v5 — Compliance POS . Gold & Silver . Australia
+// LOOT LEDGER v5 — Compliance POS . Gold & Silver . Australia
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
@@ -685,11 +685,11 @@ export default function Loot(){
     const s3=[["GST SUMMARY"],["Period: "+(frozenSnap?frozenSnap.frozenAt:todayStr())],["Total Sales","$"+tS.toFixed(2)],["Total Purchases (commercial)","$"+tP.toFixed(2)],["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)],["Standard GST (10%)","$"+tSG.toFixed(2)],["Margin Scheme GST","$"+tMG.toFixed(2)],["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],["",""],["Estimate only — confirm with registered tax agent",""]];
     const s4=[["COMPLIANCE LOG"],["Invoice","Date","Client","TTR Status","SMR","KYC","Police Hold","Voided"]];
     (txList||[]).forEach(tx=>s4.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS(tx.ttrStatus||"N/A"),tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",(tx.items||[]).some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
-    dlFile("LOOT LEDGR — ACCOUNTING EXPORT\nBusiness: "+sS(settings.businessName)+"  ABN: "+sS(settings.abn)+"\nExported: "+todayStr()+"  Spot: "+sn+"\n\n1. TRANSACTION REGISTER\n"+csv(s1)+"\n\n2. STOCK VALUATION\n"+csv(s2)+"\n\n3. GST SUMMARY\n"+csv(s3)+"\n\n4. COMPLIANCE LOG\n"+csv(s4),"lootledgr-accounting-"+todayStr()+".csv","text/csv");
+    dlFile("LOOT LEDGER — ACCOUNTING EXPORT\nBusiness: "+sS(settings.businessName)+"  ABN: "+sS(settings.abn)+"\nExported: "+todayStr()+"  Spot: "+sn+"\n\n1. TRANSACTION REGISTER\n"+csv(s1)+"\n\n2. STOCK VALUATION\n"+csv(s2)+"\n\n3. GST SUMMARY\n"+csv(s3)+"\n\n4. COMPLIANCE LOG\n"+csv(s4),"lootledger-accounting-"+todayStr()+".csv","text/csv");
     pop("Accounting export downloaded.","ok");
   };
 
-  const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledgr-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
+  const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledger-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
   const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
   // Stage 1.C lock-screen fix — defensive PIN comparison.
   //
@@ -825,7 +825,7 @@ export default function Loot(){
               <Logo variant="gold" height={64} settings={settings}/>
             </div>
             <div style={{fontSize:24,marginBottom:8}}>🔒</div>
-            <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledgr</div>
+            <div style={{fontSize:16,fontWeight:"bold",color:T.white,marginBottom:6}}>Loot Ledger</div>
             {!settingsHydrated?<div style={{fontSize:12,color:T.muted,marginTop:14,marginBottom:14}}>Loading settings…</div>:<>
               <div style={{fontSize:12,color:T.muted,marginBottom:20}}>Enter PIN to continue</div>
               <input style={{...c.inp(),textAlign:"center",fontSize:22,letterSpacing:"0.3em",marginBottom:14}} type="password" maxLength={12} value={appPinInput} onChange={e=>setAppPinInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")unlockApp();}} placeholder="••••" autoFocus/>

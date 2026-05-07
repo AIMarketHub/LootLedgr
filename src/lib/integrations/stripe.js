@@ -183,7 +183,7 @@ export async function createPaymentLink(settings,amountAUD,description){
         quantity:1,
         price_data:{
           currency:"aud",
-          product_data:{name:sS(description||"Loot Ledgr sale")},
+          product_data:{name:sS(description||"Loot Ledger sale")},
           unit_amount:cents,
         },
       }],
