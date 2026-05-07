@@ -44,8 +44,8 @@ import {T,c} from "../theme.js";
 import {F,SF,HoldTimer,Modal} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
 import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
-import {checkPhotoSize} from "../lib/storage.js";
-import {PRIVACY_NOTICE,THRESH,getRequiredFields} from "../lib/compliance/index.js";
+import {checkPhotoSize,sb} from "../lib/storage.js";
+import {PRIVACY_NOTICE,THRESH,getRequiredFields,evaluateStructuring,cashAmountFromTx} from "../lib/compliance/index.js";
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
 import {createPaymentLink} from "../lib/integrations/stripe.js";
 import ClientSearch from "../components/ClientSearch.jsx";
@@ -103,6 +103,12 @@ export default function NewTx({
   // staff has reviewed, modal open / closed).
   tfsCachedList,setTfsAllMatches,
   recordTfsBlock,recordTfsOverride,
+  // Section 9 Gap 1 — structuring override state lives in App.tsx
+  // so finalize can persist it on the tx record. NewTx owns the
+  // local UI state (loaded prior cash sum, evaluator result,
+  // override modal open/closed).
+  structuringOverrideApplied,setStructuringOverrideApplied,
+  structuringOverrideReason,setStructuringOverrideReason,
 }){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
   // Phase 2.7 follow-up (2026-04-30) — sub-state for the new-client
@@ -181,6 +187,139 @@ export default function NewTx({
       setTfsAlertDismissed(false);
     }
   },[tfsMatches]);
+
+  // ========================================================================
+  // Section 9 Gap 2 — Same-day linked-tx detection (Client step banner).
+  // ========================================================================
+  // Debounced fetch (400 ms, parallel to the TFS screening cadence).
+  // Fires on the Client step (txStep===2 after the swap) when the
+  // customer's name + DOB are both populated — same signal the TFS
+  // matcher waits for, since both checks need a real customer.
+  // Uses sb.loadTodayTxByClient when selectedClientId is present
+  // (precise), else sb.loadTodayTxByName as a fuzzy fallback. The
+  // banner is non-blocking; click-through opens a detail modal.
+  const[linkedTxsToday,setLinkedTxsToday]=useState([]);
+  const[linkedTxFuzzy,setLinkedTxFuzzy]=useState(false);
+  const[linkedTxModalOpen,setLinkedTxModalOpen]=useState(false);
+  useEffect(()=>{
+    if(txStep!==2){
+      setLinkedTxsToday([]);
+      return;
+    }
+    const name=String(client&&client.fullName||"").trim();
+    const dob=String(client&&client.dob||"").trim();
+    if(!name||!dob){
+      setLinkedTxsToday([]);
+      return;
+    }
+    const t=setTimeout(async()=>{
+      try{
+        let rows=[];
+        let fuzzy=false;
+        if(selectedClientId){
+          rows=await sb.loadTodayTxByClient(selectedClientId);
+        }else{
+          rows=await sb.loadTodayTxByName(name);
+          fuzzy=true;
+        }
+        setLinkedTxsToday(Array.isArray(rows)?rows:[]);
+        setLinkedTxFuzzy(!!fuzzy);
+      }catch(_){
+        setLinkedTxsToday([]);
+        setLinkedTxFuzzy(false);
+      }
+    },400);
+    return ()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[txStep,selectedClientId,client&&client.fullName,client&&client.dob]);
+
+  // ========================================================================
+  // Section 9 Gap 1 — Rolling 30-day structuring detection (Compliance step).
+  // ========================================================================
+  // Fires on the Compliance step (txStep===3) when the in-progress
+  // tx involves cash AND a customer is identified (either linked
+  // via selectedClientId or named). Loads the 30-day cash buy total
+  // for this customer, runs evaluateStructuring(), surfaces a
+  // banner. 'block' severity gates the Next button until staff
+  // resolves via PIN + ≥20-char reason.
+  //
+  // Re-fires when txPay or buyTotal changes (so a customer who
+  // started as cash and was switched to EFTPOS clears the banner).
+  // currentCashAmount uses the same cashAmountFromTx() the TTR
+  // path uses — single source of truth for "how much of THIS tx
+  // is cash".
+  const[structuringResult,setStructuringResult]=useState(null);
+  const[structuringFuzzy,setStructuringFuzzy]=useState(false);
+  const[structuringLoading,setStructuringLoading]=useState(false);
+  const[structuringError,setStructuringError]=useState("");
+  useEffect(()=>{
+    if(txStep!==3){return;}
+    const name=String(client&&client.fullName||"").trim();
+    const isCashTx=txPay==="cash";
+    const currentCashAmount=cashAmountFromTx({payment:txPay,buyTotal,items:txItems});
+    if(!isCashTx||currentCashAmount<=0||(!selectedClientId&&!name)){
+      setStructuringResult(null);
+      setStructuringFuzzy(false);
+      setStructuringError("");
+      return;
+    }
+    let cancelled=false;
+    setStructuringLoading(true);
+    (async()=>{
+      try{
+        let prior=0;
+        let fuzzy=false;
+        if(selectedClientId){
+          prior=await sb.loadCash30dByClient(selectedClientId);
+        }else{
+          prior=await sb.loadCash30dByName(name);
+          fuzzy=true;
+        }
+        if(cancelled)return;
+        const r=evaluateStructuring({currentCashAmount,priorCash30d:prior});
+        setStructuringResult(r);
+        setStructuringFuzzy(!!fuzzy);
+        setStructuringError("");
+      }catch(e){
+        if(cancelled)return;
+        // Compliance-relevant: a load failure shouldn't silently
+        // suppress the gate. Surface to staff so they can decide
+        // whether to retry, accept the risk and proceed manually,
+        // or abort. Defensive default: no result → no block, but
+        // an error chip in the banner area.
+        setStructuringResult(null);
+        setStructuringError(sS(e&&e.message)||"Unable to load 30-day cash history.");
+      }finally{
+        if(!cancelled)setStructuringLoading(false);
+      }
+    })();
+    return ()=>{cancelled=true;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[txStep,txPay,buyTotal,selectedClientId,client&&client.fullName]);
+
+  // Structuring override modal (PIN + ≥20-char reason) — local UI
+  // state. On submit, validates PIN against settings.staffPin and
+  // reason length, then sets the App-level structuringOverrideApplied
+  // flag so the Compliance step's Next gate clears.
+  const[structOverrideOpen,setStructOverrideOpen]=useState(false);
+  const[structOverridePin,setStructOverridePin]=useState("");
+  const[structOverrideReasonInput,setStructOverrideReasonInput]=useState("");
+  const[structOverrideErr,setStructOverrideErr]=useState("");
+  const submitStructOverride=()=>{
+    setStructOverrideErr("");
+    const pin=String(structOverridePin||"").trim();
+    const reason=String(structOverrideReasonInput||"").trim();
+    const expected=String((settings&&settings.staffPin)||"").trim();
+    if(!expected){setStructOverrideErr("No Admin PIN configured. Set one in Settings → Security before overriding.");return;}
+    if(pin!==expected){setStructOverrideErr("Incorrect PIN.");return;}
+    if(reason.length<20){setStructOverrideErr("Reason must be at least 20 characters (currently "+reason.length+").");return;}
+    if(typeof setStructuringOverrideApplied==="function")setStructuringOverrideApplied(true);
+    if(typeof setStructuringOverrideReason==="function")setStructuringOverrideReason(reason);
+    setStructOverrideOpen(false);
+    setStructOverridePin("");
+    setStructOverrideReasonInput("");
+    pop("Structuring override recorded.","ok");
+  };
 
   // The block path resets the entire tx via App's recordTfsBlock
   // handler; we wrap it so the modal can call a single "block"
@@ -537,6 +676,28 @@ export default function NewTx({
       <div>
         <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:14}}>Compliance Check</div>
         {compliance.flags.map(f=><div key={f.key} style={c.bnr(f.level)}>{f.msg}</div>)}
+        {/* Section 9 Gap 1 — rolling 30-day structuring banner.
+            Staff-only surface (do NOT mirror onto receipt or any
+            external integration; tipping-off concern). 'warn'
+            renders yellow; 'block' renders red and disables the
+            Next button until staff submits an Admin PIN + ≥20-char
+            written reason via the override modal. The override
+            persists on the tx record (structuringOverrideApplied
+            + structuringOverrideReason) for the audit trail. */}
+        {structuringLoading&&<div style={{...c.bnr("info"),marginBottom:8}}>Loading 30-day cash history…</div>}
+        {structuringError&&<div style={{...c.bnr("warn"),marginBottom:8}}>⚠ Structuring check failed: {structuringError}. Retry by re-entering the step, or proceed with caution and document the failure.</div>}
+        {structuringResult&&structuringResult.level==="warn"&&<div style={c.bnr("warn")}>
+          ⚠ {structuringResult.message}
+          {structuringFuzzy&&<div style={{fontSize:10,color:T.muted,marginTop:4}}>Lookup by name (no linked client record) — totals may include unrelated customers with similar names.</div>}
+        </div>}
+        {structuringResult&&structuringResult.level==="block"&&<div style={c.bnr("block")}>
+          🛑 {structuringResult.message}
+          {structuringFuzzy&&<div style={{fontSize:10,color:T.muted,marginTop:4}}>Lookup by name (no linked client record) — totals may include unrelated customers with similar names.</div>}
+          {!structuringOverrideApplied&&<div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+            <button style={c.btn(T.red,T.bg,{padding:"8px 14px",fontSize:12})} onClick={()=>{setStructOverrideOpen(true);setStructOverrideErr("");setStructOverridePin("");setStructOverrideReasonInput("");}}>Override (Admin PIN + reason)</button>
+          </div>}
+          {structuringOverrideApplied&&<div style={{...c.bnr("info"),marginTop:8,marginBottom:0}}>✓ Override recorded — proceed.</div>}
+        </div>}
         {/* Step 3 renders only the threshold-driven KYC fields. The
             ID-on-every-tx fields (name / idType / idNumber) are
             captured at step 4 — checked here just to drive the
@@ -580,7 +741,16 @@ export default function NewTx({
           <span style={{fontSize:10,color:T.muted}}>Never disclose to customer — tipping off is a criminal offence.</span>
         </div>
         <div style={{display:"flex",gap:10,marginTop:16}}>
-          <button style={c.btn(T.gold)} onClick={()=>setTxStep(4)}>Next: Payment →</button>
+          {(()=>{
+            const blocked=structuringResult&&structuringResult.level==="block"&&!structuringOverrideApplied;
+            return <button
+              style={c.btn(T.gold,undefined,{opacity:blocked?0.5:1,cursor:blocked?"not-allowed":"pointer"})}
+              disabled={!!blocked}
+              onClick={()=>{
+                if(blocked){pop("Structuring block — override required to continue.","warn");return;}
+                setTxStep(4);
+              }}>Next: Payment →</button>;
+          })()}
           <button style={c.bsm(T.redBg,T.red)} onClick={handleCancel}>Cancel</button>
           <button style={c.bsm()} onClick={()=>setTxStep(2)}>← Back</button>
         </div>
@@ -622,6 +792,25 @@ export default function NewTx({
             at the bottom of this step remains disabled until
             tfsReviewed flips true; the alert popup's Close button
             only hides the visual wall, not the gate. */}
+
+        {/* Section 9 Gap 2 — same-day linked-tx informational
+            banner. Non-blocking. Surfaces ALL of today's tx for
+            this customer (any payment method); staff opens the
+            modal to review individual tx detail before
+            continuing. Fuzzy-match note appears when the lookup
+            is by name fallback rather than linked clientId. */}
+        {linkedTxsToday.length>0&&<div style={{...c.bnr("warn"),marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:18}}>📋</span>
+          <div style={{flex:1,minWidth:200,lineHeight:1.4}}>
+            <div style={{fontWeight:"bold"}}>Earlier transaction{linkedTxsToday.length===1?"":"s"} today</div>
+            <div style={{fontSize:11,marginTop:2}}>
+              This customer has {linkedTxsToday.length} prior transaction{linkedTxsToday.length===1?"":"s"} today
+              {(()=>{const last=linkedTxsToday[0];if(!last)return "";const t=last.date?new Date(last.date):null;const tstr=t&&!isNaN(t)?t.toLocaleTimeString("en-AU",{hour:"2-digit",minute:"2-digit"}):null;const amt=fmtAUD(Math.max(sN(last.buyTotal),sN(last.sellTotal)));return ", last at "+(tstr||"—")+", "+amt;})()}.
+              {linkedTxFuzzy&&<span style={{color:T.muted,marginLeft:6}}>(fuzzy name match — verify it's the same customer)</span>}
+            </div>
+          </div>
+          <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setLinkedTxModalOpen(true)}>View →</button>
+        </div>}
 
         {clientStep==="search"&&<div style={c.card({padding:14,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>FIND OR CREATE CLIENT</div>
@@ -921,6 +1110,66 @@ export default function NewTx({
       onClose={()=>setTfsModalOpen(false)}
       onAllResolved={onTfsAllResolved}
     />}
+
+    {/* Section 9 Gap 2 — linked-tx detail modal. Opens via the
+        Client step's "View →" button when prior tx exist for this
+        customer today. Read-only summary; staff dismisses to
+        return to the Client step. No PIN, no block — informational
+        only, per spec ("staff just needs to know"). */}
+    {linkedTxModalOpen&&<Modal title={"Earlier transactions today — "+linkedTxsToday.length} onClose={()=>setLinkedTxModalOpen(false)}>
+      {linkedTxFuzzy&&<div style={{...c.bnr("warn"),marginBottom:12}}>⚠ Lookup by name — verify each row is the same customer before treating as linked.</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {linkedTxsToday.map((tx,i)=>{
+          const t=tx.date?new Date(tx.date):null;
+          const tstr=t&&!isNaN(t)?t.toLocaleTimeString("en-AU",{hour:"2-digit",minute:"2-digit"}):"—";
+          const buys=Array.isArray(tx.items)?tx.items.filter(it=>it.mode==="buy").length:0;
+          const sells=Array.isArray(tx.items)?tx.items.filter(it=>it.mode==="sell").length:0;
+          return <div key={tx.id||i} style={{...c.card({padding:12}),background:T.surface}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}>
+              <span style={{fontWeight:"bold",color:T.gold,fontSize:13}}>{sS(tx.id)||"—"}</span>
+              <span style={{fontSize:11,color:T.muted}}>{tstr}</span>
+            </div>
+            <div style={{fontSize:11,color:T.text}}>
+              {sN(tx.buyTotal)>0&&<span>Buy: <strong style={{color:T.green}}>{fmtAUD(tx.buyTotal)}</strong> · </span>}
+              {sN(tx.sellTotal)>0&&<span>Sell: <strong style={{color:T.gold}}>{fmtAUD(tx.sellTotal)}</strong> · </span>}
+              <span>Net: <strong>{fmtAUD(Math.abs(sN(tx.net)))}</strong></span>
+            </div>
+            <div style={{fontSize:10,color:T.muted,marginTop:4}}>{buys+sells} item{buys+sells===1?"":"s"} · {sS(tx.payment).toUpperCase()||"—"}</div>
+          </div>;
+        })}
+      </div>
+      <div style={{marginTop:12,display:"flex",justifyContent:"flex-end"}}>
+        <button style={c.bsm()} onClick={()=>setLinkedTxModalOpen(false)}>Close</button>
+      </div>
+    </Modal>}
+
+    {/* Section 9 Gap 1 — structuring override modal. Opens from
+        the Compliance step's red banner when level==="block".
+        Captures Admin PIN + ≥20-char written reason. On submit:
+        validates PIN against settings.staffPin and reason length,
+        sets the App-level structuringOverrideApplied flag (which
+        unlocks Next), persists the reason for the audit trail.
+        Tipping-off concern: staff-only surface, never customer-
+        visible. */}
+    {structOverrideOpen&&<Modal title="Structuring override — Admin PIN + reason" onClose={()=>setStructOverrideOpen(false)}>
+      <div style={{...c.bnr("block"),marginBottom:14}}>⚠ This customer's rolling 30-day cash total has reached the TTR threshold. By overriding, you confirm that you have considered whether this is structuring (split transactions to evade reporting) and have made an informed decision to proceed. The override is logged on the transaction and retained 7 years. If suspicions remain, file an SMR with AUSTRAC AFTER completing the transaction — never tip off the customer.</div>
+      <F label="Admin PIN" type="password" value={structOverridePin} onChange={setStructOverridePin}/>
+      <div style={{marginTop:10}}>
+        <label style={c.lbl}>Written reason (≥20 characters)</label>
+        <textarea
+          style={{...c.inp(),minHeight:80,fontFamily:T.ff,resize:"vertical"}}
+          value={structOverrideReasonInput}
+          onChange={e=>setStructOverrideReasonInput(e.target.value)}
+          placeholder="e.g. Long-standing commercial vendor with documented sourcing history; SMR not warranted on current evidence."
+        />
+        <div style={{fontSize:10,color:T.muted,marginTop:4}}>{String(structOverrideReasonInput||"").trim().length} / 20 characters</div>
+      </div>
+      {structOverrideErr&&<div style={{color:T.red,fontSize:12,marginTop:10}}>{structOverrideErr}</div>}
+      <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+        <button style={c.btn(T.red,T.bg)} onClick={submitStructOverride}>Submit override</button>
+        <button style={c.bsm()} onClick={()=>setStructOverrideOpen(false)}>Cancel</button>
+      </div>
+    </Modal>}
 
     {/* Print prompt — fires after Complete Transaction commits the
         tx via finalize(). Modal blocks dismissal via backdrop /

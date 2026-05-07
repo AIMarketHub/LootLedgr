@@ -80,6 +80,14 @@ export default function Loot(){
   const[tfsAllMatches,setTfsAllMatches]=useState([]);
   const[tfsOverrideApplied,setTfsOverrideApplied]=useState(false);
   const[tfsOverrideReason,setTfsOverrideReason]=useState("");
+  // Section 9 Gap 1 — structuring override state. Mirrors the TFS
+  // override pattern: NewTx Compliance step gates Next when the
+  // structuring evaluator returns level==="block"; staff resolves
+  // via Admin PIN + ≥20-char written reason; the override flag +
+  // reason persist on the tx record at finalize for the audit
+  // trail. Reset in resetTx alongside the other per-tx flags.
+  const[structuringOverrideApplied,setStructuringOverrideApplied]=useState(false);
+  const[structuringOverrideReason,setStructuringOverrideReason]=useState("");
   const[isHobbyProspector,setIsHobbyProspector]=useState(false);
   const[vicMinersRightNumber,setVicMinersRightNumber]=useState("");
   const[photo,setPhoto]=useState(null);
@@ -538,7 +546,7 @@ export default function Loot(){
     // record the flag when the tx contains at least one buy item.
     const hasBuy=(txItems||[]).some(i=>i.mode==="buy");
     const txIsHobby=!!isHobbyProspector&&hasBuy;
-    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,isHobbyProspector:txIsHobby,vicMinersRightNumber:txIsHobby?sS(vicMinersRightNumber||"").trim():"",tfsOverrideApplied:!!tfsOverrideApplied,tfsOverrideReason:tfsOverrideApplied?sS(tfsOverrideReason||""):"",deleteAfter:sevenYrsFrom(now)};
+    const tx={id:realInv,date:now,items:txItems,payment:txPay,buyTotal,sellTotal,net,client,clientId,staff,idSighted,photo:phData.idPhoto||null,itemPhotos:phData.itemPhotos||{},hasPhotos:hasPh,photoKey,kycDone:computedKycDone,flags:compliance.flags.map(f=>f.key),ttrRequired:ttrDecision.required,ttrStatus:ttrDecision.required?"PENDING":null,ttrEventCash:ttrDecision.eventCash,ttrPriorCashIn24h:priorCashIn24h,smrFlagged:!!staff.smrFlagged,isHobbyProspector:txIsHobby,vicMinersRightNumber:txIsHobby?sS(vicMinersRightNumber||"").trim():"",tfsOverrideApplied:!!tfsOverrideApplied,tfsOverrideReason:tfsOverrideApplied?sS(tfsOverrideReason||""):"",structuringOverrideApplied:!!structuringOverrideApplied,structuringOverrideReason:structuringOverrideApplied?sS(structuringOverrideReason||""):"",deleteAfter:sevenYrsFrom(now)};
     // TFS Commit 3 — audit-log LOW severity matches at finalize.
     // HIGH and MEDIUM matches are logged at staff-decision time
     // (block / override). LOW results were never surfaced in the
@@ -678,7 +686,7 @@ export default function Loot(){
       pop("Incorrect PIN","err");
     }
   };
-  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");setIsHobbyProspector(false);setVicMinersRightNumber("");setTfsAllMatches([]);setTfsOverrideApplied(false);setTfsOverrideReason("");};
+  const resetTx=()=>{setTxItems([]);setTxStep(1);setTxPay("cash");setClient({});setSelectedClientId(null);setClientStep("search");setStaff({});setKycDone(false);setPrivAck(false);setIdSighted(false);setPhoto(null);setItemPhotos({});setTxNo(peekInv());setAddQty("");setAddCustom("");setAddNote("");setIsHobbyProspector(false);setVicMinersRightNumber("");setTfsAllMatches([]);setTfsOverrideApplied(false);setTfsOverrideReason("");setStructuringOverrideApplied(false);setStructuringOverrideReason("");};
 
   // TFS Commit 3 — staff-decision handlers. Both write a row into
   // tfs_screen_log with the customer info captured at decision
@@ -881,6 +889,10 @@ export default function Loot(){
             vicMinersRightNumber={vicMinersRightNumber} setVicMinersRightNumber={setVicMinersRightNumber}
             tfsCachedList={tfsCachedList} setTfsAllMatches={setTfsAllMatches}
             recordTfsBlock={recordTfsBlock} recordTfsOverride={recordTfsOverride}
+            structuringOverrideApplied={structuringOverrideApplied}
+            setStructuringOverrideApplied={setStructuringOverrideApplied}
+            structuringOverrideReason={structuringOverrideReason}
+            setStructuringOverrideReason={setStructuringOverrideReason}
           />}
 
           {screen==="stock"&&<Stock

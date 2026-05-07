@@ -42,6 +42,20 @@ export function isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled}){
   const cur=+currentCashAmount||0,prior=+priorCashIn24h||0;
   return{required:(ttrEnabled!==false)&&cur>0&&(cur+prior)>=THRESH.CASH_TTR,eventCash:cur+prior,priorCashIn24h:prior,currentCashAmount:cur};
 }
+// Fake structuring — mirrors au.js evaluateStructuring shape with
+// the same thresholds and message format. Phase 2 step 3b region-
+// parity rule: TEST exports match AU exports so swapping regions
+// at runtime doesn't surface a `cannot read property of undefined`
+// at any call site.
+export function evaluateStructuring({currentCashAmount,priorCash30d,threshold}={}){
+  const cur=+currentCashAmount||0,prior=+priorCash30d||0;
+  const total=cur+prior;
+  const t=+threshold||THRESH.CASH_TTR;
+  let level="ok";
+  if(total>=t)level="block";
+  else if(total>=t*0.8)level="warn";
+  return{level,total,pct:t>0?(total/t)*100:0,threshold:t,priorCash30d:prior,currentCashAmount:cur,message:level==="ok"?null:"TEST region structuring "+level+" — total $"+total};
+}
 
 // Fake required-fields list. Phase 2.7 follow-up (2026-04-29)
 // honours settings.requireIdOnEveryTx for parity with the real
@@ -85,6 +99,7 @@ const region={
   checkCompliance,
   cashAmountFromTx,
   isTtrRequired,
+  evaluateStructuring,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,

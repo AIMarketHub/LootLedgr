@@ -157,6 +157,33 @@ const ON_CONFLICT={
 };
 const upsSB=(tbl,body)=>sbFetch(tbl+"?on_conflict="+(ON_CONFLICT[tbl]||"id"),{method:"POST",prefer:"resolution=merge-duplicates",body:JSON.stringify(body)});
 
+// === Section 9 C2 — shared helpers for the Gap 1/2 loaders =================
+
+// Sum tx.buyTotal across a list of cash transactions. Used by
+// loadCashTotal24h and loadCash30dByClient/Name to convert the
+// raw row array from _loadTxFiltered into the scalar total the
+// compliance evaluators want. Defensive against rows that
+// somehow lack buyTotal (older shapes / partial writes).
+const sumBuyTotalCash=rows=>(rows||[]).reduce((s,d)=>{
+  if(!d)return s;
+  const v=Number(d.buyTotal);
+  return s+(isFinite(v)?v:0);
+},0);
+
+// 30 days ago in ISO. Used by the Gap 1 loaders.
+const thirtyDaysAgoISO=()=>new Date(Date.now()-30*24*3600*1000).toISOString();
+
+// Start of today (local time) in ISO. Used by the Gap 2 loaders.
+// Local-time floor: a transaction at 00:30 today is "today"; one
+// at 23:59 yesterday is not. Date stamps stored on tx records
+// are ISO with explicit timezone offset, so the gte comparison
+// is correct regardless of viewer timezone.
+const startOfTodayISO=()=>{
+  const d=new Date();
+  d.setHours(0,0,0,0);
+  return d.toISOString();
+};
+
 export const sb={
   saveTx:async tx=>{const sid=getCurrentShopId();return upsSB("transactions",{id:tx.id,shop_id:sid,data:tx,updated_at:ts()});},
   loadTxList:async()=>{const sid=getCurrentShopId();const r=await sbFetch("transactions?shop_id=eq."+encodeURIComponent(sid)+"&order=updated_at.desc&limit=500");return r&&!r.__sbError&&!r.__sbOk?(Array.isArray(r)?r.map(x=>x.data):null):null;},
@@ -177,22 +204,79 @@ export const sb={
   // bonus → the synchronous TTR check stands as the floor.
   loadCashTotal24h:async(clientId)=>{
     if(!clientId)return 0;
+    const rows=await sb._loadTxFiltered({clientId,sinceISO:new Date(Date.now()-24*3600*1000).toISOString(),payment:"cash"});
+    return sumBuyTotalCash(rows);
+  },
+  // Section 9 C2 — shared low-level transaction filter.
+  // Used by:
+  //   • loadCashTotal24h           (TTR aggregation, Stage 1.C)
+  //   • loadCash30dByClient/Name   (Gap 1, structuring)
+  //   • loadTodayTxByClient/Name   (Gap 2, linked-tx banner)
+  // shop_id scoping is enforced server-side by RLS plus a belt-
+  // and-braces eq filter here. Pass clientId XOR fullName — when
+  // clientId is set, takes precedence; fullName is the manual-
+  // entry fallback (case-insensitive substring) for txs the
+  // dealer hasn't yet linked to a client record. Both are best-
+  // effort: failure modes return [] so callers degrade cleanly.
+  _loadTxFiltered:async({clientId,fullName,sinceISO,payment,limit=200}={})=>{
     const sid=getCurrentShopId();
-    const since=new Date(Date.now()-24*3600*1000).toISOString();
-    const path="transactions"
-      +"?shop_id=eq."+encodeURIComponent(sid)
-      +"&data->>clientId=eq."+encodeURIComponent(clientId)
-      +"&data->>payment=eq.cash"
-      +"&data->>date=gte."+encodeURIComponent(since)
-      +"&select=data";
+    let path="transactions?shop_id=eq."+encodeURIComponent(sid)+"&select=data";
+    if(clientId){
+      path+="&data->>clientId=eq."+encodeURIComponent(clientId);
+    }else if(fullName){
+      // PostgREST nested path: data->client->>fullName accesses the
+      // text value of tx.data.client.fullName. ilike pattern with
+      // wildcards (* maps to %) gives case-insensitive substring.
+      const q=String(fullName).trim();
+      if(!q)return[];
+      path+="&data->client->>fullName=ilike."+encodeURIComponent("*"+q+"*");
+    }else{
+      // No identifier → no rows. Forces the caller to provide one;
+      // returning ALL shop tx by date alone would be wrong.
+      return[];
+    }
+    if(payment)path+="&data->>payment=eq."+encodeURIComponent(payment);
+    if(sinceISO)path+="&data->>date=gte."+encodeURIComponent(sinceISO);
+    path+="&order=data->>date.desc&limit="+encodeURIComponent(limit);
     const r=await sbFetch(path);
-    if(!r||r.__sbError||r.__sbOk||!Array.isArray(r))return 0;
-    return r.reduce((s,row)=>{
-      const d=row&&row.data;
-      if(!d)return s;
-      const v=Number(d.buyTotal);
-      return s+(isFinite(v)?v:0);
-    },0);
+    if(!r||r.__sbError||r.__sbOk||!Array.isArray(r))return[];
+    return r.map(row=>row&&row.data).filter(Boolean);
+  },
+  // Section 9 Gap 1 — Rolling 30-day cash structuring detection.
+  // Sums tx.buyTotal across same-client cash transactions in the
+  // last 30 days. Uses clientId when available (precise); falls
+  // back to a substring match on tx.client.fullName when staff
+  // hasn't linked the in-progress tx to a persisted client yet.
+  // The fallback is intentionally fuzzy — for a safety check we
+  // accept false positives (over-warn) but not false negatives.
+  // Returns 0 on no identifier or on failure (defensive).
+  loadCash30dByClient:async(clientId)=>{
+    if(!clientId)return 0;
+    const rows=await sb._loadTxFiltered({clientId,sinceISO:thirtyDaysAgoISO(),payment:"cash"});
+    return sumBuyTotalCash(rows);
+  },
+  loadCash30dByName:async(fullName)=>{
+    const q=String(fullName||"").trim();
+    if(!q)return 0;
+    const rows=await sb._loadTxFiltered({fullName:q,sinceISO:thirtyDaysAgoISO(),payment:"cash"});
+    return sumBuyTotalCash(rows);
+  },
+  // Section 9 Gap 2 — Same-client same-day linked-tx detection.
+  // Returns the array of today's transactions for the given client
+  // (newest first). Today = 00:00 local-time today; the date
+  // stamps stored on tx records are ISO timestamps so the gte
+  // comparison is correct in UTC too. Caller renders the banner +
+  // detail modal. No payment filter — staff want to see ALL prior
+  // tx today regardless of method. Same fallback semantics as the
+  // 30-day structuring loader.
+  loadTodayTxByClient:async(clientId)=>{
+    if(!clientId)return[];
+    return await sb._loadTxFiltered({clientId,sinceISO:startOfTodayISO()});
+  },
+  loadTodayTxByName:async(fullName)=>{
+    const q=String(fullName||"").trim();
+    if(!q)return[];
+    return await sb._loadTxFiltered({fullName:q,sinceISO:startOfTodayISO()});
   },
   // TFS screening audit log. Inserts a row into tfs_screen_log per
   // staff decision (block / override) plus the LOW-severity audit

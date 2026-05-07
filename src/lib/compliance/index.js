@@ -42,6 +42,7 @@ export const PRIVACY_NOTICE=_active.PRIVACY_NOTICE;
 export const checkCompliance=_active.checkCompliance;
 export const cashAmountFromTx=_active.cashAmountFromTx;
 export const isTtrRequired=_active.isTtrRequired;
+export const evaluateStructuring=_active.evaluateStructuring;
 export const getRequiredFields=_active.getRequiredFields;
 export const calcUnitPrice=_active.calcUnitPrice;
 export const calcMeltFn=_active.calcMeltFn;

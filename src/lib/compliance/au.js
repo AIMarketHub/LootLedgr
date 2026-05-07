@@ -237,6 +237,62 @@ export function isTtrRequired({currentCashAmount,priorCashIn24h,ttrEnabled}){
   return{required,eventCash,priorCashIn24h:prior,currentCashAmount:cur};
 }
 
+// Section 9 Gap 1 — Rolling 30-day structuring evaluator.
+// Pure decision function. The 30-day cash sum is loaded async by
+// the caller via sb.loadCash30dByClient (or loadCash30dByName for
+// the manual-entry fallback) — see src/lib/storage.js. The
+// current-tx cash amount is derived from cashAmountFromTx() the
+// same way isTtrRequired does it.
+//
+// Three levels:
+//   - 'ok'    : total < 80 % of threshold. No banner.
+//   - 'warn'  : total in [80 %, 100 %). Yellow banner; staff alert.
+//   - 'block' : total >= 100 %. Red banner; PIN + reason override.
+//
+// `threshold` defaults to THRESH.CASH_TTR ($10,000 AUD) — the same
+// AUSTRAC threshold that triggers a TTR. The structuring rule and
+// the TTR rule are distinct (TTR is statutory; structuring
+// detection is the dealer's behavioural-pattern obligation under
+// the AML/CTF Act monitoring requirements), but the dollar value
+// is the same line.
+//
+// Messages are written for STAFF VISIBILITY ONLY — never surface
+// in customer-facing artifacts (receipt / Square / Shopify /
+// generic webhook). Tipping-off concern: same as SMR. The s.123
+// AML/CTF Act offence prohibits disclosing to a customer that an
+// SMR has been or may be filed; describing the structuring flag
+// to a customer would similarly disclose the suspicion. Keep on
+// staff screens (NewTx Compliance step banner + Settings audit
+// log surface, both staff-only).
+//
+// Caveats inherited from cashAmountFromTx and the 24-hour pattern:
+//   - Single-method tx model: 100 % of buyTotal counts as the
+//     payment method when payment === "cash".
+//   - Sell-side cash payouts (dealer paying customer cash for
+//     items the customer brought in) DO produce a non-zero
+//     currentCashAmount (buyTotal > 0 from dealer's perspective).
+//     Cash sales (dealer selling FROM stock for cash) currently
+//     don't, because the existing model uses buyTotal not
+//     sellTotal in cashAmountFromTx. This mirrors the existing
+//     TTR behaviour — known limitation, document in s5.
+export function evaluateStructuring({currentCashAmount,priorCash30d,threshold}={}){
+  const cur=sN(currentCashAmount);
+  const prior=sN(priorCash30d);
+  const total=cur+prior;
+  const t=sN(threshold)||THRESH.CASH_TTR;
+  const pct=t>0?(total/t)*100:0;
+  let level="ok";
+  if(total>=t)level="block";
+  else if(total>=t*0.8)level="warn";
+  let message=null;
+  if(level==="warn"){
+    message="STRUCTURING WARN — rolling 30-day cash total is $"+fmt2(total)+" ("+pct.toFixed(0)+"% of TTR threshold $"+fmt2(t)+"). Consider whether enhanced CDD or an SMR is warranted before continuing.";
+  }else if(level==="block"){
+    message="STRUCTURING BLOCK — rolling 30-day cash total is $"+fmt2(total)+" (≥ TTR threshold $"+fmt2(t)+"). Admin PIN + written reason required to continue. If pattern indicators are present, file an SMR with AUSTRAC.";
+  }
+  return{level,total,pct,threshold:t,priorCash30d:prior,currentCashAmount:cur,message};
+}
+
 export function checkCompliance(items,payment,ttrEnabled=true,cashHardBlockAbove=null){
   const isCash=payment==="cash";
   const buys=(items||[]).filter(i=>i.mode==="buy");
@@ -445,6 +501,7 @@ const region={
   checkCompliance,
   cashAmountFromTx,
   isTtrRequired,
+  evaluateStructuring,
   getRequiredFields,
   calcUnitPrice,
   calcMeltFn,
