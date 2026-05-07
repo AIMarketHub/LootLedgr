@@ -160,6 +160,19 @@ export default function Loot(){
   const fileRef=useRef();
   const sbSettingsTimer=useRef(null);
   const prevStockRef=useRef([]);
+  // Persist-on-mount race guard (fix landed 2026-05-07 after the
+  // catalog wipe incident). Persist effects (sb.save*) early-return
+  // until this ref flips true — that happens at the END of the
+  // boot useEffect's loadAll(), after sb.load* has had its chance
+  // to populate state. Without the gate, the first persist effect
+  // ran with the EMPTY initial state (state initializers default
+  // to [] / DEFAULT_SETTINGS when localStorage is empty) and
+  // wholesale-replaced the Supabase row before sb.loadCatalog()
+  // / sb.loadSettings() could resolve. saveTx and saveStock are
+  // per-row upserts and so naturally safe, but the gate now
+  // applies uniformly — same shape, cheaper boot (no redundant
+  // re-write of just-loaded data back to Supabase).
+  const bootCompleteRef=useRef(false);
   const[spotStatus,setSpotStatus]=useState("off");
   const[spotSource,setSpotSource]=useState("");
   const manualTs=useRef(0); // manual override resets on reload — API always tries fresh
@@ -201,7 +214,18 @@ export default function Loot(){
     el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
   useEffect(()=>{const sc=fontSize/14,w=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;const root=document.getElementById("root");if(root){root.style.zoom=sc;root.style.fontWeight=w;}const el=document.getElementById("gf-fontscale")||document.createElement("style");el.id="gf-fontscale";if(!el.parentNode)document.head.appendChild(el);el.textContent="#root,#root *{font-weight:"+w+" !important}#root strong,#root b{font-weight:"+Math.min(w+200,900)+" !important}";},[fontSize]);
-  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{setSettingsHydrated(true);}})();},[]);
+  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{
+    // Open the persist-write gate. Order matters — must come AFTER
+    // the if(cat&&cat.length)setCatalog(cat) above so that a fresh
+    // browser (localStorage empty, Supabase has data) doesn't write
+    // [] to Supabase between the gate-open and the React state
+    // commit. React batches the setState calls scheduled above
+    // before the first post-boot render, so by the time any
+    // persist effect fires the catalog state already reflects the
+    // loaded data.
+    bootCompleteRef.current=true;
+    setSettingsHydrated(true);
+  }})();},[]);
   // TFS Commit 3 — boot the sanctions screening cache. Two-phase:
   //   1. Read whatever's already in IndexedDB (instant; lets the
   //      Client step screen the customer without waiting for the
@@ -253,10 +277,51 @@ export default function Loot(){
       return r;
     }).catch(e=>{console.warn("[supabase] "+name+" threw:",e&&e.message);return null;});
   };
-  useEffect(()=>{store.set("catalog",catalog);sbWarn("saveCatalog",sb.saveCatalog(catalog));},[catalog]);
-  useEffect(()=>{store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));if(txList.length)sbWarn("saveTx",sb.saveTx(txList[0]));},[txList]);
-  useEffect(()=>{store.set("stock",stock);const prev=prevStockRef.current,curr=new Set((stock||[]).map(s=>s.id));prev.forEach(s=>{if(!curr.has(s.id))sbWarn("deleteStock",sb.deleteStock(s.id));});(stock||[]).forEach(s=>{const o=prev.find(p=>p.id===s.id);if(!o||JSON.stringify(o)!==JSON.stringify(s))sbWarn("saveStock",sb.saveStock(s));});prevStockRef.current=stock;},[stock]);
-  useEffect(()=>{store.set("settings",settings);if(sbSettingsTimer.current)clearTimeout(sbSettingsTimer.current);sbSettingsTimer.current=setTimeout(()=>sbWarn("saveSettings",sb.saveSettings(settings)),2000);},[settings]);
+  // Persist effects — localStorage write stays eager (local-only,
+  // can never harm cloud data); Supabase write is gated on
+  // bootCompleteRef so the empty initial state doesn't clobber a
+  // populated cloud row before sb.load* resolves. See the comment
+  // on bootCompleteRef above for the failure mode this prevents.
+  useEffect(()=>{
+    store.set("catalog",catalog);
+    if(!bootCompleteRef.current)return;
+    // Defensive breadcrumb — the bootComplete gate should make this
+    // path unreachable while empty, but if it ever fires we want
+    // to know. A genuine "user deleted every product via the UI"
+    // is rare but legitimate; the warning is diagnostic, not a
+    // block.
+    if(!Array.isArray(catalog)||catalog.length===0){
+      // eslint-disable-next-line no-console
+      console.warn("[saveCatalog] writing empty catalog to Supabase. If unintentional, this is a bug.");
+    }
+    sbWarn("saveCatalog",sb.saveCatalog(catalog));
+  },[catalog]);
+  useEffect(()=>{
+    store.set("txList",txList.map(t=>({...t,photo:null,itemPhotos:{}})));
+    if(!bootCompleteRef.current)return;
+    if(txList.length)sbWarn("saveTx",sb.saveTx(txList[0]));
+  },[txList]);
+  useEffect(()=>{
+    store.set("stock",stock);
+    if(!bootCompleteRef.current){
+      // Seed prevStockRef with the current stock so the first post-
+      // boot effect run diffs against the just-loaded state, not
+      // against the initial empty array — avoids a redundant
+      // saveStock fan-out for every Supabase-loaded item.
+      prevStockRef.current=stock;
+      return;
+    }
+    const prev=prevStockRef.current,curr=new Set((stock||[]).map(s=>s.id));
+    prev.forEach(s=>{if(!curr.has(s.id))sbWarn("deleteStock",sb.deleteStock(s.id));});
+    (stock||[]).forEach(s=>{const o=prev.find(p=>p.id===s.id);if(!o||JSON.stringify(o)!==JSON.stringify(s))sbWarn("saveStock",sb.saveStock(s));});
+    prevStockRef.current=stock;
+  },[stock]);
+  useEffect(()=>{
+    store.set("settings",settings);
+    if(!bootCompleteRef.current)return;
+    if(sbSettingsTimer.current)clearTimeout(sbSettingsTimer.current);
+    sbSettingsTimer.current=setTimeout(()=>sbWarn("saveSettings",sb.saveSettings(settings)),2000);
+  },[settings]);
   useEffect(()=>store.set("vendors",vendors),[vendors]);
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
   useEffect(()=>{if(logoLib.length===0&&SEED_LOGO){setLogoLib([{id:"default-logo",data:SEED_LOGO,isLogo:true}]);setSettings(p=>p.logoImg?p:{...p,logoImg:SEED_LOGO});}},[]);
