@@ -9,6 +9,7 @@ import React,{useState} from "react";
 import {T,c} from "../theme.js";
 import {Modal} from "../components/ui";
 import {sS,nowISO} from "../lib/utils.js";
+import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META} from "../lib/legal/privacyPolicyDefaults.js";
 
 function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}}
@@ -56,7 +57,7 @@ export default function PrivacyPolicyHistory({settings,setSettings,activeStaff,p
       ...p,
       privacyPolicy:{
         ...(p.privacyPolicy||{currentVersion:null,versions:[]}),
-        draft:{data:v.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+        draft:{data:v.data||{},savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()},
       },
     }));
     pop&&pop("Restored v"+v.version+" as new draft. Open the form to edit.","ok");

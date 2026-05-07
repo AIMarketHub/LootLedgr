@@ -29,6 +29,7 @@
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
+import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 
 // Date+time formatter used by the AML/CTF Program status card and
 // version history. fmtDate from utils renders "DD/MM/YY HH:MM";
@@ -441,7 +442,7 @@ export default function Settings({
               ...p,
               amlProgram:{
                 ...(p.amlProgram||{currentVersion:null,versions:[]}),
-                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()},
               },
             }));
             setShowAmlForm(true);
@@ -568,7 +569,7 @@ export default function Settings({
               ...p,
               privacyPolicy:{
                 ...(p.privacyPolicy||{currentVersion:null,versions:[]}),
-                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()},
               },
             }));
             setShowPrivacyForm(true);
@@ -660,7 +661,7 @@ export default function Settings({
               ...p,
               termsOfService:{
                 ...(p.termsOfService||{currentVersion:null,versions:[]}),
-                draft:{data:current.data||{},savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")},
+                draft:{data:current.data||{},savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()},
               },
             }));
             setShowTosForm(true);

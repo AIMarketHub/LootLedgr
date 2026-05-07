@@ -3,7 +3,7 @@
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
 import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
-import {store,sb,checkPhotoSize,initTxList} from "./lib/storage.js";
+import {store,sb,checkPhotoSize,initTxList,getCurrentUserLabel} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
@@ -593,7 +593,7 @@ export default function Loot(){
           confirmed_match:null,
           override_applied:false,
           override_reason:null,
-          staff:sS(activeStaff||"Unknown"),
+          staff:getCurrentUserLabel(),
         });
       }
     }catch(_){/* non-fatal — audit gap surfaced via staleness check */}
@@ -757,7 +757,7 @@ export default function Loot(){
         confirmed_match:true,
         override_applied:false,
         override_reason:null,
-        staff:sS(activeStaff||"Unknown"),
+        staff:getCurrentUserLabel(),
       });
     }catch(_){/* logging failure is non-fatal — refusal still proceeds */}
     pop("Transaction refused per TFS sanctions match.","warn");
@@ -778,7 +778,7 @@ export default function Loot(){
         confirmed_match:false,
         override_applied:true,
         override_reason:sS(reason)||null,
-        staff:sS(activeStaff||"Unknown"),
+        staff:getCurrentUserLabel(),
       });
     }catch(_){/* logging failure is non-fatal — staff already authenticated */}
     setTfsOverrideApplied(true);

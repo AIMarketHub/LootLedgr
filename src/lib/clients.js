@@ -24,7 +24,7 @@
 // modal. Cancel returns to the form; Proceed saves the partial.
 // This module supplies the predicate; the modal lives in the UI.
 
-import {sbFetch,getCurrentShopId} from "./storage.js";
+import {sbFetch,getCurrentShopId,getCurrentUserId} from "./storage.js";
 import {fmtDate} from "./utils.js";
 
 const ts=()=>new Date().toISOString();
@@ -160,7 +160,7 @@ export const clients={
     const r=await sbFetch(`clients`,{
       method:"POST",
       prefer:"return=representation",
-      body:JSON.stringify({shop_id:getCurrentShopId(),data,updated_at:ts()}),
+      body:JSON.stringify({shop_id:getCurrentShopId(),data,updated_at:ts(),created_by:getCurrentUserId()}),
     });
     return r&&r[0]?unwrap(r[0]):null;
   },

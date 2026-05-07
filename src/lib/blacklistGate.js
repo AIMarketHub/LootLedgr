@@ -37,6 +37,7 @@
 
 import {sS} from "./utils.js";
 import {recordBlacklistOverride} from "./clients.js";
+import {getCurrentUserId,getCurrentUserLabel} from "./storage.js";
 
 export function requireBlacklistOverride({client,callbacks,onApproved}){
   if(!client||!client.blacklisted){
@@ -53,9 +54,17 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
     reason:"⛔ BLACKLISTED CLIENT — Admin PIN required to proceed.\n\nClient: "+sS(client.fullName||"(no name)"),
     cb:async()=>{
       try{
+        // Phase 3 commit 3d-2 — staffId is the freetext display
+        // label (kept for ClientDetail history-render backward
+        // compat); staffActor is the auth.uid() for the new
+        // audit_log layer that 3d-3 wires up. activeStaff is the
+        // pre-Phase-3 selector value, retained as a fallback for
+        // sessions that haven't completed the auth identity swap.
+        const lbl=getCurrentUserLabel();
         await recordBlacklistOverride(client.id,{
           timestamp:new Date().toISOString(),
-          staffId:sS(activeStaff||""),
+          staffId:lbl!=="Unknown"?lbl:sS(activeStaff||""),
+          staffActor:getCurrentUserId(),
           reason:"Override approved via PIN",
         });
       }catch(e){

@@ -22,6 +22,7 @@ import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
 import {sS,nowISO} from "../lib/utils.js";
+import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META,buildDefaults,nextVersion} from "../lib/legal/privacyPolicyDefaults.js";
 
 // Renders a single field by key. Reads from the form-data map and
@@ -73,7 +74,7 @@ export default function PrivacyPolicyForm({settings,setSettings,activeStaff,pop,
   const onSaveDraft=async()=>{
     setSavingDraft(true);
     try{
-      const draft={data,savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")};
+      const draft={data,savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()};
       setSettings(p=>({...p,privacyPolicy:{...(p.privacyPolicy||{currentVersion:null,versions:[]}),draft}}));
       setSeed(data);
       pop&&pop("Draft saved.","ok");
@@ -98,7 +99,8 @@ export default function PrivacyPolicyForm({settings,setSettings,activeStaff,pop,
       const entry={
         version:newVersion,
         savedAt:nowIso,
-        savedBy:sS(activeStaff||"Unknown"),
+        savedBy:getCurrentUserLabel(),
+        savedByActor:getCurrentUserId(),
         approvedAt:nowIso,
         approvedBy:approverName.trim(),
         data:finalData,

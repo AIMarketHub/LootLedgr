@@ -75,6 +75,26 @@ export function getCurrentShopId(){
   return SHOP_ID;
 }
 
+// Phase 3 commit 3d-2 — auth user identity cache. Mirrors the
+// shop_id cache above. Set by AuthProvider on every refresh of
+// the auth context. Two values: the auth.uid() (uuid string,
+// goes into created_by / last_updated_by columns) and a display
+// label (first+family or email fallback, goes into freetext
+// audit fields like tfs_screen_log.staff and clients.archivedBy).
+//
+// getCurrentUserId returns null pre-auth — the 3a/3c RLS policies
+// permit NULL as the legacy escape, so a pre-auth race won't fail
+// closed but also won't carry actor identity. RequireAuth blocks
+// most paths that would reach sb.* before the cache is set.
+let _cachedUserId=null;
+let _cachedUserLabel=null;
+export function setCurrentUserId(id,label){
+  _cachedUserId=id?String(id):null;
+  _cachedUserLabel=label?String(label):null;
+}
+export function getCurrentUserId(){return _cachedUserId;}
+export function getCurrentUserLabel(){return _cachedUserLabel||"Unknown";}
+
 export const store={
   get:(k,d)=>{try{const v=localStorage.getItem("gf_"+k);return v!=null?JSON.parse(v):d;}catch(_){return d;}},
   set:(k,v)=>{try{localStorage.setItem("gf_"+k,JSON.stringify(v));}catch(_){}},
@@ -185,13 +205,13 @@ const startOfTodayISO=()=>{
 };
 
 export const sb={
-  saveTx:async tx=>{const sid=getCurrentShopId();return upsSB("transactions",{id:tx.id,shop_id:sid,data:tx,updated_at:ts()});},
+  saveTx:async tx=>{const sid=getCurrentShopId();return upsSB("transactions",{id:tx.id,shop_id:sid,data:tx,updated_at:ts(),created_by:getCurrentUserId()});},
   loadTxList:async()=>{const sid=getCurrentShopId();const r=await sbFetch("transactions?shop_id=eq."+encodeURIComponent(sid)+"&order=updated_at.desc&limit=500");return r&&!r.__sbError&&!r.__sbOk?(Array.isArray(r)?r.map(x=>x.data):null):null;},
   deleteTx:async id=>sbFetch("transactions?id=eq."+encodeURIComponent(id)+"&shop_id=eq."+encodeURIComponent(getCurrentShopId()),{method:"DELETE"}),
-  saveStock:async item=>{const sid=getCurrentShopId();return upsSB("stock",{id:item.id,shop_id:sid,data:item,updated_at:ts()});},
+  saveStock:async item=>{const sid=getCurrentShopId();return upsSB("stock",{id:item.id,shop_id:sid,data:item,updated_at:ts(),created_by:getCurrentUserId()});},
   loadStock:async()=>{const sid=getCurrentShopId();const r=await sbFetch("stock?shop_id=eq."+encodeURIComponent(sid)+"&order=updated_at.desc&limit=2000");return r&&!r.__sbError&&!r.__sbOk?(Array.isArray(r)?r.map(x=>x.data):null):null;},
   deleteStock:async id=>sbFetch("stock?id=eq."+encodeURIComponent(id)+"&shop_id=eq."+encodeURIComponent(getCurrentShopId()),{method:"DELETE"}),
-  saveSettings:async s=>{const sid=getCurrentShopId();return upsSB("settings",{shop_id:sid,data:s,updated_at:ts()});},
+  saveSettings:async s=>{const sid=getCurrentShopId();return upsSB("settings",{shop_id:sid,data:s,updated_at:ts(),last_updated_by:getCurrentUserId()});},
   loadSettings:async()=>{const sid=getCurrentShopId();const r=await sbFetch("settings?shop_id=eq."+encodeURIComponent(sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
   saveCatalog:async cat=>{const sid=getCurrentShopId();return upsSB("catalog",{id:"catalog_"+sid,shop_id:sid,data:cat,updated_at:ts()});},
   loadCatalog:async()=>{const sid=getCurrentShopId();const r=await sbFetch("catalog?id=eq."+encodeURIComponent("catalog_"+sid)+"&limit=1");return r&&!r.__sbError&&!r.__sbOk&&Array.isArray(r)&&r[0]?r[0].data:null;},
@@ -293,6 +313,7 @@ export const sb={
       shop_id:sid,
       created_at:now.toISOString(),
       delete_after:deleteAfter,
+      created_by:getCurrentUserId(),
       ...(payload||{}),
     };
     return sbFetch("tfs_screen_log",{method:"POST",body:JSON.stringify(row)});

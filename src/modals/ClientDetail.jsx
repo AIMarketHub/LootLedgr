@@ -29,7 +29,7 @@ import {T,c} from "../theme.js";
 import {Modal,F,SF} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
 import {sN,sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
-import {checkPhotoSize} from "../lib/storage.js";
+import {checkPhotoSize,getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {clients,getMissingMandatoryFields,formatLastVisit} from "../lib/clients.js";
 
 function ReadField({label,value}){
@@ -114,7 +114,8 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
       const updated=await clients.update(client.id,{
         archived:true,
         archivedAt:nowISO(),
-        archivedBy:sS(activeStaff||"")||null,
+        archivedBy:getCurrentUserLabel()||sS(activeStaff||"")||null,
+        archivedByActor:getCurrentUserId(),
       });
       if(updated){
         onSave&&onSave(updated);
@@ -214,10 +215,15 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
   // adds blacklistClearedAt / blacklistClearedBy alongside.
   const applyBlacklistChange=async next=>{
     const now=nowISO();
-    const staff=sS(activeStaff||"Unknown");
+    // Phase 3 commit 3d-2 — display label from auth identity;
+    // legacy activeStaff is the fallback when the auth context
+    // hasn't resolved (e.g. a pre-auth race). The actor uuid
+    // companion lands alongside for the new audit layer.
+    const staff=getCurrentUserLabel()!=="Unknown"?getCurrentUserLabel():sS(activeStaff||"Unknown");
+    const actor=getCurrentUserId();
     const patch=next
-      ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistReason:client.blacklistReason||""}
-      :{blacklisted:false,blacklistClearedAt:now,blacklistClearedBy:staff};
+      ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistedByActor:actor,blacklistReason:client.blacklistReason||""}
+      :{blacklisted:false,blacklistClearedAt:now,blacklistClearedBy:staff,blacklistClearedByActor:actor};
     setBusy(true);
     try{
       const updated=await clients.update(client.id,patch);

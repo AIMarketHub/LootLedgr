@@ -20,7 +20,7 @@
 
 import React,{createContext,useContext,useEffect,useState,useCallback,useRef} from "react";
 import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isLockedOut} from "../lib/auth/saas.js";
-import {setCurrentShopId} from "../lib/storage.js";
+import {setCurrentShopId,setCurrentUserId} from "../lib/storage.js";
 
 const AuthCtx=createContext({
   user:null,userRecord:null,shop:null,role:null,
@@ -47,6 +47,7 @@ export function AuthProvider({children}){
     if(!user){
       hadUserRef.current=false;
       setCurrentShopId(null);
+      setCurrentUserId(null,null);
       setState({user:null,userRecord:null,shop:null,role:null,admin:false,locked:false,loading:false});
       return;
     }
@@ -61,6 +62,18 @@ export function AuthProvider({children}){
     // can read it synchronously from this point on. Cleared above
     // when the user signs out.
     setCurrentShopId(shop&&shop.id||null);
+    // Phase 3 commit 3d-2 — cache the auth user id + display label
+    // so storage.js can stamp created_by / last_updated_by on every
+    // sb.* write and modal-level audit fields can read a stable
+    // freetext label. Display label fallback chain:
+    //   first_name + family_name → email → "Unknown"
+    setCurrentUserId(
+      user&&user.id||null,
+      ((userRecord&&userRecord.first_name||"")+" "+(userRecord&&userRecord.family_name||"")).trim()
+        ||(userRecord&&userRecord.email)
+        ||(user&&user.email)
+        ||null
+    );
     setState({
       user,
       userRecord,

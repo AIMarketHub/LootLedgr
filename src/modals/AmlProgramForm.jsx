@@ -28,6 +28,7 @@ import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F,SF} from "../components/ui";
 import {sS,nowISO} from "../lib/utils.js";
+import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META,buildDefaults,nextVersion} from "../lib/amlProgram/defaults.js";
 
 function todayPlus3YearsISODate(){
@@ -153,7 +154,7 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
   const onSaveDraft=async()=>{
     setSavingDraft(true);
     try{
-      const draft={data,savedAt:nowISO(),savedBy:sS(activeStaff||"Unknown")};
+      const draft={data,savedAt:nowISO(),savedBy:getCurrentUserLabel(),savedByActor:getCurrentUserId()};
       setSettings(p=>({...p,amlProgram:{...(p.amlProgram||{currentVersion:null,versions:[]}),draft}}));
       // Resync seed to the just-saved data so the dirty flag flips
       // back to false. Subsequent Cancel won't trigger the discard
@@ -183,7 +184,8 @@ export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onC
       const entry={
         version:newVersion,
         savedAt:nowIso,
-        savedBy:sS(activeStaff||"Unknown"),
+        savedBy:getCurrentUserLabel(),
+        savedByActor:getCurrentUserId(),
         approvedAt:nowIso,
         approvedBy:approverName.trim(),
         data:finalData,
