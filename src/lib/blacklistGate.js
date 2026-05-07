@@ -37,7 +37,7 @@
 
 import {sS} from "./utils.js";
 import {recordBlacklistOverride} from "./clients.js";
-import {getCurrentUserId,getCurrentUserLabel} from "./storage.js";
+import {getCurrentUserId,getCurrentUserLabel,sb} from "./storage.js";
 
 export function requireBlacklistOverride({client,callbacks,onApproved}){
   if(!client||!client.blacklisted){
@@ -57,7 +57,7 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
         // Phase 3 commit 3d-2 — staffId is the freetext display
         // label (kept for ClientDetail history-render backward
         // compat); staffActor is the auth.uid() for the new
-        // audit_log layer that 3d-3 wires up. activeStaff is the
+        // audit_log layer wired up in 3d-3. activeStaff is the
         // pre-Phase-3 selector value, retained as a fallback for
         // sessions that haven't completed the auth identity swap.
         const lbl=getCurrentUserLabel();
@@ -70,6 +70,22 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
       }catch(e){
         pop&&pop("Audit log write failed (proceeding): "+sS(e&&e.message),"warn");
       }
+      // Phase 3 commit 3d-3 — blacklist_override audit_log row
+      // alongside the legacy JSONB array on the client record. The
+      // JSONB stays as the per-client history surface (read by
+      // ClientDetail); audit_log carries the cross-client unified
+      // record with actor=auth.uid() for the audit query layer.
+      try{
+        sb.logAudit({
+          event_type:"blacklist_override",
+          target_table:"clients",
+          target_id:client.id,
+          reason:"Override approved via PIN",
+          payload:{
+            client_name:sS(client.fullName||""),
+          },
+        });
+      }catch(_){/* non-fatal */}
       onApproved&&onApproved();
     },
   });

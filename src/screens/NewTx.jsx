@@ -323,6 +323,28 @@ export default function NewTx({
     if(reason.length<20){setStructOverrideErr("Reason must be at least 20 characters (currently "+reason.length+").");return;}
     if(typeof setStructuringOverrideApplied==="function")setStructuringOverrideApplied(true);
     if(typeof setStructuringOverrideReason==="function")setStructuringOverrideReason(reason);
+    // Phase 3 commit 3d-3 — structuring_override audit_log row.
+    // tx.id is not yet generated (the tx finalizes later), so
+    // target_id is null; payload carries the cash totals + the
+    // client linkage to reconstruct the event.
+    try{
+      const sR=structuringResult||{};
+      sb.logAudit({
+        event_type:"structuring_override",
+        target_table:"transactions",
+        target_id:null,
+        reason:sS(reason)||null,
+        payload:{
+          cash_total_30d:sR.total||null,
+          prior_cash_30d:sR.priorCash30d||null,
+          current_cash:sR.currentCashAmount||null,
+          threshold:sR.threshold||null,
+          level:sR.level||null,
+          fuzzy:!!structuringFuzzy,
+          client_id:selectedClientId||null,
+        },
+      });
+    }catch(_){/* non-fatal */}
     setStructOverrideOpen(false);
     setStructOverridePin("");
     setStructOverrideReasonInput("");

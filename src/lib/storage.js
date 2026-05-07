@@ -318,6 +318,36 @@ export const sb={
     };
     return sbFetch("tfs_screen_log",{method:"POST",body:JSON.stringify(row)});
   },
+  // Phase 3 commit 3d-3 — generic audit_log writer.
+  // Wraps a POST to audit_log so every override / gate site can
+  // emit a row without re-plumbing shop_id / actor / actor_label
+  // each time. The 3c WITH CHECK clause requires actor=auth.uid()
+  // unless event_type='legacy_import' (the 3e backfill marker), so
+  // a row written via this helper from an authed user always
+  // satisfies the policy. Pre-auth race: getCurrentUserId returns
+  // null and the row will be rejected by the policy — caller's
+  // try/catch suppresses the failure.
+  //
+  // Caller supplies event_type, payload, reason, target_table,
+  // target_id; helper supplies shop_id, actor, actor_label.
+  // created_at and delete_after default at the DB level (3a).
+  // Returns sbFetch's result so callers can branch on success.
+  logAudit:async(payload)=>{
+    const sid=getCurrentShopId();
+    const actor=getCurrentUserId();
+    const actorLabel=getCurrentUserLabel();
+    const row={
+      shop_id:sid,
+      actor:actor,
+      actor_label:actorLabel,
+      event_type:(payload&&payload.event_type)||"unknown",
+      target_table:(payload&&payload.target_table)||null,
+      target_id:(payload&&payload.target_id)||null,
+      payload:(payload&&payload.payload)||{},
+      reason:(payload&&payload.reason)||null,
+    };
+    return sbFetch("audit_log",{method:"POST",body:JSON.stringify(row)});
+  },
   // TFS Commit 4 — read-only audit-log surface for the Settings →
   // TFS Screening Log panel. Returns rows newest-first, paginated.
   // status filter mirrors the panel's UI:

@@ -450,7 +450,25 @@ export default function Loot(){
   const fmtSW=r=>fmtScaleWeight(r,settings.scaleUnit||"g");
 
   const handleAddItem=()=>{if(!addProd||!addCalc){pop("Enter quantity or price.","warn");return;}setTxItems(p=>[...p,{id:uid(),mode:addMode,product:addProd,qty:addQtyN||1,unitPrice:addUnit,price:addCalc,note:addNote,holdUntil:addMode==="buy"?addHours(nowISO(),THRESH.HOLD_HOURS):null,policeHold:false}]);setAddQty("");setAddCustom("");setAddNote("");pop("Added: "+sS(addProd.label),"ok");};
-  const submitPin=()=>{if(!settings.staffPin){pop("No Admin PIN set. Set one in Settings → Security.","warn");setPinModal(null);return;}if(pinVal===settings.staffPin){pinModal&&pinModal.cb&&pinModal.cb();setPinModal(null);setPinVal("");}else{pop("Incorrect PIN.","err");setPinVal("");}};
+  const submitPin=()=>{
+    if(!settings.staffPin){pop("No Admin PIN set. Set one in Settings → Security.","warn");setPinModal(null);return;}
+    if(pinVal===settings.staffPin){
+      pinModal&&pinModal.cb&&pinModal.cb();
+      setPinModal(null);
+      setPinVal("");
+    }else{
+      // Phase 3 commit 3d-3 — admin_pin_gate_failed audit. Only
+      // fires when pinModal is set (i.e. an admin gate or
+      // blacklist gate is open); excludes the lock-screen unlock
+      // path which uses unlockApp(), not submitPin. The reason
+      // text carries the gate context (admin gate vs blacklist).
+      if(pinModal){
+        try{sb.logAudit({event_type:"admin_pin_gate_failed",reason:sS(pinModal.reason||"")});}catch(_){/* non-fatal */}
+      }
+      pop("Incorrect PIN.","err");
+      setPinVal("");
+    }
+  };
   // Phase 2.7 follow-up batch 2 — single closure-bound gate helper
   // shared with destructive call sites in the modals/screens.
   // Wraps requireAdminPin so callers don't have to re-thread the
@@ -781,6 +799,22 @@ export default function Loot(){
         staff:getCurrentUserLabel(),
       });
     }catch(_){/* logging failure is non-fatal — staff already authenticated */}
+    // Phase 3 commit 3d-3 — tfs_override audit_log row alongside
+    // the legacy tfs_screen_log entry. tfs_screen_log keeps the
+    // richer per-screen data (matched/confirmed/override flags);
+    // audit_log carries the unified actor + reason record.
+    try{
+      sb.logAudit({
+        event_type:"tfs_override",
+        target_table:"clients",
+        target_id:selectedClientId||null,
+        reason:sS(reason)||null,
+        payload:{
+          match_reference:sS(matchRef)||null,
+          customer_name:sS(client&&client.fullName)||null,
+        },
+      });
+    }catch(_){/* non-fatal */}
     setTfsOverrideApplied(true);
     setTfsOverrideReason(prev=>{
       const segment=sS(matchRef)+": "+sS(reason);

@@ -22,7 +22,7 @@ import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
 import {sS,nowISO} from "../lib/utils.js";
-import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
+import {getCurrentUserId,getCurrentUserLabel,sb} from "../lib/storage.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META,buildDefaults,nextVersion} from "../lib/legal/privacyPolicyDefaults.js";
 
 // Renders a single field by key. Reads from the form-data map and
@@ -107,6 +107,19 @@ export default function PrivacyPolicyForm({settings,setSettings,activeStaff,pop,
       };
       const versions=Array.isArray(prog.versions)?prog.versions:[];
       setSettings(p=>({...p,privacyPolicy:{currentVersion:newVersion,versions:[...versions,entry],draft:null}}));
+      // Phase 3 commit 3d-3 — legal_doc_approved audit.
+      try{
+        sb.logAudit({
+          event_type:"legal_doc_approved",
+          target_table:"settings",
+          target_id:"privacy",
+          reason:null,
+          payload:{
+            version:newVersion,
+            approver_name:approverName.trim(),
+          },
+        });
+      }catch(_){/* non-fatal */}
       pop&&pop("Privacy Policy approved as v"+newVersion+".","ok");
       onClose&&onClose();
     }finally{setApproving(false);}

@@ -45,8 +45,15 @@
 // these as props because they're shared with blacklistGate.
 
 import {sS} from "./utils.js";
+import {sb} from "./storage.js";
 
-export function requireAdminPin({reason,callbacks,onApproved}){
+// Phase 3 commit 3d-3 — closes Section 9 Gap 6 admin-PIN audit.
+// Optional `target` parameter ({table, id}) lets call sites that
+// know what they're acting on supply the audit row's target_table
+// / target_id. Existing call sites continue to work — target stays
+// undefined and the audit row gets nulls; the reason text already
+// carries the action context (e.g. "Edit catalog product: X").
+export function requireAdminPin({reason,callbacks,onApproved,target}){
   const{settings,pop,setPinModal,setPinVal}=callbacks||{};
   // Bypass: gate is off entirely.
   if(!settings||!settings.requirePin){
@@ -67,7 +74,21 @@ export function requireAdminPin({reason,callbacks,onApproved}){
   }
   setPinModal({
     reason:"🔒 Admin PIN required\n\n"+sS(reason||"Confirm to proceed."),
-    cb:()=>{onApproved&&onApproved();},
+    cb:()=>{
+      // 3d-3 — pass audit, fired before onApproved so the audit
+      // row exists even if onApproved itself throws. Failure of
+      // the audit write is non-fatal (try/catch swallows; the
+      // gate event already passed).
+      try{
+        sb.logAudit({
+          event_type:"admin_pin_gate_passed",
+          reason:sS(reason||""),
+          target_table:target&&target.table||null,
+          target_id:target&&target.id||null,
+        });
+      }catch(_){/* non-fatal */}
+      onApproved&&onApproved();
+    },
   });
   setPinVal&&setPinVal("");
 }
