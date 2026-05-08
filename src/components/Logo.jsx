@@ -47,22 +47,10 @@ export default function Logo({height=32,settings,style,className,alt}){
   const useCustom=custom&&!isDefaultLogo(custom);
   const src=useCustom?custom:pickAsset(height);
   const finalAlt=alt!=null?alt:(useCustom?"":"LootLedger");
-  // 2026-05-08 — circular white disc behind the logo. The branded
-  // PNGs are authored on a transparent background; on the app's
-  // dark surfaces (lock screen, topbar) the transparent corners
-  // composite onto dark and read as black. The wrapper paints a
-  // white disc behind the ring so the logo looks clean regardless
-  // of the surface beneath it. style + className are applied to
-  // the wrapper (the visually outermost element) so call sites
-  // continue to control sizing / margins as before.
-  return <div
-    style={{position:"relative",display:"inline-block",width:height,height:height,background:"#fff",borderRadius:"50%",overflow:"hidden",...style}}
+  return <img
+    src={src}
+    alt={finalAlt}
+    style={{height:height,width:"auto",objectFit:"contain",display:"block",...style}}
     className={className}
-  >
-    <img
-      src={src}
-      alt={finalAlt}
-      style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}
-    />
-  </div>;
+  />;
 }
