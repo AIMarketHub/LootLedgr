@@ -35,8 +35,8 @@ export default function Prices({
     <div style={c.card({padding:12,marginBottom:14})}>
       <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10}}>Manual Spot Override</div>
       <div style={{display:"flex",gap:10}}>
-        <div style={{flex:1}}><label style={c.lbl}>Gold (AUD/oz)</label><input style={c.inp()} type="number" value={gSpot||""} onChange={e=>setGSpotManual(parseFloat(e.target.value)||0)}/></div>
-        <div style={{flex:1}}><label style={c.lbl}>Silver (AUD/oz)</label><input style={c.inp()} type="number" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)}/></div>
+        <div style={{flex:1}}><label style={c.lbl}>Gold (AUD/oz)</label><input style={c.inp()} type="number" value={gSpot||""} onChange={e=>setGSpotManual(parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/></div>
+        <div style={{flex:1}}><label style={c.lbl}>Silver (AUD/oz)</label><input style={c.inp()} type="number" value={sSpot||""} onChange={e=>setSSpotManual(parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/></div>
         <div style={{flex:1}}><SF label="TTL" value={settings.manualPriceTTL||"1h"} onChange={v=>setSettings(p=>({...p,manualPriceTTL:v}))} options={TTL_OPTIONS}/></div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap"}}>
