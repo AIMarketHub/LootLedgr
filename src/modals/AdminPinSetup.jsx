@@ -31,10 +31,11 @@ import React,{useState} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
 import {generatePassphrase,buildRecoveryBundle} from "../lib/auth/passphrase.js";
+import {sb} from "../lib/storage.js";
 
 function isValidPin(s){return /^\d{4,12}$/.test(String(s||""));}
 
-export default function AdminPinSetup({setSettings,pop,onClose}){
+export default function AdminPinSetup({settings,setSettings,pop,onClose}){
   const[pin,setPin]=useState("");
   const[pinConfirm,setPinConfirm]=useState("");
   const[phone,setPhone]=useState("");
@@ -63,13 +64,20 @@ export default function AdminPinSetup({setSettings,pop,onClose}){
     setBusy(true);
     try{
       const bundle=await buildRecoveryBundle(passphrase,pin);
-      setSettings(p=>({
-        ...p,
+      // FIX B — build the next-state object explicitly so we can
+      // force-flush sb.saveSettings before fanning out. The default
+      // 2s settings debounce in App.tsx loses the new PIN if the
+      // user reloads the app within the debounce window.
+      const next={
+        ...(settings||{}),
         staffPin:pin,
         ...bundle,
         adminRecoveryPhone:String(phone||"").trim(),
         requirePin:true,
-      }));
+        pinUnrecovered:false, // FIX C clear — any prior recovery skip is now resolved.
+      };
+      setSettings(next);
+      try{await sb.saveSettings(next);}catch(_){/* non-fatal — debounced effect will retry */}
       pop&&pop("Admin PIN set. Recovery passphrase stored (encrypted).","ok");
       onClose&&onClose(true);
     }catch(e){

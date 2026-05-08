@@ -241,7 +241,22 @@ export default function Loot(){
     el.textContent="input:focus,select:focus,textarea:focus{outline:2px solid "+T.gold+";outline-offset:1px;}";
   },[]);
   useEffect(()=>{const sc=fontSize/14,w=fontSize<=14?400:fontSize<=18?500:fontSize<=24?600:700;const root=document.getElementById("root");if(root){root.style.zoom=sc;root.style.fontWeight=w;}const el=document.getElementById("gf-fontscale")||document.createElement("style");el.id="gf-fontscale";if(!el.parentNode)document.head.appendChild(el);el.textContent="#root,#root *{font-weight:"+w+" !important}#root strong,#root b{font-weight:"+Math.min(w+200,900)+" !important}";},[fontSize]);
-  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){setSettings(p=>({...DEFAULT_SETTINGS,...p,...cfg}));if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);}if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{
+  useEffect(()=>{(async()=>{try{const[t,s,cfg,cat]=await Promise.all([sb.loadTxList(),sb.loadStock(),sb.loadSettings(),sb.loadCatalog()]);if(t&&t.length)setTxList(t);if(s&&s.length)setStock(s);if(cfg&&Object.keys(cfg).length){
+    // FIX D — selective boot merge. Default precedence is cfg over
+    // local. For auth-critical keys (PIN + recovery bundle), if cfg
+    // has an empty/missing value we PRESERVE the local value. Guards
+    // against a stale Supabase row wiping a freshly-set local PIN
+    // before the debounced save lands. Force-flush in
+    // AdminPinSetup / ForgotPin / Settings change-pin (FIX B) is
+    // the primary defence; this is the safety net.
+    setSettings(p=>{
+      const merged={...DEFAULT_SETTINGS,...p,...cfg};
+      const AUTH_KEYS=["staffPin","requirePin","adminRecoveryPassphraseHash","adminRecoverySalt","adminRecoveryPassphraseEncrypted"];
+      for(const k of AUTH_KEYS){if(p[k]&&!cfg[k])merged[k]=p[k];}
+      return merged;
+    });
+    if(cfg.gSpot)setGSpot(cfg.gSpot);if(cfg.sSpot)setSSpot(cfg.sSpot);
+  }if(cat&&cat.length)setCatalog(cat);}catch(_){}finally{
     // Open the persist-write gate. Order matters — must come AFTER
     // the if(cat&&cat.length)setCatalog(cat) above so that a fresh
     // browser (localStorage empty, Supabase has data) doesn't write
@@ -919,6 +934,14 @@ export default function Loot(){
           </div>
         </div>
 
+        {/* FIX C — pin-unrecovered banner. Set by ForgotPin's "Skip
+            — set later in Settings" path; cleared on next successful
+            PIN write (AdminPinSetup, ForgotPin newpin save, or
+            Settings change-pin). Click opens Settings. */}
+        {settings.pinUnrecovered&&<div style={{padding:"10px 14px",background:T.orangeBg||"#3a2200",color:T.orange,borderBottom:"2px solid "+T.orange,fontSize:12,cursor:"pointer",textAlign:"center",fontWeight:"bold",letterSpacing:"0.04em"}} onClick={()=>setShowSet(true)}>
+          ⚠ Admin PIN unrecovered. Set a new PIN in Settings → Security before you sign out.
+        </div>}
+
         <div style={{padding:"18px 16px",paddingBottom:72}}>
 
           {screen==="dashboard"&&<Dashboard
@@ -1185,9 +1208,13 @@ export default function Loot(){
           withAdminGate={withAdminGate}
         />
 
-        <Notif msg={notify&&notify.msg} type={notify&&notify.type} onClose={()=>setNotify(null)}/>
       </div>
       )}
+      {/* Notif lives OUTSIDE the locked? ternary so toasts fired by
+          unlockApp ("Incorrect PIN", "Still loading settings…") are
+          visible on the lock screen too. Pre-fix this was inside the
+          unlocked branch and lock-screen pop() calls rendered nothing. */}
+      <Notif msg={notify&&notify.msg} type={notify&&notify.type} onClose={()=>setNotify(null)}/>
     </div>
   );
 }

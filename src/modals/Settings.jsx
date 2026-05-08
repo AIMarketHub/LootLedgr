@@ -29,7 +29,7 @@
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
-import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
+import {getCurrentUserId,getCurrentUserLabel,sb} from "../lib/storage.js";
 
 // Date+time formatter used by the AML/CTF Program status card and
 // version history. fmtDate from utils renders "DD/MM/YY HH:MM";
@@ -286,7 +286,13 @@ export default function Settings({
       const pp=await decryptPassphrase(settings.adminRecoveryPassphraseEncrypted,settings.staffPin,settings.adminRecoverySalt);
       if(pp==null){pop("Could not re-encrypt — old PIN appears stale. Try Forgot PIN on the lock screen.","err");return;}
       const ct=await encryptPassphrase(pp,newPin,settings.adminRecoverySalt);
-      setSettings(p=>({...p,staffPin:newPin,adminRecoveryPassphraseEncrypted:ct}));
+      // FIX B — build next-state explicitly so we can force-flush
+      // sb.saveSettings before the modal closes. Bypasses the 2s
+      // settings debounce that was losing PIN changes on fast reload.
+      // FIX C clear — any prior recovery skip is now resolved.
+      const next={...settings,staffPin:newPin,adminRecoveryPassphraseEncrypted:ct,pinUnrecovered:false};
+      setSettings(next);
+      try{await sb.saveSettings(next);}catch(_){/* non-fatal */}
       setChangePinOpen(false);
       pop("Admin PIN updated. Recovery passphrase re-encrypted with the new PIN.","ok");
     }catch(e){
@@ -908,7 +914,7 @@ export default function Settings({
       z-index 999 across the app; later siblings paint on top.
       Without this ordering AdminPinSetup opens but stays hidden
       behind the Settings overlay (the bug fix this commit makes). */}
-  {showAdminSetup&&<AdminPinSetup setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
+  {showAdminSetup&&<AdminPinSetup settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
   {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
   {showAmlHistory&&<AmlProgramHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlHistory(false)} onRestoredOpenForm={()=>setShowAmlForm(true)}/>}
   {showAmlPdf&&<AmlProgramPdf settings={settings} pop={pop} onClose={()=>setShowAmlPdf(false)}/>}

@@ -39,11 +39,21 @@ import React,{useState} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
 import {verifyPassphrase,encryptPassphrase,canonPassphrase} from "../lib/auth/passphrase.js";
+import {sb} from "../lib/storage.js";
 
 function isValidPin(s){return /^\d{4,12}$/.test(String(s||""));}
 
 export default function ForgotPin({settings,setSettings,pop,onClose,onUnlocked}){
-  // "menu" | "passphrase" | "newpin"
+  // FIX C — new flow:
+  //   "menu" -> "passphrase" -> "verified" -> (optional) "newpin"
+  // On entering "verified" we call onUnlocked() immediately so the
+  // user is in the app. Two follow-up paths:
+  //   "Set new PIN now"        -> "newpin" stage (existing logic).
+  //   "Skip — set later in Settings" -> set settings.pinUnrecovered
+  //                              and close. App.tsx renders a
+  //                              persistent banner until the user
+  //                              sets a PIN via AdminPinSetup or
+  //                              Settings change-pin.
   const[stage,setStage]=useState("menu");
   const[passphrase,setPassphrase]=useState("");
   const[verified,setVerified]=useState("");
@@ -63,7 +73,24 @@ export default function ForgotPin({settings,setSettings,pop,onClose,onUnlocked})
         return;
       }
       setVerified(canonPassphrase(passphrase));
-      setStage("newpin");
+      // FIX C — unlock immediately on verify. The user is in the
+      // app from this moment; the new-PIN step becomes optional.
+      onUnlocked&&onUnlocked();
+      setStage("verified");
+    }finally{setBusy(false);}
+  };
+
+  const onSkipPinReset=async()=>{
+    setBusy(true);
+    setErr("");
+    try{
+      // FIX C — flag the pin-unrecovered banner. Persist now so it
+      // survives a reload before the user sets a new PIN.
+      const next={...(settings||{}),pinUnrecovered:true};
+      setSettings(next);
+      try{await sb.saveSettings(next);}catch(_){/* non-fatal */}
+      pop&&pop("Unlocked. Set a new Admin PIN in Settings → Security before signing out.","warn");
+      onClose&&onClose();
     }finally{setBusy(false);}
   };
 
@@ -76,8 +103,17 @@ export default function ForgotPin({settings,setSettings,pop,onClose,onUnlocked})
     setErr("");
     try{
       const ct=await encryptPassphrase(verified,newPin,settings.adminRecoverySalt);
-      setSettings(p=>({...p,staffPin:newPin,adminRecoveryPassphraseEncrypted:ct}));
+      // FIX B — build next-state explicitly + force-flush before
+      // closing. The 2s settings debounce was losing the new PIN on
+      // fast reloads after recovery. FIX C clear — any prior
+      // recovery-skip flag is resolved by setting a fresh PIN.
+      const next={...(settings||{}),staffPin:newPin,adminRecoveryPassphraseEncrypted:ct,pinUnrecovered:false};
+      setSettings(next);
+      try{await sb.saveSettings(next);}catch(_){/* non-fatal */}
       pop&&pop("Admin PIN reset using recovery passphrase. The passphrase remains valid for future recovery.","ok");
+      // onUnlocked already fired when entering "verified"; safe to
+      // re-call (idempotent — sets appUnlocked=true and refreshes
+      // sessionLast).
       onUnlocked&&onUnlocked();
       onClose&&onClose();
     }catch(e){
@@ -104,6 +140,14 @@ export default function ForgotPin({settings,setSettings,pop,onClose,onUnlocked})
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <button style={c.btn(T.gold,T.bg)} onClick={onVerifyPassphrase} disabled={busy||!passphrase}>{busy?"Checking…":"Verify"}</button>
         <button style={c.bsm()} onClick={()=>{setStage("menu");setPassphrase("");setErr("");}} disabled={busy}>Back</button>
+      </div>
+    </div>}
+
+    {stage==="verified"&&<div>
+      <div style={{...c.bnr("ok"),marginBottom:14}}>✓ Passphrase verified. The app is now unlocked. Your old PIN cannot be recovered — set a new one now, or skip and set it later in Settings.</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <button style={c.btn(T.gold,T.bg)} onClick={()=>{setErr("");setStage("newpin");}} disabled={busy}>🔐 Set new PIN now</button>
+        <button style={c.bsm()} onClick={onSkipPinReset} disabled={busy}>{busy?"…":"Skip — set later in Settings"}</button>
       </div>
     </div>}
 
