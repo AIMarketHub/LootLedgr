@@ -910,7 +910,7 @@ export default function Loot(){
             {[[T.goldBg,T.goldDim,T.gold,"Au",52,gSpot,setGSpotManual],[T.silverBg,T.silverDim,T.silver,"Ag",42,sSpot,setSSpotManual]].map(([bg,dim,col,lbl,w,val,setter])=>(
               <div key={lbl} style={{display:"flex",alignItems:"center",gap:2,background:bg,border:"1px solid "+dim+"44",borderRadius:5,padding:"2px 5px"}}>
                 <span style={{fontSize:8,color:T.muted,flexShrink:0}}>{lbl}</span>
-                <input style={{background:"transparent",border:"none",color:col,fontFamily:T.ff,fontSize:11,fontWeight:"bold",width:w,outline:"none",textAlign:"right"}} type="number" value={val} onChange={e=>setter(parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
+                <input style={{background:"transparent",border:"none",color:col,fontFamily:T.ff,fontSize:11,fontWeight:"bold",width:w,outline:"none",textAlign:"right"}} type="number" value={val||""} onChange={e=>setter(parseFloat(e.target.value)||0)} onFocus={e=>e.target.select()}/>
               </div>
             ))}
             <span title={spotStatus==="live"?"Live: "+spotSource:spotStatus==="manual"?"Manual override":"No API"} style={{width:7,height:7,borderRadius:"50%",flexShrink:0,display:"inline-block",background:spotStatus==="live"?T.readyGreen:spotStatus==="manual"?T.gold:spotStatus==="off"?T.border:T.orange}}/>
