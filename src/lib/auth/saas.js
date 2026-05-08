@@ -246,9 +246,16 @@ export async function getCurrentUser(){
 }
 
 // Returns the user's domain record from the public.users table:
-// { id, shop_id, role, first_name, family_name, email, phone }.
+//   { id, shop_id, role, first_name, family_name, email, phone,
+//     terms_accepted_at, terms_version_accepted,
+//     privacy_policy_version_accepted, pin, job_title }
 // null when the user hasn't been signed up via signUp() above
 // (i.e. an auth.users row exists but no matching public.users).
+//
+// Refreshed 2026-05-08 (3d-4-b) to include the legal-acceptance
+// trio (added by 0005) and the per-user PIN + job_title pair
+// (added by 0011_user_pins.sql). SELECT * picks them up
+// automatically — the doc just needed updating.
 export async function getCurrentUserRecord(){
   const u=await getCurrentUser();
   if(!u)return null;
@@ -344,4 +351,71 @@ export async function getCurrentLegalDocumentVersions(){
     termsVersion:tos.currentVersion||null,
     privacyVersion:pp.currentVersion||null,
   };
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Phase 3 commit 3d-4-b — staff invite + per-user PIN helpers.
+// ──────────────────────────────────────────────────────────────────
+
+// Sign up a NEW staff member for an EXISTING shop (invite claim
+// path). Distinct from signUp() above which creates a brand-new
+// shop via the signup_shop RPC. signUpForInvite just creates the
+// auth.users row; the public.users row + shop assignment land
+// when the caller follows up with claimStaffInvite(token).
+//
+// Returns {ok, data:{user, session?}, error} for the caller to
+// branch on. On success, the auth session is established (with
+// auto-confirm) so the immediate claim_staff_invite call has an
+// auth.uid() to attach to.
+export async function signUpForInvite({email,password,firstName,familyName,phone}){
+  if(!email)return{ok:false,error:"Email is required."};
+  if(!password||password.length<8)return{ok:false,error:"Password must be at least 8 characters."};
+  if(!firstName)return{ok:false,error:"First name is required."};
+  if(!familyName)return{ok:false,error:"Family name is required."};
+  const r=await safe(()=>supabase.auth.signUp({
+    email,
+    password,
+    phone:phone||undefined,
+    options:{
+      data:{first_name:firstName,family_name:familyName,phone:phone||""},
+    },
+  }));
+  if(!r.ok)return{ok:false,error:"Signup failed: "+r.error};
+  const authUser=r.data&&r.data.user;
+  if(!authUser||!authUser.id)return{ok:false,error:"Signup returned no user id."};
+  return{ok:true,data:{user:authUser,session:r.data&&r.data.session||null}};
+}
+
+// RPC wrappers for the SQL functions delivered in 3d-1 + 3d-4-a.
+// All throw on error so call sites can use try/catch with
+// pop-on-failure rather than {ok,error} branching.
+
+export async function createStaffInvite(email,role){
+  const{data,error}=await supabase.rpc("create_staff_invite",{p_email:email,p_role:role});
+  if(error)throw error;
+  return data;
+}
+
+export async function claimStaffInvite(token){
+  const{data,error}=await supabase.rpc("claim_staff_invite",{p_token:token});
+  if(error)throw error;
+  return data;
+}
+
+export async function setMyPin(pin){
+  const{data,error}=await supabase.rpc("set_my_pin",{p_pin:pin||null});
+  if(error)throw error;
+  return data;
+}
+
+export async function setStaffPin(userId,pin){
+  const{data,error}=await supabase.rpc("set_staff_pin",{p_user_id:userId,p_pin:pin||null});
+  if(error)throw error;
+  return data;
+}
+
+export async function setMyJobTitle(title){
+  const{data,error}=await supabase.rpc("set_my_job_title",{p_title:title||""});
+  if(error)throw error;
+  return data;
 }

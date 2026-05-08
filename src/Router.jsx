@@ -30,6 +30,8 @@ const TrialExpired=lazy(()=>import("./screens/TrialExpired.jsx"));
 const AdminPanel=lazy(()=>import("./screens/admin/AdminPanel.jsx"));
 const TfsListAdmin=lazy(()=>import("./screens/admin/TfsListAdmin.jsx"));
 const RequireAdmin=lazy(()=>import("./components/RequireAdmin.jsx"));
+// Phase 3 commit 3d-4-b — staff invite-claim entry point.
+const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
 
 function RootRedirect(){
   const{user,loading}=useAuth();
@@ -48,6 +50,7 @@ export default function Router(){
           <Route path="/login" element={<Login/>}/>
           <Route path="/signup" element={<Signup/>}/>
           <Route path="/forgot" element={<ForgotPassword/>}/>
+          <Route path="/claim-invite" element={<ClaimInvite/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
           <Route path="/admin/tfs" element={<RequireAdmin><TfsListAdmin/></RequireAdmin>}/>
           <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>

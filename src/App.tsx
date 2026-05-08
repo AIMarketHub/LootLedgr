@@ -740,12 +740,18 @@ export default function Loot(){
   const unlockApp=()=>{
     if(!settingsHydrated){pop("Still loading settings…","warn");return;}
     const typed=String(appPinInput||"").trim();
-    const expected=String(settings.staffPin||"").trim();
+    // Phase 3 commit 3d-4-b — per-staff PIN check first, shop-
+    // level Admin PIN as fallback (owner override + reset path
+    // when a staff forgets theirs). Either match unlocks.
+    const userPin=String((auth&&auth.userRecord&&auth.userRecord.pin)||"").trim();
+    const adminPin=String(settings.staffPin||"").trim();
+    const matchUser =!!userPin && typed===userPin;
+    const matchAdmin=!!adminPin && typed===adminPin;
     if(import.meta.env.DEV){
       // eslint-disable-next-line no-console
-      console.log("[lock] PIN check",{typedLen:typed.length,expectedLen:expected.length,requirePin:settings.requirePin,hydrated:settingsHydrated});
+      console.log("[lock] PIN check",{typedLen:typed.length,userPinSet:!!userPin,adminPinSet:!!adminPin,matchUser,matchAdmin,requirePin:settings.requirePin,hydrated:settingsHydrated});
     }
-    if(typed&&expected&&typed===expected){
+    if(typed && (matchUser || matchAdmin)){
       setAppUnlocked(true);
       store.set("sessionActive",true);
       store.set("sessionLast",Date.now());
