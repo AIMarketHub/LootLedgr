@@ -26,7 +26,7 @@ import {T,c} from "../theme.js";
 import {sS,todayStr,daysAgoISO} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
-import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle,listStaffHours,upsertStaffHours} from "../lib/auth/saas.js";
+import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle,listStaffHours,upsertStaffHours,unlockStaffHours} from "../lib/auth/saas.js";
 
 // Trim, then accept only 4-12 digit strings or blank. Returns the
 // canonical value to store, or null if the input is rejected.
@@ -71,6 +71,33 @@ function formatDateLabel(iso){
   const d=new Date(iso+"T00:00:00");
   if(isNaN(d.getTime()))return iso;
   return d.toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"});
+}
+
+// 3.5-A-2.5 — duplicate-day confirm body. Mirrors the EOD.jsx
+// helper but inlined here so the two modals stay independent. The
+// "existing" arg is the raw row from listStaffHours; "next" is the
+// edited row from local state.
+function diffPromptText(date,existing,next){
+  const fmtT=t=>t?String(t).slice(0,5):"—";
+  const fmtBreak=v=>String(parseInt(v,10)||0)+"m";
+  return "Hours already logged for "+date+".\n\n"
+    +"Existing:\n"
+    +"  Start "+fmtT(existing.start_time)+"  End "+fmtT(existing.end_time)
+    +"  Break "+fmtBreak(existing.break_minutes)+"\n"
+    +(existing.note?"  Note: "+sS(existing.note)+"\n":"")
+    +"\nNew:\n"
+    +"  Start "+(next.start||"—")+"  End "+(next.end||"—")
+    +"  Break "+fmtBreak(next.break)+"\n"
+    +(next.note?"  Note: "+next.note+"\n":"")
+    +"\nClick OK to overwrite, Cancel to skip this day.";
+}
+
+// Short locked-at label, e.g. "Locked Thu 09 May 16:42".
+function fmtLockedAt(iso){
+  if(!iso)return "Locked";
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return "Locked";
+  return "Locked "+d.toLocaleString("en-AU",{weekday:"short",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
 }
 
 export default function Staff({pop,setShowStaff}){
@@ -133,12 +160,18 @@ export default function Staff({pop,setShowStaff}){
 
   // ─── Section A.5 — My Hours (14-day catch-up) ───────────────
   // State: per-row {date, start, end, break, note, dirty,
-  // existing_id}. Pre-filled from listStaffHours(...) on mount;
-  // dirty flag tracks edits since the last successful save.
+  // existing_id, existing_row, locked, locked_at}. Pre-filled from
+  // listStaffHours(...) on mount; dirty flag tracks edits since
+  // last successful save. 3.5-A-2.5 added the lock trio + the raw
+  // existing_row reference (kept so the duplicate-day confirm can
+  // diff existing-vs-new without a re-fetch).
   const[hoursPin,setHoursPin]=useState("");
   const[hoursRows,setHoursRows]=useState([]);
   const[hoursLoading,setHoursLoading]=useState(true);
   const[hoursSaving,setHoursSaving]=useState(false);
+  // Inline unlock-panel state, scoped to the row index currently
+  // being unlocked. {idx, pin, busy} or null.
+  const[unlockMine,setUnlockMine]=useState(null);
 
   const refreshMyHours=useCallback(async()=>{
     if(!auth||!auth.shop||!auth.shop.id||!auth.user||!auth.user.id)return;
@@ -161,7 +194,10 @@ export default function Staff({pop,setShowStaff}){
           note:sS(existing.note),
           dirty:false,
           existing_id:existing.id,
-        }:{date,start:"",end:"",break:"0",note:"",dirty:false,existing_id:null});
+          existing_row:existing,
+          locked:!!existing.locked,
+          locked_at:existing.locked_at||null,
+        }:{date,start:"",end:"",break:"0",note:"",dirty:false,existing_id:null,existing_row:null,locked:false,locked_at:null});
       }
       setHoursRows(rows);
     }catch(e){
@@ -179,7 +215,7 @@ export default function Staff({pop,setShowStaff}){
     const pin=String(hoursPin||"").trim();
     if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit per-staff PIN.","warn");return;}
     setHoursSaving(true);
-    let saved=0,failed=0;
+    let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0;
     try{
       for(const row of hoursRows){
         if(!row.dirty)continue;
@@ -187,6 +223,16 @@ export default function Staff({pop,setShowStaff}){
         // to do. Owner-only DELETE for clearing existing entries
         // is handled outside this UI.
         if(!row.existing_id&&!row.start&&!row.end&&(parseInt(row.break,10)||0)===0&&!row.note)continue;
+        // 3.5-A-2.5 — locked rows can't be overwritten.
+        if(row.locked){skippedLocked++;continue;}
+        // 3.5-A-2.5 — duplicate-day confirmation when an existing
+        // row exists for this date.
+        if(row.existing_id&&row.existing_row){
+          const ok=typeof window!=="undefined"&&window.confirm
+            ?window.confirm(diffPromptText(formatDateLabel(row.date),row.existing_row,row))
+            :true;
+          if(!ok){skippedUserDeclined++;continue;}
+        }
         try{
           await upsertStaffHours({
             pin,
@@ -204,13 +250,37 @@ export default function Staff({pop,setShowStaff}){
         }
       }
       if(saved>0){
-        pop&&pop("Saved "+saved+" day"+(saved===1?"":"s")+(failed>0?" ("+failed+" failed)":"."),"ok");
+        const extras=[];
+        if(failed>0)extras.push(failed+" failed");
+        if(skippedLocked>0)extras.push(skippedLocked+" locked");
+        if(skippedUserDeclined>0)extras.push(skippedUserDeclined+" skipped");
+        pop&&pop("Saved "+saved+" day"+(saved===1?"":"s")+(extras.length?" ("+extras.join(", ")+")":"."),"ok");
         await refreshMyHours();
         setHoursPin("");
-      }else if(failed===0){
+      }else if(failed===0&&skippedLocked===0&&skippedUserDeclined===0){
         pop&&pop("No changes to save.","warn");
+      }else if(skippedLocked>0&&saved===0&&failed===0){
+        pop&&pop("All changed rows are locked. Unlock first or skip.","warn");
       }
     }finally{setHoursSaving(false);}
+  };
+
+  const onConfirmUnlockMine=async()=>{
+    if(!unlockMine)return;
+    const row=hoursRows[unlockMine.idx];
+    if(!row||!row.existing_id)return;
+    const pin=String(unlockMine.pin||"").trim();
+    if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit PIN.","warn");return;}
+    setUnlockMine(p=>({...p,busy:true}));
+    try{
+      await unlockStaffHours(pin,row.existing_id);
+      pop&&pop("Entry unlocked.","ok");
+      setUnlockMine(null);
+      await refreshMyHours();
+    }catch(e){
+      pop&&pop("Unlock failed: "+sS(e&&e.message),"err");
+      setUnlockMine(p=>({...p,busy:false}));
+    }
   };
 
   // Section B — Invite state.
@@ -314,15 +384,36 @@ export default function Staff({pop,setShowStaff}){
         <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,fontSize:10,color:T.muted,letterSpacing:"0.05em",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid "+T.border+"55"}}>
           <div>Date</div><div>Start</div><div>End</div><div>Break (min)</div><div>Note</div>
         </div>
-        {hoursRows.map((row,idx)=>(
-          <div key={row.date} style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.border+"22",alignItems:"center"}}>
-            <div style={{fontSize:11,color:T.text}}>{formatDateLabel(row.date)}{row.dirty?<span style={{color:T.gold,marginLeft:6}}>•</span>:null}</div>
-            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.start} onChange={e=>updateHoursRow(idx,{start:e.target.value})}/>
-            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.end} onChange={e=>updateHoursRow(idx,{end:e.target.value})}/>
-            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="number" min="0" max="1440" value={row.break} onChange={e=>updateHoursRow(idx,{break:e.target.value})}/>
-            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="text" value={row.note} onChange={e=>updateHoursRow(idx,{note:e.target.value})} placeholder="optional"/>
-          </div>
-        ))}
+        {hoursRows.map((row,idx)=>{
+          const isLocked=!!row.locked;
+          const showUnlock=unlockMine&&unlockMine.idx===idx;
+          return <div key={row.date} style={{borderBottom:"1px solid "+T.border+"22"}}>
+            <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,padding:"6px 0",alignItems:"center",opacity:isLocked?0.7:1}}>
+              <div style={{fontSize:11,color:T.text,display:"flex",alignItems:"center",flexWrap:"wrap",gap:4}}>
+                <span>{formatDateLabel(row.date)}</span>
+                {row.dirty?<span style={{color:T.gold}}>•</span>:null}
+                {isLocked?<span style={{fontSize:9,color:T.gold,border:"1px solid "+T.gold,borderRadius:3,padding:"1px 4px"}} title={fmtLockedAt(row.locked_at)}>🔒</span>:null}
+              </div>
+              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.start} disabled={isLocked} onChange={e=>updateHoursRow(idx,{start:e.target.value})}/>
+              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.end} disabled={isLocked} onChange={e=>updateHoursRow(idx,{end:e.target.value})}/>
+              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="number" min="0" max="1440" value={row.break} disabled={isLocked} onChange={e=>updateHoursRow(idx,{break:e.target.value})}/>
+              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="text" value={row.note} disabled={isLocked} onChange={e=>updateHoursRow(idx,{note:e.target.value})} placeholder="optional"/>
+            </div>
+            {isLocked&&!showUnlock&&<div style={{display:"flex",justifyContent:"flex-end",gap:8,padding:"0 0 8px"}}>
+              <span style={{fontSize:10,color:T.muted,alignSelf:"center"}}>{fmtLockedAt(row.locked_at)}</span>
+              <button type="button" style={c.bsm()} onClick={()=>setUnlockMine({idx,pin:"",busy:false})}>Unlock</button>
+            </div>}
+            {showUnlock&&<div style={{...c.card({padding:10}),margin:"0 0 8px",background:T.warn||T.surface,borderColor:T.red||T.border}}>
+              <div style={{fontSize:11,color:T.red||T.gold,fontWeight:"bold",marginBottom:6}}>⚠ Hours locked in for accounting. Contact the accountant before modifying the timesheet.</div>
+              <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Unlocking <strong>{formatDateLabel(row.date)}</strong> requires your per-staff PIN.</div>
+              <F label="Your PIN (4–12 digits)" type="password" value={unlockMine.pin} onChange={v=>setUnlockMine(p=>({...p,pin:v}))} placeholder="••••"/>
+              <div style={{display:"flex",gap:8,marginTop:6}}>
+                <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onConfirmUnlockMine} disabled={unlockMine.busy||!unlockMine.pin}>{unlockMine.busy?"…":"Confirm unlock"}</button>
+                <button style={c.bsm()} onClick={()=>setUnlockMine(null)} disabled={unlockMine.busy}>Cancel</button>
+              </div>
+            </div>}
+          </div>;
+        })}
       </div>}
       <div style={{marginTop:10}}>
         <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSaveMyHours} disabled={hoursSaving||hoursLoading||!hoursPin}>{hoursSaving?"Saving…":"Save changed rows"}</button>

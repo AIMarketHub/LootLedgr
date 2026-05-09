@@ -449,10 +449,12 @@ export async function setMyJobTitle(title){
 
 // Read staff_hours rows for a shop in [fromDate, toDate] inclusive.
 // Returns rows ordered by work_date desc. Empty array on no rows.
+// 3.5-A-2.5 (2026-05-09) — also returns lock columns so the UI can
+// render the lock badge + disable inputs without a second round-trip.
 export async function listStaffHours(shopId,fromDate,toDate){
   const{data,error}=await supabase
     .from("staff_hours")
-    .select("id, user_id, work_date, start_time, end_time, break_minutes, note, updated_at, updated_by")
+    .select("id, user_id, work_date, start_time, end_time, break_minutes, note, updated_at, updated_by, locked, locked_at, locked_by")
     .eq("shop_id",shopId)
     .gte("work_date",fromDate)
     .lte("work_date",toDate)
@@ -481,6 +483,25 @@ export async function upsertStaffHours({pin,userId,workDate,startTime,endTime,br
 // PIN-gated delete. Owner-only server-side.
 export async function deleteStaffHours(pin,id){
   const{data,error}=await supabase.rpc("delete_staff_hours",{p_pin:pin,p_id:id});
+  if(error)throw error;
+  return data;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Phase 3.5-A-2.5 (2026-05-09) — lock-for-processing wrappers.
+// lock requires the CALLER's PIN; unlock requires the ROW OWNER's
+// PIN (the staff member whose hours are being unlocked, NOT the
+// caller). Server-side RPCs in 0015_staff_hours_lock.sql enforce
+// this — these wrappers are thin pass-throughs.
+// ──────────────────────────────────────────────────────────────────
+export async function lockStaffHours(pin,id){
+  const{data,error}=await supabase.rpc("lock_staff_hours",{p_pin:pin,p_id:id});
+  if(error)throw error;
+  return data;
+}
+
+export async function unlockStaffHours(rowOwnerPin,id){
+  const{data,error}=await supabase.rpc("unlock_staff_hours",{p_pin:rowOwnerPin,p_id:id});
   if(error)throw error;
   return data;
 }
