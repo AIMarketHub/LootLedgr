@@ -1,0 +1,89 @@
+TOPIC: Staff role permissions
+WHEN TO USE: When a user asks "what can I do?", "why can't I do X?", "how do I invite someone?", or any question about role-based access in LootLedger. Also during onboarding so each new person knows the boundaries of their role.
+
+PROCEDURE:
+  1. LootLedger has three roles: owner, manager, staff. Roles are
+     enforced server-side via Supabase Row Level Security plus
+     role-checked RPCs — the UI hides actions a user can't perform,
+     and the server refuses them too.
+
+  2. OWNER — full access:
+        - Run buy / sell / exchange transactions.
+        - Edit catalog, stock, clients, settings.
+        - Delete records (transactions, stock, clients).
+        - Approve legal documents (Terms, Privacy, AML).
+        - Override compliance blocks (TFS sanctions match,
+          structuring threshold, blacklist override) using the
+          shop Admin PIN.
+        - Invite any role (owner / manager / staff).
+        - Reset any staff member's per-staff PIN.
+        - Rotate the shop Admin PIN and recovery passphrase.
+
+  3. MANAGER — operational + invite-light:
+        - Run transactions; edit catalog and stock.
+        - Override compliance blocks using the shop Admin PIN.
+        - Invite manager or staff roles only — cannot invite
+          another owner (server-enforced).
+        - Cannot reset other staff's PINs.
+        - Cannot rotate shop Admin PIN or recovery passphrase.
+        - Cannot delete records.
+
+  4. STAFF — operational only:
+        - Run transactions; view clients, stock, prices, history.
+        - Cannot delete records (RLS-enforced).
+        - Cannot override compliance blocks.
+        - Cannot invite anyone.
+        - Cannot change settings.
+
+  5. PIN HIERARCHY:
+        - Per-staff PIN — each user sets their own 4-12 digit PIN
+          in Staff modal → "My PIN + Job Title". Used to unlock
+          the app daily when the same browser session has been
+          idle past the session timeout. Owner can reset any
+          staff member's PIN via Staff modal → "Active Staff" →
+          "Reset PIN".
+        - Shop Admin PIN — single shop-wide PIN. Acts as owner
+          override at the lock screen (always works) AND as the
+          gate for compliance overrides, legal-doc approvals,
+          and other owner-authority operations.
+
+EDGE CASES:
+  - First sign-in with no per-staff PIN set: the user can still
+    sign in via email + password; the lock screen only requires
+    the per-staff PIN on subsequent idle-resume. Prompt them to
+    set one in the Staff modal.
+  - Forgot per-staff PIN: owner resets via Staff modal "Active
+    Staff" section, "Reset PIN" button on that user's row.
+  - Forgot shop Admin PIN: recover via the passphrase set during
+    AdminPinSetup. From the lock screen click "Forgot PIN" →
+    enter passphrase → unlock; rotate to a new PIN at leisure.
+  - Manager tries to invite an owner: blocked at the RPC layer
+    with "Manager cannot invite owner".
+  - Joining a shop while already a member of another shop:
+    blocked at claim time with "User already belongs to a
+    different shop". The user must contact the owner of the
+    existing shop to be removed first.
+  - Invite link expired: invites expire 14 days after creation.
+    Owner sends a fresh invite from Staff modal → "Invite Staff
+    Member".
+
+COMMON MISTAKES:
+  - Sharing the shop Admin PIN with staff. Don't — every staff
+    member should have their own per-staff PIN. Admin PIN is
+    the owner's escalation key.
+  - Treating the per-staff PIN as the account password. It's a
+    LOCK-SCREEN convenience PIN only. The account password is
+    set during signup or via the Forgot Password / reset-
+    password flow.
+  - Looking for the old "Active Staff Member" dropdown — that
+    selector was retired. Identity is automatic from the auth
+    account; whoever is signed in IS the actor on the audit log.
+  - Trying to delete a record while signed in as staff — staff
+    cannot delete. The action either won't appear or will be
+    refused server-side. Ask an owner or manager.
+
+RELATED TOPICS:
+  - "Sophiie - PIN recovery.txt" — recovering the shop Admin
+    PIN via the recovery passphrase.
+  - "Sophiie - AI Agent settings.txt" — companion training
+    file.
