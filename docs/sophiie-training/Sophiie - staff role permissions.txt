@@ -4,10 +4,10 @@ WHEN TO USE: When a user asks "what can I do?", "why can't I do X?", "how do I i
 PROCEDURE:
   1. LootLedger has three roles: owner, manager, staff. Roles are
      enforced server-side via Supabase Row Level Security plus
-     role-checked RPCs — the UI hides actions a user can't perform,
+     role-checked RPCs  --  the UI hides actions a user can't perform,
      and the server refuses them too.
 
-  2. OWNER — full access:
+  2. OWNER  --  full access:
         - Run buy / sell / exchange transactions.
         - Edit catalog, stock, clients, settings.
         - Delete records (transactions, stock, clients).
@@ -19,16 +19,16 @@ PROCEDURE:
         - Reset any staff member's per-staff PIN.
         - Rotate the shop Admin PIN and recovery passphrase.
 
-  3. MANAGER — operational + invite-light:
+  3. MANAGER  --  operational + invite-light:
         - Run transactions; edit catalog and stock.
         - Override compliance blocks using the shop Admin PIN.
-        - Invite manager or staff roles only — cannot invite
+        - Invite manager or staff roles only  --  cannot invite
           another owner (server-enforced).
         - Cannot reset other staff's PINs.
         - Cannot rotate shop Admin PIN or recovery passphrase.
         - Cannot delete records.
 
-  4. STAFF — operational only:
+  4. STAFF  --  operational only:
         - Run transactions; view clients, stock, prices, history.
         - Cannot delete records (RLS-enforced).
         - Cannot override compliance blocks.
@@ -36,13 +36,13 @@ PROCEDURE:
         - Cannot change settings.
 
   5. PIN HIERARCHY:
-        - Per-staff PIN — each user sets their own 4-12 digit PIN
+        - Per-staff PIN  --  each user sets their own 4-12 digit PIN
           in Staff modal → "My PIN + Job Title". Used to unlock
           the app daily when the same browser session has been
           idle past the session timeout. Owner can reset any
           staff member's PIN via Staff modal → "Active Staff" →
           "Reset PIN".
-        - Shop Admin PIN — single shop-wide PIN. Acts as owner
+        - Shop Admin PIN  --  single shop-wide PIN. Acts as owner
           override at the lock screen (always works) AND as the
           gate for compliance overrides, legal-doc approvals,
           and other owner-authority operations.
@@ -68,22 +68,22 @@ EDGE CASES:
     Member".
 
 COMMON MISTAKES:
-  - Sharing the shop Admin PIN with staff. Don't — every staff
+  - Sharing the shop Admin PIN with staff. Don't  --  every staff
     member should have their own per-staff PIN. Admin PIN is
     the owner's escalation key.
   - Treating the per-staff PIN as the account password. It's a
     LOCK-SCREEN convenience PIN only. The account password is
     set during signup or via the Forgot Password / reset-
     password flow.
-  - Looking for the old "Active Staff Member" dropdown — that
+  - Looking for the old "Active Staff Member" dropdown  --  that
     selector was retired. Identity is automatic from the auth
     account; whoever is signed in IS the actor on the audit log.
-  - Trying to delete a record while signed in as staff — staff
+  - Trying to delete a record while signed in as staff  --  staff
     cannot delete. The action either won't appear or will be
     refused server-side. Ask an owner or manager.
 
 RELATED TOPICS:
-  - "Sophiie - PIN recovery.txt" — recovering the shop Admin
+  - "Sophiie - PIN recovery.txt"  --  recovering the shop Admin
     PIN via the recovery passphrase.
-  - "Sophiie - AI Agent settings.txt" — companion training
+  - "Sophiie - AI Agent settings.txt"  --  companion training
     file.

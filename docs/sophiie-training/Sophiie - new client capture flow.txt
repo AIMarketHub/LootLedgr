@@ -8,20 +8,20 @@ PROCEDURE:
        0 matches → "Create New Client" button. Click it.
        1 match  → confirmation card with two buttons:
                   "✓ Yes, this is them" loads the existing record.
-                  "✗ Not them — create new" opens the capture
+                  "✗ Not them  --  create new" opens the capture
                   selector for a same-name-different-person.
        N matches → grid of cards. Each has ✓ This one and ✗.
                    ✗ on any card jumps to create-new.
   3. Create New Client opens the capture-method panel. Pick one:
-       📷 Capture with camera — AU licences, autofill via vision.
-       📁 Upload photo — photo lives on a phone or other device,
+       📷 Capture with camera  --  AU licences, autofill via vision.
+       📁 Upload photo  --  photo lives on a phone or other device,
                           same autofill, different source.
-       ✍ Add manually — tourist passports, foreign IDs, autofill
+       ✍ Add manually  --  tourist passports, foreign IDs, autofill
                          misfires. SKIPS autofill; type every field.
   4. The client form opens. Fill in or correct fields. Middle name
-     is optional but strongly encouraged — it is what distinguishes
+     is optional but strongly encouraged  --  it is what distinguishes
      two same-named-different-people on the next search.
-  5. Continue through the rest of NewTx — privacy ack, signature,
+  5. Continue through the rest of NewTx  --  privacy ack, signature,
      finalise. Manual-entry transactions have no ID photo on file;
      that is the trade-off for being able to serve tourists.
 
@@ -45,7 +45,7 @@ COMMON MISTAKES:
     tool for non-AU IDs.
 
 RELATED TOPICS:
-  - "Sophiie - PIN recovery.txt" — companion training file.
-  - "Sophiie - client transaction history.txt" — companion file.
-  - "Sophiie - require ID on every transaction.txt" — the shop
+  - "Sophiie - PIN recovery.txt"  --  companion training file.
+  - "Sophiie - client transaction history.txt"  --  companion file.
+  - "Sophiie - require ID on every transaction.txt"  --  the shop
     policy that mandates ID capture on every transaction.

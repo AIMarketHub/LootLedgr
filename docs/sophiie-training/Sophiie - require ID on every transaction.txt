@@ -8,7 +8,7 @@ PROCEDURE:
   2. Open Settings (gear icon) → Compliance Thresholds accordion.
   3. The first item is the toggle "Require ID on every transaction
      (recommended)". Above it is a help line explaining the on /
-     off behaviour. The toggle itself is gated by Admin PIN — the
+     off behaviour. The toggle itself is gated by Admin PIN  --  the
      same gate that protects the threshold-tightening fields below
      it; one PIN entry per Settings session unlocks both.
   4. Toggle ON behaviour:
@@ -26,7 +26,7 @@ PROCEDURE:
   6. The NewTx Client step (step 4) prompts for the same fields
      either way; the difference is whether finalising rejects an
      incomplete form. With the toggle ON and ID fields blank,
-     finalize pops "ID type and ID number required — this shop
+     finalize pops "ID type and ID number required  --  this shop
      sights ID on every transaction."
 
 EDGE CASES:
@@ -40,18 +40,18 @@ EDGE CASES:
 
 COMMON MISTAKES:
   - Treating sub-threshold transactions as "ID optional" when the
-    toggle is ON. They are not — the shop policy says every tx
+    toggle is ON. They are not  --  the shop policy says every tx
     sights ID. The toast wording exists to remind.
   - Confusing ID capture with KYC. Capturing name + ID type + ID
     number is the dedupe minimum and runs every transaction. KYC
     (PEP / TFS / Risk / Source of Funds / Source of Wealth) only
     runs above the legal thresholds.
-  - Toggling OFF for "convenience" on a busy day. Don't — the
+  - Toggling OFF for "convenience" on a busy day. Don't  --  the
     legal-minimum mode is for shops that have made a deliberate
     choice to follow the legal floor and nothing more.
 
 RELATED TOPICS:
-  - "Sophiie - PIN recovery.txt" — companion training file.
-  - "Sophiie - client transaction history.txt" — companion file.
-  - The Compliance Thresholds section in Settings — the
+  - "Sophiie - PIN recovery.txt"  --  companion training file.
+  - "Sophiie - client transaction history.txt"  --  companion file.
+  - The Compliance Thresholds section in Settings  --  the
     threshold-tightening fields live alongside this toggle.
