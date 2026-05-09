@@ -12,7 +12,7 @@
 
 import React from "react";
 import {T,c} from "../theme.js";
-import {sN,sS,fmtAUD,hoursLeft,todayStr} from "../lib/utils.js";
+import {sN,sS,fmtAUD,hoursLeft,todayStr,formatDateAU} from "../lib/utils.js";
 import {AIGhost} from "../components/ui";
 import StockCard from "../components/StockCard.jsx";
 
@@ -27,7 +27,7 @@ export default function Stock({
       <div style={{fontSize:17,fontWeight:"bold",color:T.white}}>Stock / Hold Manager<AIGhost settings={settings} label="Stock"/></div>
       <button style={c.btn(T.gold,T.bg,{fontSize:11,padding:"7px 12px"})} onClick={dlAccounting}>📊 Accounting</button>
     </div>
-    {frozenSnap?<div style={{...c.bnr("warn"),marginBottom:10}}>❄ Frozen at {frozenSnap.frozenAt} — Au {fmtAUD(frozenSnap.gSpot)}/oz · Ag {fmtAUD(frozenSnap.sSpot)}/oz<button style={{...c.bsm(T.redBg,T.red),marginLeft:10,fontSize:10}} onClick={()=>setPinModal({reason:"Unfreeze snapshot — Admin PIN required.",cb:()=>{setFrozenSnap(null);pop("Snapshot unfrozen.","ok");}})}>Unfreeze</button></div> :
+    {frozenSnap?<div style={{...c.bnr("warn"),marginBottom:10}}>❄ Frozen at {formatDateAU(frozenSnap.frozenAt)} — Au {fmtAUD(frozenSnap.gSpot)}/oz · Ag {fmtAUD(frozenSnap.sSpot)}/oz<button style={{...c.bsm(T.redBg,T.red),marginLeft:10,fontSize:10}} onClick={()=>setPinModal({reason:"Unfreeze snapshot — Admin PIN required.",cb:()=>{setFrozenSnap(null);pop("Snapshot unfrozen.","ok");}})}>Unfreeze</button></div> :
     <div style={{...c.bnr("info"),marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>📸 No frozen snapshot. Lock prices for month-end accounting.</span><button style={{...c.bsm(T.goldBg,T.gold),fontSize:10}} onClick={()=>setPinModal({reason:"Freeze snapshot at current spot prices — Admin PIN required.",cb:()=>{setFrozenSnap({gSpot,sSpot,frozenAt:todayStr()});pop("Snapshot locked.","ok");}})}>❄ Freeze Now</button></div>}
     {(stock||[]).length>0&&(
       <div style={c.g3(10)}>

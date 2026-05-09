@@ -2,7 +2,7 @@
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
-import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,daysAgoISO,computeHoursWorked,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {sN,sS,uid,fmt2,fmtAUD,fmtDate,formatDateAU,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,daysAgoISO,computeHoursWorked,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList,getCurrentUserLabel} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
@@ -734,8 +734,8 @@ export default function Loot(){
   // include the range so the accountant can see it at a glance.
   const dlAccounting=async({fromDate,toDate})=>{
     const sp=spotForCalc();
-    const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
-    const rangeLabel=fromDate+" to "+toDate;
+    const sn=frozenSnap?"FROZEN "+formatDateAU(frozenSnap.frozenAt)+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
+    const rangeLabel=formatDateAU(fromDate)+" to "+formatDateAU(toDate);
     const rows=[];
 
     // 3.5-A-4 — date-bounded filter for the tx-driven sections.
@@ -751,7 +751,7 @@ export default function Loot(){
     rows.push(["Field","Value"]);
     rows.push(["Business",sS(settings.businessName)]);
     rows.push(["ABN",sS(settings.abn)]);
-    rows.push(["Exported",todayStr()]);
+    rows.push(["Exported",formatDateAU(todayStr())]);
     rows.push(["Date Range",rangeLabel]);
     rows.push(["Spot",sn]);
     rows.push(["Generator","Loot Ledger v"+APP_VERSION]);
@@ -777,7 +777,7 @@ export default function Loot(){
       const code=hobby?sS(settings.xeroBuyCodeHobby||"315"):isBuy?sS(settings.xeroBuyCode||"310"):isSell?sS(settings.xeroSellCode||"200"):"";
       rows.push([
         sS(tx.id),
-        sS(tx.date&&tx.date.slice(0,10)),
+        formatDateAU(tx.date),
         sS((tx.client&&tx.client.fullName)||"-"),
         sS((it.product&&it.product.label)||it.description||"-"),
         sS((it.product&&it.product.cat)||"-"),
@@ -842,7 +842,7 @@ export default function Loot(){
     // 3.5-A-4 — Period row reflects the picked range; preserved
     // frozen-snap path takes precedence so a frozen export still
     // shows the snapshot timestamp it was taken at.
-    const periodLabel=frozenSnap?sS(frozenSnap.frozenAt):rangeLabel;
+    const periodLabel=frozenSnap?formatDateAU(frozenSnap.frozenAt):rangeLabel;
     rows.push(["GST SUMMARY ("+rangeLabel+")"]);
     rows.push(["Period",periodLabel]);
     rows.push(["Total Sales","$"+tS.toFixed(2)]);
@@ -863,7 +863,7 @@ export default function Loot(){
     ]);
     filteredTx.forEach(tx=>rows.push([
       sS(tx.id),
-      sS(tx.date&&tx.date.slice(0,10)),
+      formatDateAU(tx.date),
       sS((tx.client&&tx.client.fullName)||"-"),
       sS(tx.ttrStatus||"N/A"),
       tx.smrFlagged?"YES":"",
@@ -923,7 +923,7 @@ export default function Loot(){
       sorted.forEach(r=>{
         rows.push([
           usersMap[r.user_id]||sS(r.user_id),
-          sS(r.work_date),
+          formatDateAU(r.work_date),
           r.start_time?String(r.start_time).slice(0,5):"-",
           r.end_time?String(r.end_time).slice(0,5):"-",
           sN(r.break_minutes),

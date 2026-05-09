@@ -28,7 +28,7 @@ import React,{useState,useMemo,useEffect} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F,SF} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
-import {sN,sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
+import {sN,sS,fmtAUD,fmtDate,nowISO,formatDateTimeAU} from "../lib/utils.js";
 import {checkPhotoSize,getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {clients,getMissingMandatoryFields,formatLastVisit} from "../lib/clients.js";
 
@@ -459,7 +459,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
           <div style={{...c.card({padding:10}),marginTop:8}}>
             {client.blacklistOverrides.map((o,i)=>(
               <div key={i} style={{padding:"6px 0",borderBottom:i<client.blacklistOverrides.length-1?"1px solid "+T.border+"44":"none",fontSize:11,color:T.muted}}>
-                <div style={{color:T.text}}>{o.timestamp?new Date(o.timestamp).toLocaleString("en-AU"):"—"}</div>
+                <div style={{color:T.text}}>{o.timestamp?formatDateTimeAU(o.timestamp):"—"}</div>
                 {o.staffId&&<div>Staff: {sS(o.staffId)}</div>}
                 {o.reason&&<div>Reason: {sS(o.reason)}</div>}
               </div>

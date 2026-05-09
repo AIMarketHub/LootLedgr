@@ -15,10 +15,11 @@ import {useNavigate} from "react-router-dom";
 import AuthLayout from "./auth/AuthLayout.jsx";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {signOut} from "../lib/auth/saas.js";
+import {formatDateAU} from "../lib/utils.js";
 
 const SUPPORT_EMAIL="admin@lootledger.com.au";
 
-function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return String(iso);}}
+const fmtLong=iso=>iso?formatDateAU(iso):"—";
 
 export default function TrialExpired(){
   const{shop,refresh}=useAuth();

@@ -23,7 +23,7 @@
 
 import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
-import {sS,todayStr,daysAgoISO} from "../lib/utils.js";
+import {sS,todayStr,daysAgoISO,formatDateTimeAU} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle,listStaffHours,upsertStaffHours,unlockStaffHours} from "../lib/auth/saas.js";
@@ -92,12 +92,11 @@ function diffPromptText(date,existing,next){
     +"\nClick OK to overwrite, Cancel to skip this day.";
 }
 
-// Short locked-at label, e.g. "Locked Thu 09 May 16:42".
+// Locked-at label using the consolidated formatDateTimeAU helper.
+// Renders as "Locked 09-05-2026 13:28".
 function fmtLockedAt(iso){
   if(!iso)return "Locked";
-  const d=new Date(iso);
-  if(isNaN(d.getTime()))return "Locked";
-  return "Locked "+d.toLocaleString("en-AU",{weekday:"short",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+  return "Locked "+formatDateTimeAU(iso);
 }
 
 export default function Staff({pop,setShowStaff}){

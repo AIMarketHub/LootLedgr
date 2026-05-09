@@ -30,9 +30,9 @@
 import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
-import {sS} from "../lib/utils.js";
+import {sS,formatDateAU} from "../lib/utils.js";
 
-function fmtLong(iso){if(!iso)return null;try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return sS(iso);}}
+const fmtLong=iso=>iso?formatDateAU(iso):null;
 
 // Format the parsed DOB for human display alongside the raw text.
 function formatDob(parsed){

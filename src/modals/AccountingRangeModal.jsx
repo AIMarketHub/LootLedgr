@@ -16,7 +16,7 @@
 
 import React,{useState,useMemo} from "react";
 import {T,c} from "../theme.js";
-import {todayStr,daysAgoISO} from "../lib/utils.js";
+import {todayStr,daysAgoISO,formatDateAU} from "../lib/utils.js";
 import Modal from "../components/ui/Modal.jsx";
 import {F} from "../components/ui";
 
@@ -93,7 +93,7 @@ export default function AccountingRangeModal({onClose,onExport}){
       {customInvalid&&<div style={{fontSize:11,color:T.red||T.gold,marginTop:4}}>From date must be on or before To date.</div>}
     </div>}
 
-    {!customInvalid&&resolved&&resolved.fromDate&&resolved.toDate&&<div style={{fontSize:11,color:T.muted,marginBottom:12}}>Range: <strong style={{color:T.text}}>{resolved.fromDate}</strong> to <strong style={{color:T.text}}>{resolved.toDate}</strong>.</div>}
+    {!customInvalid&&resolved&&resolved.fromDate&&resolved.toDate&&<div style={{fontSize:11,color:T.muted,marginBottom:12}}>Range: <strong style={{color:T.text}}>{formatDateAU(resolved.fromDate)}</strong> to <strong style={{color:T.text}}>{formatDateAU(resolved.toDate)}</strong>.</div>}
 
     <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
       <button style={c.bsm()} onClick={onClose}>Cancel</button>

@@ -19,8 +19,9 @@ import {Link,useNavigate} from "react-router-dom";
 import {supabase,signOut} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 import Logo from "../../components/Logo.jsx";
+import {formatDateAU} from "../../lib/utils.js";
 
-function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return String(iso);}}
+const fmtLong=iso=>iso?formatDateAU(iso):"—";
 
 const styles={
   page:{minHeight:"100vh",background:"#f5f5f5",color:"#222",fontFamily:"system-ui, -apple-system, Segoe UI, Roboto, sans-serif",padding:"24px 16px"},

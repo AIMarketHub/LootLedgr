@@ -43,7 +43,7 @@ import React,{useState,useEffect,useRef} from "react";
 import {T,c} from "../theme.js";
 import {F,SF,HoldTimer,Modal} from "../components/ui";
 import {ID_OPTIONS} from "../lib/constants.js";
-import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO} from "../lib/utils.js";
+import {sN,sS,uid,fmtAUD,fmtScaleWeight,addHours,nowISO,formatDateAU,formatDateTimeAU} from "../lib/utils.js";
 import {checkPhotoSize,sb} from "../lib/storage.js";
 import {PRIVACY_NOTICE,THRESH,getRequiredFields,evaluateStructuring,cashAmountFromTx} from "../lib/compliance/index.js";
 import {sendEftpos,sendSquareSell,sendShopifySell,sendSquareBuy,sendShopifyBuy} from "../lib/integrations.js";
@@ -935,7 +935,7 @@ export default function NewTx({
         <div style={c.card({padding:16,marginBottom:14})}>
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 1 — TRANSACTION</div>
           <div style={c.g2(10)}>
-            <F label="Date" value={new Date().toLocaleDateString("en-AU")} readOnly/>
+            <F label="Date" value={formatDateAU(new Date().toISOString())} readOnly/>
             <F label="Contract No" value={txNo} readOnly/>
           </div>
           <div style={{marginBottom:12}}>
@@ -1019,7 +1019,7 @@ export default function NewTx({
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 5 — ID VERIFICATION</div>
           <div style={c.g2(10)}>
             <F label="Staff Member Name" required value={staff.staffName} onChange={v=>setStaff(p=>({...p,staffName:v}))}/>
-            <F label="Date / Time" value={new Date().toLocaleString("en-AU")} readOnly/>
+            <F label="Date / Time" value={formatDateTimeAU(new Date().toISOString())} readOnly/>
           </div>
           <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginTop:8}}>
             <input type="checkbox" checked={idSighted} onChange={e=>setIdSighted(e.target.checked)}/>
@@ -1030,8 +1030,8 @@ export default function NewTx({
           <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:12}}>SECTION 7 — 168-HOUR SAFETY HOLD</div>
           <div style={c.bnr("warn")}>Automatic 168-hour Safety Hold applies to all bought items.</div>
           <div style={c.g2(10)}>
-            <div><div style={c.lbl}>Hold Start</div><div style={{fontSize:12,color:T.white}}>{new Date().toLocaleString("en-AU")}</div></div>
-            <div><div style={c.lbl}>Hold Expiry (+168 hrs)</div><div style={{fontSize:12,color:T.orange}}>{new Date(Date.now()+168*3600000).toLocaleString("en-AU")}</div></div>
+            <div><div style={c.lbl}>Hold Start</div><div style={{fontSize:12,color:T.white}}>{formatDateTimeAU(new Date().toISOString())}</div></div>
+            <div><div style={c.lbl}>Hold Expiry (+168 hrs)</div><div style={{fontSize:12,color:T.orange}}>{formatDateTimeAU(new Date(Date.now()+168*3600000).toISOString())}</div></div>
           </div>
           {/* Section 9 Gap 4 polish — emphasised label + datalist
               autocomplete from the most-recent storage locations
@@ -1088,7 +1088,7 @@ export default function NewTx({
             <div><div style={c.lbl}>Net</div><div style={{fontWeight:"bold",color:net>=0?T.gold:T.green,fontSize:16}}>{net>=0?"Client pays "+fmtAUD(net):"We pay "+fmtAUD(-net)}</div></div>
             {buyTotal>0&&<div><div style={c.lbl}>Buy Total</div><div style={{color:T.green,fontWeight:"bold"}}>{fmtAUD(buyTotal)}</div></div>}
             {sellTotal>0&&<div><div style={c.lbl}>Sell Total</div><div style={{color:T.gold,fontWeight:"bold"}}>{fmtAUD(sellTotal)}</div></div>}
-            <div><div style={c.lbl}>Date</div><div style={{color:T.text}}>{new Date().toLocaleString("en-AU")}</div></div>
+            <div><div style={c.lbl}>Date</div><div style={{color:T.text}}>{formatDateTimeAU(new Date().toISOString())}</div></div>
           </div>
           {compliance.flags.some(f=>f.key==="ttr")&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 TTR required — file with AUSTRAC Online within 10 business days.</div>}
         </div>

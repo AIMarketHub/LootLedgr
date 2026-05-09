@@ -23,7 +23,7 @@
 
 import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
-import {sN,sS,fmtAUD,todayStr} from "../lib/utils.js";
+import {sN,sS,fmtAUD,todayStr,formatDateAU,formatDateTimeAU} from "../lib/utils.js";
 import Modal from "../components/ui/Modal.jsx";
 import {F} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
@@ -44,9 +44,10 @@ function fmtT(t){return t?String(t).slice(0,5):"—";}
 // Build the multi-line text for the duplicate-day confirm. window.
 // confirm renders newlines; this is intentionally plain text rather
 // than a React modal because it must block the save loop and
-// accept/reject sequentially per user.
+// accept/reject sequentially per user. The `date` arg is a YYYY-
+// MM-DD ISO string; formatted via formatDateAU for display.
 function diffPromptText(label,date,existing,next){
-  return "Hours already logged for "+label+" on "+date+".\n\n"
+  return "Hours already logged for "+label+" on "+formatDateAU(date)+".\n\n"
     +"Existing:\n"
     +"  Start "+fmtT(existing.start_time)+"  End "+fmtT(existing.end_time)
     +"  Break "+sN(existing.break_minutes)+"m\n"
@@ -58,12 +59,11 @@ function diffPromptText(label,date,existing,next){
     +"\nClick OK to overwrite, Cancel to skip this row.";
 }
 
-// Short locked-at label, e.g. "Locked Thu 09 May 16:42".
+// Locked-at label using the consolidated formatDateTimeAU helper.
+// Renders as "Locked 09-05-2026 13:28".
 function fmtLockedAt(iso){
   if(!iso)return "Locked";
-  const d=new Date(iso);
-  if(isNaN(d.getTime()))return "Locked";
-  return "Locked "+d.toLocaleString("en-AU",{weekday:"short",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+  return "Locked "+formatDateTimeAU(iso);
 }
 
 export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
@@ -279,7 +279,7 @@ export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
               </div>}
               {showUnlockPanel&&<div style={{...c.card({padding:10}),marginTop:8,background:T.warn||T.surface,borderColor:T.red||T.border}}>
                 <div style={{fontSize:11,color:T.red||T.gold,fontWeight:"bold",marginBottom:6}}>⚠ Hours locked in for accounting. Contact the accountant before modifying the timesheet.</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Unlocking <strong>{userLabel(u)}</strong> for {today} requires their per-staff PIN.</div>
+                <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Unlocking <strong>{userLabel(u)}</strong> for {formatDateAU(today)} requires their per-staff PIN.</div>
                 <F label="Row owner's PIN (4–12 digits)" type="password" value={unlockFor.pin} onChange={v=>setUnlockFor(p=>({...p,pin:v}))} placeholder="••••"/>
                 <div style={{display:"flex",gap:8,marginTop:6}}>
                   <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onConfirmUnlock} disabled={unlockFor.busy||!unlockFor.pin}>{unlockFor.busy?"…":"Confirm unlock"}</button>

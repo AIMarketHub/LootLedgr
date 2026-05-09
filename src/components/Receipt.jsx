@@ -29,10 +29,15 @@
 
 import React from "react";
 import Logo from "./Logo.jsx";
+// Date helpers — receipts are customer-facing AU tax-invoice
+// artifacts. Date column is slashed AU convention via
+// formatDateAUSlash; the printed-on footer uses formatDateTimeAU
+// (consolidated DD-MM-YYYY HH:MM) so it matches the rest of the
+// operator UI.
+import {formatDateAUSlash,formatDateTimeAU} from "../lib/utils.js";
 
 function fmt2(n){return Number(n||0).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fmtAUD(n){return n==null||isNaN(n)?"—":"$"+fmt2(n);}
-function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU");}catch(_){return "—";}}
 function redactIdNumber(num){const s=String(num==null?"":num);return s.length<=4?s:"****"+s.slice(-4);}
 
 export default function Receipt({tx,settings}){
@@ -69,7 +74,7 @@ export default function Receipt({tx,settings}){
     <hr style={dashed}/>
     <section style={{marginBottom:10}}>
       <div><strong>Transaction #:</strong> {tx.id}</div>
-      <div><strong>Date:</strong> {fmtDateTime(tx.date)}</div>
+      <div><strong>Date:</strong> {formatDateAUSlash(tx.date)}</div>
       {cli.fullName&&<div><strong>Client:</strong> {cli.fullName}</div>}
       {cli.idType&&<div><strong>ID:</strong> {String(cli.idType).toUpperCase()} ending {redactIdNumber(cli.idNumber)}</div>}
       {(stf.staffName||stf.name)&&<div><strong>Operator:</strong> {stf.staffName||stf.name}</div>}
@@ -122,7 +127,7 @@ export default function Receipt({tx,settings}){
     </section>
     <footer style={{textAlign:"center",fontSize:10,color:"#666",marginTop:20}}>
       <div>Retain for tax records — 7 years.</div>
-      <div>Generated {new Date().toLocaleString("en-AU")}</div>
+      <div>Generated {formatDateTimeAU(new Date().toISOString())}</div>
     </footer>
   </div>;
 }

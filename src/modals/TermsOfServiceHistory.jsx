@@ -6,11 +6,11 @@
 import React,{useState} from "react";
 import {T,c} from "../theme.js";
 import {Modal} from "../components/ui";
-import {sS,nowISO} from "../lib/utils.js";
+import {sS,nowISO,formatDateTimeAU} from "../lib/utils.js";
 import {getCurrentUserId,getCurrentUserLabel} from "../lib/storage.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META} from "../lib/legal/termsOfServiceDefaults.js";
 
-function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}}
+const fmtDateTime=iso=>iso?formatDateTimeAU(iso):"—";
 
 function VersionDetail({version}){
   const data=version&&version.data||{};

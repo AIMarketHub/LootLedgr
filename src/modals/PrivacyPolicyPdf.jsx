@@ -15,11 +15,12 @@
 import React from "react";
 import {T,c} from "../theme.js";
 import {Modal} from "../components/ui";
-import {sS} from "../lib/utils.js";
+import {sS,formatDateLong} from "../lib/utils.js";
 import {SECTION_TITLES,SECTION_FIELDS,FIELD_META} from "../lib/legal/privacyPolicyDefaults.js";
 import Logo from "../components/Logo.jsx";
 
-function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});}catch(_){return sS(iso);}}
+// See AmlProgramPdf for the rationale on keeping fmtDateTime local.
+const fmtLong=iso=>iso?formatDateLong(iso):"—";
 function fmtDateTime(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}}
 function safeShopName(name){return sS(name).replace(/[^a-zA-Z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"shop";}
 

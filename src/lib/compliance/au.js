@@ -122,7 +122,7 @@
 // See docs/handover/section-9-audit.md for the full Section 9
 // status snapshot at this audit point.
 
-import {sN,sS,fmt2,fmtAUD,fmtDate} from "../utils.js";
+import {sN,sS,fmt2,fmtAUD,fmtDate,formatDateAU,formatDateTimeAU,formatDateAUSlash} from "../utils.js";
 import {TROY_OZ,GOLD_P,SILV_P} from "../constants.js";
 
 // Compliance thresholds (AUD).
@@ -523,7 +523,7 @@ export function calcMeltFn(item,frozenSnap,gSpot,sSpot){
 
 export function makeReceiptFn(tx,settings){
   const b=sS(settings.businessName)||"The Gold Shop";
-  const L=["========================================",b.toUpperCase(),"ABN: "+sS(settings.abn),sS(settings.address),"========================================","CONTRACT:  "+sS(tx.id),"DATE:      "+new Date(tx.date).toLocaleString("en-AU"),"CLIENT:    "+sS(tx.client&&tx.client.fullName),"----------------------------------------"];
+  const L=["========================================",b.toUpperCase(),"ABN: "+sS(settings.abn),sS(settings.address),"========================================","CONTRACT:  "+sS(tx.id),"DATE:      "+formatDateAUSlash(tx.date),"CLIENT:    "+sS(tx.client&&tx.client.fullName),"----------------------------------------"];
   (tx.items||[]).forEach((it,i)=>{L.push((i+1)+". "+sS(it.product&&it.product.label||"Item").slice(0,30));L.push("   "+it.mode.toUpperCase()+" "+fmtAUD(it.price));if(it.note)L.push("   "+sS(it.note).slice(0,40));});
   L.push("----------------------------------------");
   if(tx.buyTotal>0)L.push("BUY TOTAL:  "+fmtAUD(tx.buyTotal));
@@ -562,8 +562,8 @@ export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,sett
   // dealer's internal record). The columns are appended at the end
   // so existing column order is preserved for any consumer that
   // parses by index.
-  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":dateFrom.toLocaleDateString("en-AU")+" to "+dateTo.toLocaleDateString("en-AU")],["Hold Period",st.hold],["Instructions",st.note],["Generated",new Date().toLocaleString("en-AU")],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Storage","Notes","Hobby","Vic Miner's Right"]];
-  txs.forEach(tx=>{const cl=tx.client||{},stf=tx.staff||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),new Date(tx.date).toLocaleDateString("en-AU"),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(stf.storageLocation||"—"),sS(it.note),tx.isHobbyProspector?"YES":"",tx.isHobbyProspector?sS(tx.vicMinersRightNumber||""):""]);});});
+  const rows=[[st.name.toUpperCase()+" SECONDHAND DEALER TRANSACTION REPORT"],["Governing Act",st.act],["Dealer",sS(settings.businessName)],["ABN",sS(settings.abn)],["Licence",sS(settings.dealerLicenceNo)],["Address",sS(settings.address)],["Phone",sS(settings.phone)],suspicious?["Report Type","IMMEDIATE — SUSPICIOUS ITEM REPORT"]:["Report Type","TRANSACTION REGISTER"],["Period",suspicious?"All SMR-flagged":formatDateAU(dateFrom.toISOString())+" to "+formatDateAU(dateTo.toISOString())],["Hold Period",st.hold],["Instructions",st.note],["Generated",formatDateTimeAU(new Date().toISOString())],[],["Contract No","Date","Item","Serial","Qty","Price AUD","Client Name","DOB","Address","ID Type","ID Number","KYC","TTR","SMR","Storage","Notes","Hobby","Vic Miner's Right"]];
+  txs.forEach(tx=>{const cl=tx.client||{},stf=tx.staff||{};(tx.items||[]).filter(i=>i.mode==="buy").forEach(it=>{const p=it.product||{};rows.push([sS(tx.id),formatDateAU(tx.date),sS(p.label||(it.note?"Unlisted: "+it.note:"Item")),sS(p.serial||"—"),sS(it.qty||"1"),sN(it.price).toFixed(2),sS(cl.fullName),sS(cl.dob),sS(cl.address),sS(cl.idType),sS(cl.idNumber),tx.kycDone?"YES":"NO",tx.ttrRequired?"YES":"NO",tx.smrFlagged?"YES":"NO",sS(stf.storageLocation||"—"),sS(it.note),tx.isHobbyProspector?"YES":"",tx.isHobbyProspector?sS(tx.vicMinersRightNumber||""):""]);});});
   if(rows.length<=15)rows.push(["(No qualifying buy transactions in this period)"]);
   // Section 9 Gap 8 — police-hold register. Appended as a
   // separate block (NOT a new column on the existing schema —
@@ -580,7 +580,7 @@ export function genPoliceReport(dateFrom,dateTo,suspicious,stateCode,txList,sett
     rows.push(["Item","Linked Tx","Notice Received","Notice Ref","First Expiry","Reissue Date","Reissue Expiry","Status","Days Remaining","Storage"]);
     heldStock.forEach(s=>{
       const ph=policeHoldState(s);
-      const fmtIso=v=>v?new Date(v).toLocaleDateString("en-AU"):"—";
+      const fmtIso=v=>v?formatDateAU(v):"—";
       rows.push([
         sS(s.description||(s.product&&s.product.label)||"—"),
         sS(s.txId||"—"),

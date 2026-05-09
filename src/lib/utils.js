@@ -20,7 +20,69 @@ export const uid=()=>Date.now().toString(36).toUpperCase()+Math.random().toStrin
 // Number / currency / date formatters (Australian locale).
 export const fmt2=n=>sN(n).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
 export const fmtAUD=n=>(n==null||isNaN(n)||!isFinite(n))?"—":"$"+fmt2(n);
-export const fmtDate=iso=>iso?new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+
+// Date display formatters (consolidated 2026-05-09).
+//
+// Four canonical formats — pick the one that matches the surface:
+//
+//   formatDateAU      → "09-05-2026"        general UI display
+//   formatDateTimeAU  → "09-05-2026 13:28"  UI + audit timestamps
+//   formatDateAUSlash → "09/05/2026"        receipts only
+//   formatDateLong    → "9 May 2026"        legal PDFs only
+//
+// All accept either an ISO timestamp ("2026-05-09T13:28:00.000Z")
+// or a YYYY-MM-DD date string. Empty / null input returns "".
+// Non-parseable input falls back to the original string so a
+// surprise value doesn't render as "Invalid Date".
+//
+// formatDateAU + formatDateAUSlash do PURE STRING surgery on the
+// YYYY-MM-DD prefix (no Date construction), so they're immune to
+// timezone offsets — a Postgres `date` column always renders as
+// the literal calendar day stored. formatDateTimeAU + formatDate
+// Long use Date(...) since they need clock / month-name lookups.
+
+export function formatDateAU(iso){
+  if(!iso)return "";
+  const s=String(iso).slice(0,10);
+  const parts=s.split("-");
+  if(parts.length!==3)return s;
+  return parts[2]+"-"+parts[1]+"-"+parts[0];
+}
+
+export function formatDateTimeAU(iso){
+  if(!iso)return "";
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return String(iso);
+  const dd=String(d.getDate()).padStart(2,"0");
+  const mm=String(d.getMonth()+1).padStart(2,"0");
+  const yyyy=d.getFullYear();
+  const hh=String(d.getHours()).padStart(2,"0");
+  const mi=String(d.getMinutes()).padStart(2,"0");
+  return dd+"-"+mm+"-"+yyyy+" "+hh+":"+mi;
+}
+
+export function formatDateAUSlash(iso){
+  if(!iso)return "";
+  const s=String(iso).slice(0,10);
+  const parts=s.split("-");
+  if(parts.length!==3)return s;
+  return parts[2]+"/"+parts[1]+"/"+parts[0];
+}
+
+export function formatDateLong(iso){
+  if(!iso)return "";
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return String(iso);
+  return d.toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});
+}
+
+// fmtDate — kept as backward-compat alias for formatDateTimeAU
+// so existing call sites in History, StockCard, Clients,
+// Dashboard, ClientDetail, lib/clients, lib/compliance/au, etc.
+// pick up the new "DD-MM-YYYY HH:MM" format automatically.
+// Returns "—" (em-dash) for empty input to preserve the prior
+// fmtDate sentinel; formatDateTimeAU returns "" for empty.
+export const fmtDate=iso=>iso?formatDateTimeAU(iso):"—";
 
 // Hold / hours math (used by HoldTimer and stock-card ready state).
 export const addHours=(iso,h)=>new Date(new Date(iso).getTime()+h*3600000).toISOString();

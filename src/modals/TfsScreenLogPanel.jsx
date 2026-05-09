@@ -39,7 +39,7 @@ import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
 import Modal from "../components/ui/Modal.jsx";
 import {sb} from "../lib/storage.js";
-import {sS,fmtDate} from "../lib/utils.js";
+import {sS,fmtDate,formatDateTimeAU} from "../lib/utils.js";
 
 const PAGE_SIZE=50;
 
@@ -56,11 +56,7 @@ function ConfirmedCell({row}){
   return <span style={{color:T.muted,fontSize:11}}>—</span>;
 }
 
-function fmtDateTime(iso){
-  if(!iso)return "—";
-  try{return new Date(iso).toLocaleString("en-AU",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"});}
-  catch(_){return sS(iso);}
-}
+const fmtDateTime=iso=>iso?formatDateTimeAU(iso):"—";
 
 function defaultFromISO(){
   const d=new Date();

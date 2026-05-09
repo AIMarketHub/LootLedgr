@@ -29,8 +29,9 @@ import {useAuth} from "../../components/AuthProvider.jsx";
 import {parseDfatExcel} from "../../lib/tfs/parser.js";
 import {replaceTfsCache} from "../../lib/tfs/storage.js";
 import Logo from "../../components/Logo.jsx";
+import {formatDateTimeAU} from "../../lib/utils.js";
 
-function fmtLong(iso){if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return String(iso);}}
+const fmtLong=iso=>iso?formatDateTimeAU(iso):"—";
 function daysSince(iso){if(!iso)return null;const d=new Date(iso).getTime();if(isNaN(d))return null;return Math.floor((Date.now()-d)/(24*3600*1000));}
 
 const styles={

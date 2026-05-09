@@ -28,14 +28,14 @@
 
 import React,{useState,useEffect} from "react";
 import {T,c} from "../theme.js";
-import {sS,fmtAUD,fmtDate,nowISO} from "../lib/utils.js";
+import {sS,fmtAUD,fmtDate,nowISO,formatDateAU,formatDateTimeAU} from "../lib/utils.js";
 import {getCurrentUserId,getCurrentUserLabel,sb} from "../lib/storage.js";
 
-// Date+time formatter used by the AML/CTF Program status card and
-// version history. fmtDate from utils renders "DD/MM/YY HH:MM";
-// the AML surface is documentation grade, so we elaborate to a
-// long-form day/month/year + 24-hour time.
-const fmtDateTime=iso=>{if(!iso)return "—";try{return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});}catch(_){return sS(iso);}};
+// Date+time formatter for the AML/CTF Program status card and
+// version history rows. Consolidated 2026-05-09 onto the shared
+// formatDateTimeAU helper so the timestamp format ("09-05-2026
+// 13:28") matches the rest of the operator UI.
+const fmtDateTime=iso=>iso?formatDateTimeAU(iso):"—";
 import {APP_VERSION} from "../lib/constants.js";
 import {sendDuressSMS} from "../lib/integrations.js";
 import {probeStripe} from "../lib/integrations/stripe.js";
@@ -429,7 +429,9 @@ export default function Settings({
           if(current&&current.approvedAt){
             const d=new Date(current.approvedAt);
             d.setFullYear(d.getFullYear()+3);
-            nextReview=d.toLocaleDateString("en-AU",{day:"numeric",month:"long",year:"numeric"});
+            // Use formatDateAU for consistency with the rest of
+            // the operator UI (DD-MM-YYYY).
+            nextReview=formatDateAU(d.toISOString());
           }
           const mostRecent=versions.length?[...versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]:null;
           // Seed a fresh draft from the current approved version.

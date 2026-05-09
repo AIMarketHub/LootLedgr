@@ -32,7 +32,7 @@
 import React,{useMemo,useState} from "react";
 import {T,c} from "../theme.js";
 import {Modal,F} from "../components/ui";
-import {sS,fmtDate,nowISO} from "../lib/utils.js";
+import {sS,nowISO,formatDateAU} from "../lib/utils.js";
 import {policeHoldState,calendarDaysBetween} from "../lib/compliance/index.js";
 
 const HOLD_DAYS=21;
@@ -51,7 +51,9 @@ function plusDaysISO(baseISO,days){
   return d.toISOString();
 }
 
-function fmtIso(v){return v?fmtDate(v):"—";}
+// Police-hold notice fields are date-only (stored via type=date
+// inputs); render as DD-MM-YYYY without a clock.
+function fmtIso(v){return v?formatDateAU(v):"—";}
 
 export default function PoliceHoldModal({stockItem,mode,setStock,onClose,pop}){
   const item=stockItem||null;
