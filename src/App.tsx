@@ -708,44 +708,38 @@ export default function Loot(){
     setTimeout(()=>setDuressActive(false),5*60*1000);
   };
 
-  // Phase 3.5-B (2026-05-09) — multi-tab XLSX accounting export.
-  // Replaces the prior single-CSV implementation. Five sheets:
-  // Cover / TX Register / Stock Valuation / GST Summary /
-  // Compliance Log. Per-item iteration matches the prior CSV
-  // shape field-for-field so downstream parsers (Xero importers,
-  // accountant macros) continue to read the same columns. The
-  // only data-side change: em-dash fallbacks ("—") swapped to
-  // ASCII "-" for cross-editor cleanliness (OpenOffice's
-  // Windows-1252 default reader rendered them as â€" mojibake).
-  //
-  // SheetJS imported at the top of this file.
+  // Phase 3.5-B (2026-05-09) — single-sheet XLSX accounting
+  // export. Sections stack vertically with blank-row separators,
+  // each prefixed by an uppercase section title row. Preserves
+  // every field reference from the prior 5-sheet implementation
+  // (e387890) field-for-field; only the workbook layout changes.
+  // ASCII-clean fallbacks throughout. Adds a Staff Hours
+  // placeholder section pending the Phase 3.5-A feature.
   const dlAccounting=()=>{
     const sp=spotForCalc();
     const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
-    const wb=XLSX.utils.book_new();
+    const rows=[];
 
-    // ─── Sheet 1 — Cover ───────────────────────────────────
-    const coverRows=[
-      ["Field","Value"],
-      ["Business",sS(settings.businessName)],
-      ["ABN",sS(settings.abn)],
-      ["Exported",todayStr()],
-      ["Spot",sn],
-      ["Generator","Loot Ledger v"+APP_VERSION],
-    ];
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(coverRows),"Cover");
+    // ─── Cover block ────────────────────────────────────
+    rows.push(["Field","Value"]);
+    rows.push(["Business",sS(settings.businessName)]);
+    rows.push(["ABN",sS(settings.abn)]);
+    rows.push(["Exported",todayStr()]);
+    rows.push(["Spot",sn]);
+    rows.push(["Generator","Loot Ledger v"+APP_VERSION]);
+    rows.push([]);
 
-    // ─── Sheet 2 — TX Register ─────────────────────────────
-    // One row per item per tx (matches prior CSV iteration).
-    // Stage 1.C hobby-prospector treatment preserved verbatim:
-    // hobby buys are GST-exempt + posted to xeroBuyCodeHobby
-    // (default 315). Standard sells stay at xeroSellCode (200);
-    // standard buys at xeroBuyCode (310).
-    const txRows=[[
+    // ─── TX Register ────────────────────────────────────
+    // One row per item per tx. Stage 1.C hobby-prospector
+    // treatment preserved: hobby buys are GST-exempt + posted
+    // to xeroBuyCodeHobby (default 315); standard sells stay
+    // at xeroSellCode (200); standard buys at xeroBuyCode (310).
+    rows.push(["TRANSACTION REGISTER"]);
+    rows.push([
       "Invoice","Date","Client","Item","Metal","Purity","Wt(g)",
       "Bought($)","Sold($)","Margin($)","GST","GST Est($)",
       "Status","Hobby","Account Code"
-    ]];
+    ]);
     (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
       const isBuy=it.mode==="buy",isSell=it.mode==="sell";
       const hobby=isBuy&&!!tx.isHobbyProspector;
@@ -753,7 +747,7 @@ export default function Loot(){
       const gst=hobby?"Hobby (exempt)":it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin":"Standard 10%";
       const ge=hobby?0:it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,m/11):sv*0.1;
       const code=hobby?sS(settings.xeroBuyCodeHobby||"315"):isBuy?sS(settings.xeroBuyCode||"310"):isSell?sS(settings.xeroSellCode||"200"):"";
-      txRows.push([
+      rows.push([
         sS(tx.id),
         sS(tx.date&&tx.date.slice(0,10)),
         sS((tx.client&&tx.client.fullName)||"-"),
@@ -771,23 +765,21 @@ export default function Loot(){
         code,
       ]);
     }));
-    // Hobby-prospector accounting note row preserved (placed
-    // after the data so it doesn't interfere with column
-    // alignment when the file is sorted/filtered).
-    txRows.push([]);
-    txRows.push(["Note: Hobby prospector -- personal-use exemption (income tax nil, GST nil, CGT exempt under personal-use). Account code: "+sS(settings.xeroBuyCodeHobby||"315")+"."]);
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(txRows),"TX Register");
+    rows.push([]);
+    rows.push(["Note: Hobby prospector -- personal-use exemption (income tax nil, GST nil, CGT exempt under personal-use). Account code: "+sS(settings.xeroBuyCodeHobby||"315")+"."]);
+    rows.push([]);
 
-    // ─── Sheet 3 — Stock Valuation ────────────────────────
-    const stockRows=[[
+    // ─── Stock Valuation ────────────────────────────────
+    rows.push(["STOCK VALUATION"]);
+    rows.push([
       "Item","Invoice","Metal","Purity","Wt(g)","Bought($)",
       "Melt($)","P&L($)","GST","Days","Status"
-    ]];
+    ]);
     (stock||[]).filter(x=>!x.sold).forEach(s=>{
       const mv=calcMeltFn(s,frozenSnap,sp.g,sp.s);
       const b=sN(s.price);
       const d=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;
-      stockRows.push([
+      rows.push([
         sS(s.description||((s.product&&s.product.label))||"-"),
         sS(s.txId||"-"),
         sS((s.product&&s.product.cat)||"-"),
@@ -801,9 +793,9 @@ export default function Loot(){
         s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready",
       ]);
     });
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(stockRows),"Stock Valuation");
+    rows.push([]);
 
-    // ─── Sheet 4 — GST Summary ────────────────────────────
+    // ─── GST Summary ────────────────────────────────────
     // Stage 1.C — hobby buys excluded from "Total Purchases"
     // and reported on their own line. Standard / margin GST are
     // sell-side only under the AU second-hand goods regime.
@@ -820,26 +812,25 @@ export default function Loot(){
       }
     }));
     const periodLabel=frozenSnap?sS(frozenSnap.frozenAt):todayStr();
-    const gstRows=[
-      ["Metric","Value"],
-      ["Period",periodLabel],
-      ["Total Sales","$"+tS.toFixed(2)],
-      ["Total Purchases (commercial)","$"+tP.toFixed(2)],
-      ["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)],
-      ["Standard GST (10%)","$"+tSG.toFixed(2)],
-      ["Margin Scheme GST","$"+tMG.toFixed(2)],
-      ["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],
-      ["Note","Estimate only -- confirm with registered tax agent"],
-    ];
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gstRows),"GST Summary");
+    rows.push(["GST SUMMARY"]);
+    rows.push(["Period",periodLabel]);
+    rows.push(["Total Sales","$"+tS.toFixed(2)]);
+    rows.push(["Total Purchases (commercial)","$"+tP.toFixed(2)]);
+    rows.push(["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)]);
+    rows.push(["Standard GST (10%)","$"+tSG.toFixed(2)]);
+    rows.push(["Margin Scheme GST","$"+tMG.toFixed(2)]);
+    rows.push(["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)]);
+    rows.push(["Note","Estimate only -- confirm with registered tax agent"]);
+    rows.push([]);
 
-    // ─── Sheet 5 — Compliance Log ─────────────────────────
-    // One row per tx (NOT per item; matches prior CSV).
-    const complianceRows=[[
+    // ─── Compliance Log ─────────────────────────────────
+    // One row per tx (NOT per item).
+    rows.push(["COMPLIANCE LOG"]);
+    rows.push([
       "Invoice","Date","Client","TTR Status","SMR","KYC",
       "Police Hold","Voided"
-    ]];
-    (txList||[]).forEach(tx=>complianceRows.push([
+    ]);
+    (txList||[]).forEach(tx=>rows.push([
       sS(tx.id),
       sS(tx.date&&tx.date.slice(0,10)),
       sS((tx.client&&tx.client.fullName)||"-"),
@@ -849,10 +840,15 @@ export default function Loot(){
       (tx.items||[]).some(i=>i.policeHold)?"YES":"",
       tx.voided?"YES":"",
     ]));
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(complianceRows),"Compliance Log");
+    rows.push([]);
 
-    // Trigger browser download via SheetJS's built-in
-    // BlobBuilder + anchor click. No dlFile() helper needed.
+    // ─── Staff Hours (placeholder) ──────────────────────
+    rows.push(["STAFF HOURS"]);
+    rows.push(["(Staff hours tracking not yet shipped -- Phase 3.5 part A.)"]);
+
+    // Build single-sheet workbook + trigger download.
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"Accounting");
     XLSX.writeFile(wb,"lootledger-accounting-"+todayStr()+".xlsx");
     pop("Accounting export downloaded.","ok");
   };
