@@ -30,6 +30,7 @@ import {parseDfatExcel} from "../../lib/tfs/parser.js";
 import {replaceTfsCache} from "../../lib/tfs/storage.js";
 import Logo from "../../components/Logo.jsx";
 import {formatDateTimeAU} from "../../lib/utils.js";
+import {translateAuthError} from "../../lib/auth/errorMessages.js";
 
 const fmtLong=iso=>iso?formatDateTimeAU(iso):"—";
 function daysSince(iso){if(!iso)return null;const d=new Date(iso).getTime();if(isNaN(d))return null;return Math.floor((Date.now()-d)/(24*3600*1000));}
@@ -80,7 +81,7 @@ export default function TfsListAdmin(){
     setLoading(true);
     setErr("");
     const{data,error}=await supabase.from("tfs_list_metadata").select("*").eq("id",1).maybeSingle();
-    if(error)setErr(error.message);
+    if(error)setErr(translateAuthError(error.message));
     else setMeta(data||null);
     setLoading(false);
   };
@@ -125,7 +126,7 @@ export default function TfsListAdmin(){
       // because PostgREST requires a filter clause on DELETE.
       // (gt.0 against the bigserial id matches every row.)
       const del=await supabase.from("tfs_list").delete().gt("id",0);
-      if(del.error)throw new Error("Delete: "+del.error.message);
+      if(del.error)throw new Error("Delete: "+translateAuthError(del.error.message));
 
       // Step 2 — bulk insert in batches of 500.
       const BATCH=500;
@@ -133,7 +134,7 @@ export default function TfsListAdmin(){
       for(let i=0;i<records.length;i+=BATCH){
         const slice=records.slice(i,i+BATCH);
         const ins=await supabase.from("tfs_list").insert(slice);
-        if(ins.error)throw new Error("Insert at row "+i+": "+ins.error.message);
+        if(ins.error)throw new Error("Insert at row "+i+": "+translateAuthError(ins.error.message));
         setInsertProgress(Math.round(((i+slice.length)/records.length)*100));
       }
 
@@ -146,7 +147,7 @@ export default function TfsListAdmin(){
         source_filename:selectedFile&&selectedFile.name||null,
       };
       const up=await supabase.from("tfs_list_metadata").upsert(metaPatch);
-      if(up.error)throw new Error("Metadata upsert: "+up.error.message);
+      if(up.error)throw new Error("Metadata upsert: "+translateAuthError(up.error.message));
 
       // Step 4 — refresh the local IndexedDB cache so this admin's
       // own session has the new data immediately. Other shops will
@@ -159,7 +160,7 @@ export default function TfsListAdmin(){
         const all=[];
         while(true){
           const r=await supabase.from("tfs_list").select("*").order("id",{ascending:true}).range(from,from+PAGE-1);
-          if(r.error)throw new Error("Re-fetch: "+r.error.message);
+          if(r.error)throw new Error("Re-fetch: "+translateAuthError(r.error.message));
           if(!r.data||!r.data.length)break;
           all.push(...r.data);
           if(r.data.length<PAGE)break;

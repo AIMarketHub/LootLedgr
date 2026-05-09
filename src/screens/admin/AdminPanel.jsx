@@ -20,6 +20,7 @@ import {supabase,signOut} from "../../lib/auth/saas.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
 import Logo from "../../components/Logo.jsx";
 import {formatDateAU} from "../../lib/utils.js";
+import {translateAuthError} from "../../lib/auth/errorMessages.js";
 
 const fmtLong=iso=>iso?formatDateAU(iso):"—";
 
@@ -55,7 +56,7 @@ export default function AdminPanel(){
     setLoading(true);
     setErr("");
     const{data,error}=await supabase.from("shops").select("*").order("created_at",{ascending:false});
-    if(error){setErr(error.message);setShops([]);}
+    if(error){setErr(translateAuthError(error.message));setShops([]);}
     else setShops(data||[]);
     setLoading(false);
   };
@@ -88,7 +89,7 @@ export default function AdminPanel(){
       :{subscription_active:false};
     const{error}=await supabase.from("shops").update(patch).eq("id",shop.id);
     setBusyId(null);
-    if(error){setErr(error.message);return;}
+    if(error){setErr(translateAuthError(error.message));return;}
     await load();
   };
 

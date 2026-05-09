@@ -21,7 +21,14 @@ export function translateAuthError(rawError){
   const msg=raw.toLowerCase();
 
   // Rate limits — both the email-send rate and the broader
-  // Supabase rate limit surface here.
+  // Supabase rate limit surface here. The 60-second cooldown is
+  // matched FIRST so it doesn't fall into the broader "wait an
+  // hour" branch below; the trigger pattern is specific enough
+  // ("for security purposes" only ever appears in this Supabase
+  // message) that it won't catch unrelated errors.
+  if(msg.includes("every 60 seconds")||msg.includes("for security purposes")||msg.includes("once every")){
+    return "Wait a minute before requesting another reset link.";
+  }
   if(msg.includes("over_email_send_rate_limit")){
     return "Email rate limit reached. Please wait a few minutes before trying again.";
   }
