@@ -2,7 +2,7 @@
 // AML/CTF Act 2006 (Cth) . SHD Act 1989 (Vic) . Privacy Act 1988 (Cth)
 import React,{useState,useEffect,useRef,useMemo} from "react";
 import {TROY_OZ,APP_VERSION,DEFAULT_SETTINGS,SCALE_STD_SVC,SCALE_STD_CHAR,NUS_SVC,NUS_TX,SEED_LOGO} from "./lib/constants.js";
-import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
+import {sN,sS,uid,fmt2,fmtAUD,fmtDate,addHours,hoursLeft,sevenYrsFrom,isExpired7yr,nowISO,todayStr,daysAgoISO,computeHoursWorked,peekInv,makeInv,parseStdWeight,parseAsciiWeight,fmtScaleWeight} from "./lib/utils.js";
 import {store,sb,checkPhotoSize,initTxList,getCurrentUserLabel} from "./lib/storage.js";
 import {sendDuressSMS,pushIntegrations} from "./lib/integrations.js";
 import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calcMeltFn,makeReceiptFn,makeTxt,getRequiredFields} from "./lib/compliance/index.js";
@@ -33,7 +33,7 @@ import ForgotPin from "./modals/ForgotPin.jsx";
 import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
 import Logo from "./components/Logo.jsx";
 import {useAuth} from "./components/AuthProvider.jsx";
-import {signOut as saasSignOut} from "./lib/auth/saas.js";
+import {signOut as saasSignOut,supabase as sbClient,listStaffHours} from "./lib/auth/saas.js";
 // Phase 3.5-B (2026-05-09) — multi-tab XLSX accounting export.
 // Same SheetJS package the TFS list parser uses (see CVE-
 // acceptance memo at src/lib/tfs/parser.js header).
@@ -715,7 +715,12 @@ export default function Loot(){
   // (e387890) field-for-field; only the workbook layout changes.
   // ASCII-clean fallbacks throughout. Adds a Staff Hours
   // placeholder section pending the Phase 3.5-A feature.
-  const dlAccounting=()=>{
+  // Phase 3.5-A-3 — async to await the staff_hours fetch. The
+  // three call sites (Stock.jsx, ApiDiagnostics.jsx, EOD.jsx)
+  // don't await the returned Promise; the XLSX download still
+  // fires synchronously after the await because XLSX.writeFile
+  // runs in the same micro-task as the trailing pop().
+  const dlAccounting=async()=>{
     const sp=spotForCalc();
     const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
     const rows=[];
@@ -842,9 +847,66 @@ export default function Loot(){
     ]));
     rows.push([]);
 
-    // ─── Staff Hours (placeholder) ──────────────────────
-    rows.push(["STAFF HOURS"]);
-    rows.push(["(Staff hours tracking not yet shipped -- Phase 3.5 part A.)"]);
+    // ─── Staff Hours (Phase 3.5-A-3) ────────────────────
+    // Last 90 days of staff_hours rows for this shop. listStaff
+    // Hours is RLS-gated server-side so cross-shop leakage is not
+    // possible here. usersMap is a one-shot lookup so the export
+    // shows real names instead of UUIDs; if the SELECT errors
+    // (RLS pushback, network blip), we fall back to user_id
+    // strings rather than dropping the section entirely.
+    let staffHoursData=[];
+    let usersMap={};
+    if(auth&&auth.shop&&auth.shop.id){
+      try{
+        staffHoursData=await listStaffHours(
+          String(auth.shop.id),daysAgoISO(89),todayStr()
+        );
+      }catch(e){
+        pop&&pop("Could not load staff hours: "+sS(e&&e.message),"warn");
+      }
+      try{
+        const{data:usersList}=await sbClient.from("users")
+          .select("id, first_name, family_name, email")
+          .eq("shop_id",auth.shop.id);
+        (usersList||[]).forEach(u=>{
+          const full=((sS(u.first_name)+" "+sS(u.family_name)).trim());
+          usersMap[u.id]=full||sS(u.email)||sS(u.id);
+        });
+      }catch(_){/* fall back to user_id strings */}
+    }
+
+    rows.push(["STAFF HOURS (last 90 days)"]);
+    rows.push([
+      "User","Date","Start","End","Break (min)",
+      "Hours Worked","Locked","Note"
+    ]);
+    if(staffHoursData.length===0){
+      rows.push(["(no staff hours logged in the last 90 days)"]);
+    }else{
+      // Most-recent date first; within a date, alphabetic by
+      // user label so the same staff member's rows land
+      // adjacent across dates.
+      const sorted=[...staffHoursData].sort((a,b)=>{
+        if(a.work_date!==b.work_date){
+          return a.work_date<b.work_date?1:-1;
+        }
+        const la=usersMap[a.user_id]||a.user_id||"";
+        const lb=usersMap[b.user_id]||b.user_id||"";
+        return la.localeCompare(lb);
+      });
+      sorted.forEach(r=>{
+        rows.push([
+          usersMap[r.user_id]||sS(r.user_id),
+          sS(r.work_date),
+          r.start_time?String(r.start_time).slice(0,5):"-",
+          r.end_time?String(r.end_time).slice(0,5):"-",
+          sN(r.break_minutes),
+          computeHoursWorked(r),
+          r.locked?"YES":"",
+          sS(r.note),
+        ]);
+      });
+    }
 
     // Build single-sheet workbook + trigger download.
     const wb=XLSX.utils.book_new();

@@ -39,6 +39,35 @@ export const todayStr=()=>nowISO().slice(0,10);
 // by the Staff modal "My Hours" 14-day catch-up grid.
 export const daysAgoISO=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);};
 
+// Phase 3.5-A-3 — "Hours Worked" cell formatter for the XLSX
+// staff-hours export. Takes a staff_hours row {start_time,
+// end_time, break_minutes} and returns "Nh MMm" or "-" when
+// either bound is missing or the math goes negative (e.g.
+// overnight shift not yet supported — would show as a negative
+// span and gets clamped to "-").
+//
+// Hour math is intentionally simple:
+//   total minutes = (end_h*60 + end_m) - (start_h*60 + start_m) - break
+// Same-day only. If you log a shift that crosses midnight, the
+// user-facing UI prevents end_time < start_time anyway because
+// HTML <input type="time"> won't accept it inline.
+export function computeHoursWorked(row){
+  if(!row||!row.start_time||!row.end_time)return "-";
+  try{
+    const[sh,sm]=String(row.start_time).split(":").map(Number);
+    const[eh,em]=String(row.end_time).split(":").map(Number);
+    if(!isFinite(sh)||!isFinite(sm)||!isFinite(eh)||!isFinite(em))return "-";
+    const startMin=sh*60+sm;
+    const endMin=eh*60+em;
+    const breaks=sN(row.break_minutes);
+    const totalMin=endMin-startMin-breaks;
+    if(totalMin<=0)return "-";
+    const hours=Math.floor(totalMin/60);
+    const mins=totalMin%60;
+    return hours+"h "+(mins<10?"0"+mins:mins)+"m";
+  }catch(_){return "-";}
+}
+
 // Invoice-number date prefix (DDMMYY).
 export const invDay=()=>{const d=new Date();return String(d.getDate()).padStart(2,"0")+String(d.getMonth()+1).padStart(2,"0")+String(d.getFullYear()).slice(-2);};
 
