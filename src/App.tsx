@@ -31,6 +31,7 @@ import CatalogEditor from "./modals/CatalogEditor.jsx";
 import LogoManager from "./modals/LogoManager.jsx";
 import ForgotPin from "./modals/ForgotPin.jsx";
 import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
+import AccountingRangeModal from "./modals/AccountingRangeModal.jsx";
 import Logo from "./components/Logo.jsx";
 import {useAuth} from "./components/AuthProvider.jsx";
 import {signOut as saasSignOut,supabase as sbClient,listStaffHours} from "./lib/auth/saas.js";
@@ -150,6 +151,11 @@ export default function Loot(){
   const[staffList,setStaffList]=useState(()=>store.get("staffList",[]));
   const[showStaff,setShowStaff]=useState(false);
   const[showEOD,setShowEOD]=useState(false);
+  // Phase 3.5-A-4 — accounting export range picker. The 3 call
+  // sites (Stock, EOD, ApiDiagnostics) all open this picker
+  // instead of triggering the export directly; the picker's
+  // onExport callback then fires dlAccounting({fromDate,toDate}).
+  const[showAccRange,setShowAccRange]=useState(false);
   const[frozenSnap,setFrozenSnap]=useState(()=>store.get("frozenSnap",null));
   const[spotLog,setSpotLog]=useState(()=>store.get("spotLog",[]));
   const[histFilter,setHistFilter]=useState("all");
@@ -720,16 +726,33 @@ export default function Loot(){
   // don't await the returned Promise; the XLSX download still
   // fires synchronously after the await because XLSX.writeFile
   // runs in the same micro-task as the trailing pop().
-  const dlAccounting=async()=>{
+  // Phase 3.5-A-4 — dlAccounting takes a {fromDate, toDate}
+  // pair from the AccountingRangeModal picker. TX Register, GST
+  // Summary, Compliance Log, Staff Hours all filter to this
+  // range. Stock Valuation is always a current snapshot
+  // regardless of range. Section titles + filename + cover sheet
+  // include the range so the accountant can see it at a glance.
+  const dlAccounting=async({fromDate,toDate})=>{
     const sp=spotForCalc();
     const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
+    const rangeLabel=fromDate+" to "+toDate;
     const rows=[];
+
+    // 3.5-A-4 — date-bounded filter for the tx-driven sections.
+    // YYYY-MM-DD string comparison works because t.date is an
+    // ISO timestamp; .slice(0,10) extracts the date portion.
+    // Inclusive on both ends.
+    const filteredTx=(txList||[]).filter(t=>{
+      const d=t.date&&t.date.slice(0,10);
+      return d&&d>=fromDate&&d<=toDate;
+    });
 
     // ─── Cover block ────────────────────────────────────
     rows.push(["Field","Value"]);
     rows.push(["Business",sS(settings.businessName)]);
     rows.push(["ABN",sS(settings.abn)]);
     rows.push(["Exported",todayStr()]);
+    rows.push(["Date Range",rangeLabel]);
     rows.push(["Spot",sn]);
     rows.push(["Generator","Loot Ledger v"+APP_VERSION]);
     rows.push([]);
@@ -739,13 +762,13 @@ export default function Loot(){
     // treatment preserved: hobby buys are GST-exempt + posted
     // to xeroBuyCodeHobby (default 315); standard sells stay
     // at xeroSellCode (200); standard buys at xeroBuyCode (310).
-    rows.push(["TRANSACTION REGISTER"]);
+    rows.push(["TRANSACTION REGISTER ("+rangeLabel+")"]);
     rows.push([
       "Invoice","Date","Client","Item","Metal","Purity","Wt(g)",
       "Bought($)","Sold($)","Margin($)","GST","GST Est($)",
       "Status","Hobby","Account Code"
     ]);
-    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
+    filteredTx.forEach(tx=>(tx.items||[]).forEach(it=>{
       const isBuy=it.mode==="buy",isSell=it.mode==="sell";
       const hobby=isBuy&&!!tx.isHobbyProspector;
       const b=isBuy?sN(it.price):0,sv=isSell?sN(it.price):0,m=sv-b;
@@ -775,7 +798,7 @@ export default function Loot(){
     rows.push([]);
 
     // ─── Stock Valuation ────────────────────────────────
-    rows.push(["STOCK VALUATION"]);
+    rows.push(["STOCK VALUATION (current snapshot)"]);
     rows.push([
       "Item","Invoice","Metal","Purity","Wt(g)","Bought($)",
       "Melt($)","P&L($)","GST","Days","Status"
@@ -805,7 +828,7 @@ export default function Loot(){
     // and reported on their own line. Standard / margin GST are
     // sell-side only under the AU second-hand goods regime.
     let tS=0,tP=0,tHP=0,tMG=0,tSG=0;
-    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
+    filteredTx.forEach(tx=>(tx.items||[]).forEach(it=>{
       if(it.mode==="sell"&&it.gstApplicable!==false){
         tS+=sN(it.price);
         if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);
@@ -816,8 +839,11 @@ export default function Loot(){
         else tP+=sN(it.price);
       }
     }));
-    const periodLabel=frozenSnap?sS(frozenSnap.frozenAt):todayStr();
-    rows.push(["GST SUMMARY"]);
+    // 3.5-A-4 — Period row reflects the picked range; preserved
+    // frozen-snap path takes precedence so a frozen export still
+    // shows the snapshot timestamp it was taken at.
+    const periodLabel=frozenSnap?sS(frozenSnap.frozenAt):rangeLabel;
+    rows.push(["GST SUMMARY ("+rangeLabel+")"]);
     rows.push(["Period",periodLabel]);
     rows.push(["Total Sales","$"+tS.toFixed(2)]);
     rows.push(["Total Purchases (commercial)","$"+tP.toFixed(2)]);
@@ -830,12 +856,12 @@ export default function Loot(){
 
     // ─── Compliance Log ─────────────────────────────────
     // One row per tx (NOT per item).
-    rows.push(["COMPLIANCE LOG"]);
+    rows.push(["COMPLIANCE LOG ("+rangeLabel+")"]);
     rows.push([
       "Invoice","Date","Client","TTR Status","SMR","KYC",
       "Police Hold","Voided"
     ]);
-    (txList||[]).forEach(tx=>rows.push([
+    filteredTx.forEach(tx=>rows.push([
       sS(tx.id),
       sS(tx.date&&tx.date.slice(0,10)),
       sS((tx.client&&tx.client.fullName)||"-"),
@@ -859,7 +885,7 @@ export default function Loot(){
     if(auth&&auth.shop&&auth.shop.id){
       try{
         staffHoursData=await listStaffHours(
-          String(auth.shop.id),daysAgoISO(89),todayStr()
+          String(auth.shop.id),fromDate,toDate
         );
       }catch(e){
         pop&&pop("Could not load staff hours: "+sS(e&&e.message),"warn");
@@ -875,13 +901,13 @@ export default function Loot(){
       }catch(_){/* fall back to user_id strings */}
     }
 
-    rows.push(["STAFF HOURS (last 90 days)"]);
+    rows.push(["STAFF HOURS ("+rangeLabel+")"]);
     rows.push([
       "User","Date","Start","End","Break (min)",
       "Hours Worked","Locked","Note"
     ]);
     if(staffHoursData.length===0){
-      rows.push(["(no staff hours logged in the last 90 days)"]);
+      rows.push(["(no staff hours logged in this range)"]);
     }else{
       // Most-recent date first; within a date, alphabetic by
       // user label so the same staff member's rows land
@@ -911,9 +937,15 @@ export default function Loot(){
     // Build single-sheet workbook + trigger download.
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"Accounting");
-    XLSX.writeFile(wb,"lootledger-accounting-"+todayStr()+".xlsx");
+    XLSX.writeFile(wb,"lootledger-accounting-"+fromDate+"-to-"+toDate+".xlsx");
     pop("Accounting export downloaded.","ok");
   };
+
+  // Phase 3.5-A-4 — wrapper passed to the 3 call sites instead
+  // of dlAccounting itself. Opens the AccountingRangeModal; the
+  // modal's onExport handler then fires dlAccounting with the
+  // chosen range.
+  const requestAccountingExport=()=>setShowAccRange(true);
 
   const dlBackup=()=>{dlFile(JSON.stringify({version:APP_VERSION,exportedAt:nowISO(),txList,stock,catalog,settings:{...settings,logoImg:null},vendors,staffList,blacklist,frozenSnap,spotLog},null,2),"lootledger-backup-"+todayStr()+".json","application/json");pop("Backup downloaded.","ok");};
   const restoreBackup=file=>{const r=new FileReader();r.onload=ev=>{try{const d=JSON.parse(ev.target.result);if(!d.txList||!d.stock){pop("Invalid backup file.","err");return;}if(d.txList)setTxList(d.txList);if(d.stock)setStock(d.stock);if(d.catalog)setCatalog(d.catalog);if(d.vendors)setVendors(d.vendors);if(d.staffList)setStaffList(d.staffList);if(d.blacklist)setBlacklist(d.blacklist);if(d.frozenSnap)setFrozenSnap(d.frozenSnap);pop("Backup restored.","ok");}catch(e){pop("Restore failed: "+e.message,"err");}};r.readAsText(file);};
@@ -1199,7 +1231,7 @@ export default function Loot(){
 
           {screen==="stock"&&<Stock
             settings={settings} gSpot={gSpot} sSpot={sSpot} stock={stock} frozenSnap={frozenSnap}
-            dlAccounting={dlAccounting} setPinModal={setPinModal} setFrozenSnap={setFrozenSnap} pop={pop}
+            dlAccounting={requestAccountingExport} setPinModal={setPinModal} setFrozenSnap={setFrozenSnap} pop={pop}
             togglePoliceHold={togglePoliceHold} setPinVal={setPinVal} setStock={setStock}
             setEditStockId={setEditStockId} setEditStockVal={setEditStockVal}
             setPoliceHoldModal={setPoliceHoldModal}
@@ -1336,7 +1368,7 @@ export default function Loot(){
           settings={settings}
           spotStatus={spotStatus} spotSource={spotSource}
           apiError={apiError} setApiError={setApiError} forceResumeAPI={forceResumeAPI}
-          exportPayload={exportPayload} dlAccounting={dlAccounting} dlFile={dlFile}
+          exportPayload={exportPayload} dlAccounting={requestAccountingExport} dlFile={dlFile}
           txList={txList} pop={pop} setShowApi={setShowApi}
         />}
 
@@ -1355,7 +1387,8 @@ export default function Loot(){
           pop={pop}
         />}
 
-        {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={dlAccounting} setShowEOD={setShowEOD} pop={pop}/>}
+        {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={requestAccountingExport} setShowEOD={setShowEOD} pop={pop}/>}
+        {showAccRange&&<AccountingRangeModal onClose={()=>setShowAccRange(false)} onExport={({fromDate,toDate})=>{setShowAccRange(false);dlAccounting({fromDate,toDate});}}/>}
 
         {showVendors&&<Vendors
           vendors={vendors} setVendors={setVendors}
