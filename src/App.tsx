@@ -34,6 +34,10 @@ import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
 import Logo from "./components/Logo.jsx";
 import {useAuth} from "./components/AuthProvider.jsx";
 import {signOut as saasSignOut} from "./lib/auth/saas.js";
+// Phase 3.5-B (2026-05-09) — multi-tab XLSX accounting export.
+// Same SheetJS package the TFS list parser uses (see CVE-
+// acceptance memo at src/lib/tfs/parser.js header).
+import * as XLSX from "xlsx";
 
 export default function Loot(){
   // Stage 1.A SaaS foundation — auth context provides the
@@ -704,23 +708,44 @@ export default function Loot(){
     setTimeout(()=>setDuressActive(false),5*60*1000);
   };
 
+  // Phase 3.5-B (2026-05-09) — multi-tab XLSX accounting export.
+  // Replaces the prior single-CSV implementation. Five sheets:
+  // Cover / TX Register / Stock Valuation / GST Summary /
+  // Compliance Log. Per-item iteration matches the prior CSV
+  // shape field-for-field so downstream parsers (Xero importers,
+  // accountant macros) continue to read the same columns. The
+  // only data-side change: em-dash fallbacks ("—") swapped to
+  // ASCII "-" for cross-editor cleanliness (OpenOffice's
+  // Windows-1252 default reader rendered them as â€" mojibake).
+  //
+  // SheetJS imported at the top of this file.
   const dlAccounting=()=>{
     const sp=spotForCalc();
     const sn=frozenSnap?"FROZEN "+frozenSnap.frozenAt+" Au:"+fmtAUD(frozenSnap.gSpot)+"/oz Ag:"+fmtAUD(frozenSnap.sSpot)+"/oz":"LIVE Au:"+fmtAUD(sp.g)+"/oz Ag:"+fmtAUD(sp.s)+"/oz";
-    const esc=v=>{const str=sS(v).replace(/[\r\n]+/g," ");const Q='"';return Q+str.split(Q).join(Q+Q)+Q;};
-    const csv=rows=>rows.map(r=>r.map(esc).join(",")).join("\n");
-    // Stage 1.C — Hobby prospector accounting treatment.
-    //   • Hobby buys are tax-exempt under personal-use provisions:
-    //     GST=0, posted to settings.xeroBuyCodeHobby (default 315)
-    //     instead of the standard buy code (310). Hobby sells don't
-    //     exist as a concept (the flag is a property of the seller),
-    //     so on a tx with the flag set we still treat any sell items
-    //     under standard GST.
-    //   • The Hobby column + Account Code column are appended to
-    //     preserve existing column order for downstream parsers.
-    //   • A note row is appended at the end so the bookkeeper sees
-    //     the policy without having to read the column headers.
-    const s1=[["TRANSACTION REGISTER"],["Spot: "+sn],["Invoice","Date","Client","Item","Metal","Purity","Wt(g)","Bought($)","Sold($)","Margin($)","GST","GST Est($)","Status","Hobby","Account Code"]];
+    const wb=XLSX.utils.book_new();
+
+    // ─── Sheet 1 — Cover ───────────────────────────────────
+    const coverRows=[
+      ["Field","Value"],
+      ["Business",sS(settings.businessName)],
+      ["ABN",sS(settings.abn)],
+      ["Exported",todayStr()],
+      ["Spot",sn],
+      ["Generator","Loot Ledger v"+APP_VERSION],
+    ];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(coverRows),"Cover");
+
+    // ─── Sheet 2 — TX Register ─────────────────────────────
+    // One row per item per tx (matches prior CSV iteration).
+    // Stage 1.C hobby-prospector treatment preserved verbatim:
+    // hobby buys are GST-exempt + posted to xeroBuyCodeHobby
+    // (default 315). Standard sells stay at xeroSellCode (200);
+    // standard buys at xeroBuyCode (310).
+    const txRows=[[
+      "Invoice","Date","Client","Item","Metal","Purity","Wt(g)",
+      "Bought($)","Sold($)","Margin($)","GST","GST Est($)",
+      "Status","Hobby","Account Code"
+    ]];
     (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
       const isBuy=it.mode==="buy",isSell=it.mode==="sell";
       const hobby=isBuy&&!!tx.isHobbyProspector;
@@ -728,24 +753,107 @@ export default function Loot(){
       const gst=hobby?"Hobby (exempt)":it.gstApplicable===false?"GST-Free":it.gstScheme==="margin"?"Margin":"Standard 10%";
       const ge=hobby?0:it.gstApplicable===false?0:it.gstScheme==="margin"?Math.max(0,m/11):sv*0.1;
       const code=hobby?sS(settings.xeroBuyCodeHobby||"315"):isBuy?sS(settings.xeroBuyCode||"310"):isSell?sS(settings.xeroSellCode||"200"):"";
-      s1.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS((it.product&&it.product.label)||it.description||"—"),sS((it.product&&it.product.cat)||"—"),sS(it.purity||((it.product&&it.product.carat)&&it.product.carat+"ct")||"—"),sS(it.qty||"—"),b||"",sv||"",m||"",gst,ge.toFixed(2),tx.voided?"VOIDED":"OK",hobby?"YES":"",code]);
+      txRows.push([
+        sS(tx.id),
+        sS(tx.date&&tx.date.slice(0,10)),
+        sS((tx.client&&tx.client.fullName)||"-"),
+        sS((it.product&&it.product.label)||it.description||"-"),
+        sS((it.product&&it.product.cat)||"-"),
+        sS(it.purity||((it.product&&it.product.carat)&&it.product.carat+"ct")||"-"),
+        sS(it.qty||"-"),
+        b||"",
+        sv||"",
+        m||"",
+        gst,
+        ge.toFixed(2),
+        tx.voided?"VOIDED":"OK",
+        hobby?"YES":"",
+        code,
+      ]);
     }));
-    s1.push([]);
-    s1.push(["Note: Hobby prospector — personal-use exemption (income tax nil, GST nil, CGT exempt under personal-use). Account code: "+sS(settings.xeroBuyCodeHobby||"315")+"."]);
-    const s2=[["STOCK VALUATION"],["Spot: "+sn],["Item","Invoice","Metal","Purity","Wt(g)","Bought($)","Melt($)","P&L($)","GST","Days","Status"]];
-    (stock||[]).filter(x=>!x.sold).forEach(s=>{const mv=calcMeltFn(s,frozenSnap,sp.g,sp.s),b=sN(s.price),d=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;s2.push([sS(s.description||((s.product&&s.product.label))||"—"),sS(s.txId||"—"),sS((s.product&&s.product.cat)||"—"),sS(s.purity||"—"),sS(s.weight_g||"—"),b.toFixed(2),mv!=null?mv.toFixed(2):"—",mv!=null?(mv-b).toFixed(2):"—",s.gstApplicable===false?"GST-Free":"Taxable",d,s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready"]);});
-    // Stage 1.C — GST summary excludes hobby buys from "Total
-    // Purchases" and surfaces them on a separate line so the
-    // bookkeeper can see the split. Standard / margin GST were
-    // already sell-side only (no buy-GST liability under the AU
-    // second-hand goods regime), so hobby has no effect on those
-    // two lines — just on the buy total.
+    // Hobby-prospector accounting note row preserved (placed
+    // after the data so it doesn't interfere with column
+    // alignment when the file is sorted/filtered).
+    txRows.push([]);
+    txRows.push(["Note: Hobby prospector -- personal-use exemption (income tax nil, GST nil, CGT exempt under personal-use). Account code: "+sS(settings.xeroBuyCodeHobby||"315")+"."]);
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(txRows),"TX Register");
+
+    // ─── Sheet 3 — Stock Valuation ────────────────────────
+    const stockRows=[[
+      "Item","Invoice","Metal","Purity","Wt(g)","Bought($)",
+      "Melt($)","P&L($)","GST","Days","Status"
+    ]];
+    (stock||[]).filter(x=>!x.sold).forEach(s=>{
+      const mv=calcMeltFn(s,frozenSnap,sp.g,sp.s);
+      const b=sN(s.price);
+      const d=s.date?Math.floor((Date.now()-new Date(s.date))/86400000):0;
+      stockRows.push([
+        sS(s.description||((s.product&&s.product.label))||"-"),
+        sS(s.txId||"-"),
+        sS((s.product&&s.product.cat)||"-"),
+        sS(s.purity||"-"),
+        sS(s.weight_g||"-"),
+        b.toFixed(2),
+        mv!=null?mv.toFixed(2):"-",
+        mv!=null?(mv-b).toFixed(2):"-",
+        s.gstApplicable===false?"GST-Free":"Taxable",
+        d,
+        s.policeHold?"POLICE HOLD":hoursLeft(s.holdUntil)>0?"In Hold":"Ready",
+      ]);
+    });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(stockRows),"Stock Valuation");
+
+    // ─── Sheet 4 — GST Summary ────────────────────────────
+    // Stage 1.C — hobby buys excluded from "Total Purchases"
+    // and reported on their own line. Standard / margin GST are
+    // sell-side only under the AU second-hand goods regime.
     let tS=0,tP=0,tHP=0,tMG=0,tSG=0;
-    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{if(it.mode==="sell"&&it.gstApplicable!==false){tS+=sN(it.price);if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);else tSG+=sN(it.price)*0.1;}if(it.mode==="buy"){if(tx.isHobbyProspector)tHP+=sN(it.price);else tP+=sN(it.price);}}));
-    const s3=[["GST SUMMARY"],["Period: "+(frozenSnap?frozenSnap.frozenAt:todayStr())],["Total Sales","$"+tS.toFixed(2)],["Total Purchases (commercial)","$"+tP.toFixed(2)],["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)],["Standard GST (10%)","$"+tSG.toFixed(2)],["Margin Scheme GST","$"+tMG.toFixed(2)],["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],["",""],["Estimate only — confirm with registered tax agent",""]];
-    const s4=[["COMPLIANCE LOG"],["Invoice","Date","Client","TTR Status","SMR","KYC","Police Hold","Voided"]];
-    (txList||[]).forEach(tx=>s4.push([sS(tx.id),sS(tx.date&&tx.date.slice(0,10)),sS((tx.client&&tx.client.fullName)||"—"),sS(tx.ttrStatus||"N/A"),tx.smrFlagged?"YES":"",tx.kycDone?"YES":"",(tx.items||[]).some(i=>i.policeHold)?"YES":"",tx.voided?"YES":""]));
-    dlFile("LOOT LEDGER — ACCOUNTING EXPORT\nBusiness: "+sS(settings.businessName)+"  ABN: "+sS(settings.abn)+"\nExported: "+todayStr()+"  Spot: "+sn+"\n\n1. TRANSACTION REGISTER\n"+csv(s1)+"\n\n2. STOCK VALUATION\n"+csv(s2)+"\n\n3. GST SUMMARY\n"+csv(s3)+"\n\n4. COMPLIANCE LOG\n"+csv(s4),"lootledger-accounting-"+todayStr()+".csv","text/csv");
+    (txList||[]).forEach(tx=>(tx.items||[]).forEach(it=>{
+      if(it.mode==="sell"&&it.gstApplicable!==false){
+        tS+=sN(it.price);
+        if(it.gstScheme==="margin")tMG+=Math.max(0,(sN(it.price)-sN(it.boughtAt))/11);
+        else tSG+=sN(it.price)*0.1;
+      }
+      if(it.mode==="buy"){
+        if(tx.isHobbyProspector)tHP+=sN(it.price);
+        else tP+=sN(it.price);
+      }
+    }));
+    const periodLabel=frozenSnap?sS(frozenSnap.frozenAt):todayStr();
+    const gstRows=[
+      ["Metric","Value"],
+      ["Period",periodLabel],
+      ["Total Sales","$"+tS.toFixed(2)],
+      ["Total Purchases (commercial)","$"+tP.toFixed(2)],
+      ["Hobby Prospector Purchases (exempt)","$"+tHP.toFixed(2)],
+      ["Standard GST (10%)","$"+tSG.toFixed(2)],
+      ["Margin Scheme GST","$"+tMG.toFixed(2)],
+      ["TOTAL GST (est)","$"+(tSG+tMG).toFixed(2)],
+      ["Note","Estimate only -- confirm with registered tax agent"],
+    ];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gstRows),"GST Summary");
+
+    // ─── Sheet 5 — Compliance Log ─────────────────────────
+    // One row per tx (NOT per item; matches prior CSV).
+    const complianceRows=[[
+      "Invoice","Date","Client","TTR Status","SMR","KYC",
+      "Police Hold","Voided"
+    ]];
+    (txList||[]).forEach(tx=>complianceRows.push([
+      sS(tx.id),
+      sS(tx.date&&tx.date.slice(0,10)),
+      sS((tx.client&&tx.client.fullName)||"-"),
+      sS(tx.ttrStatus||"N/A"),
+      tx.smrFlagged?"YES":"",
+      tx.kycDone?"YES":"",
+      (tx.items||[]).some(i=>i.policeHold)?"YES":"",
+      tx.voided?"YES":"",
+    ]));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(complianceRows),"Compliance Log");
+
+    // Trigger browser download via SheetJS's built-in
+    // BlobBuilder + anchor click. No dlFile() helper needed.
+    XLSX.writeFile(wb,"lootledger-accounting-"+todayStr()+".xlsx");
     pop("Accounting export downloaded.","ok");
   };
 

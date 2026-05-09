@@ -111,7 +111,7 @@ export default function ApiDiagnostics({
     <div style={{borderTop:"1px solid "+T.border,paddingTop:14}}>
       <div style={{fontSize:12,fontWeight:"bold",color:T.white,marginBottom:8}}>Downloads</div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        <button style={c.btn(T.gold,T.bg)} onClick={dlAccounting}>📊 Accounting CSV</button>
+        <button style={c.btn(T.gold,T.bg)} onClick={dlAccounting}>📊 Accounting (XLSX)</button>
         <button style={c.bsm(T.border,T.muted)} onClick={()=>{const rows=[["Invoice","Date","Client","Buy","Sell","Net","Payment","KYC","TTR","SMR"]];(txList||[]).forEach(t=>rows.push([sS(t.id),sS(t.date&&t.date.slice(0,10)),sS(t.client&&t.client.fullName),sS(t.buyTotal),sS(t.sellTotal),sS(t.net),sS(t.payment),t.kycDone?"YES":"",t.ttrRequired?"YES":"",t.smrFlagged?"YES":""]));const Q='"';const esc=v=>Q+sS(v).replace(/"/g,Q+Q)+Q;dlFile(rows.map(r=>r.map(esc).join(",")).join("\n"),"lootledger-tx-"+todayStr()+".csv","text/csv");pop("TX CSV exported.","ok");}}>⬇ TX CSV</button>
       </div>
     </div>
