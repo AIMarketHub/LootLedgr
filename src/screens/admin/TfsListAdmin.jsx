@@ -182,7 +182,7 @@ export default function TfsListAdmin(){
       if(fileInputRef.current)fileInputRef.current.value="";
       await loadMeta();
     }catch(e){
-      setErr("Insert failed: "+(e.message||String(e))+" — the list is now in an inconsistent state. Re-upload to recover.");
+      setErr("Insert failed: "+translateAuthError(e.message||String(e))+" — the list is now in an inconsistent state. Re-upload to recover.");
       setPhase("ready");
     }
   };
