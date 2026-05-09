@@ -23,10 +23,10 @@
 
 import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
-import {sS} from "../lib/utils.js";
+import {sS,todayStr,daysAgoISO} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
-import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle} from "../lib/auth/saas.js";
+import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle,listStaffHours,upsertStaffHours} from "../lib/auth/saas.js";
 
 // Trim, then accept only 4-12 digit strings or blank. Returns the
 // canonical value to store, or null if the input is rejected.
@@ -63,6 +63,14 @@ function userLabel(u){
   const ln=sS(u.family_name||"");
   const full=(fn+" "+ln).trim();
   return full||sS(u.email)||"(no name)";
+}
+
+// "Thu 09 May" label for the My Hours 14-day grid.
+function formatDateLabel(iso){
+  if(!iso)return "";
+  const d=new Date(iso+"T00:00:00");
+  if(isNaN(d.getTime()))return iso;
+  return d.toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"});
 }
 
 export default function Staff({pop,setShowStaff}){
@@ -121,6 +129,88 @@ export default function Staff({pop,setShowStaff}){
       pop("Job title updated.","ok");
     }catch(e){pop("Job title update failed: "+sS(e&&e.message),"err");}
     finally{setMyBusy(false);}
+  };
+
+  // ─── Section A.5 — My Hours (14-day catch-up) ───────────────
+  // State: per-row {date, start, end, break, note, dirty,
+  // existing_id}. Pre-filled from listStaffHours(...) on mount;
+  // dirty flag tracks edits since the last successful save.
+  const[hoursPin,setHoursPin]=useState("");
+  const[hoursRows,setHoursRows]=useState([]);
+  const[hoursLoading,setHoursLoading]=useState(true);
+  const[hoursSaving,setHoursSaving]=useState(false);
+
+  const refreshMyHours=useCallback(async()=>{
+    if(!auth||!auth.shop||!auth.shop.id||!auth.user||!auth.user.id)return;
+    setHoursLoading(true);
+    try{
+      const fromDate=daysAgoISO(13);
+      const toDate=todayStr();
+      const all=await listStaffHours(String(auth.shop.id),fromDate,toDate);
+      const mine=all.filter(r=>r.user_id===auth.user.id);
+      // Build 14-row grid (today + 13 days back, newest first).
+      const rows=[];
+      for(let i=0;i<14;i++){
+        const date=daysAgoISO(i);
+        const existing=mine.find(r=>r.work_date===date);
+        rows.push(existing?{
+          date,
+          start:existing.start_time?String(existing.start_time).slice(0,5):"",
+          end:existing.end_time?String(existing.end_time).slice(0,5):"",
+          break:String(existing.break_minutes||0),
+          note:sS(existing.note),
+          dirty:false,
+          existing_id:existing.id,
+        }:{date,start:"",end:"",break:"0",note:"",dirty:false,existing_id:null});
+      }
+      setHoursRows(rows);
+    }catch(e){
+      pop&&pop("Could not load your hours: "+sS(e&&e.message),"err");
+    }finally{setHoursLoading(false);}
+  },[auth&&auth.shop&&auth.shop.id,auth&&auth.user&&auth.user.id]);
+
+  useEffect(()=>{refreshMyHours();},[refreshMyHours]);
+
+  const updateHoursRow=(idx,patch)=>{
+    setHoursRows(p=>p.map((r,i)=>i===idx?{...r,...patch,dirty:true}:r));
+  };
+
+  const onSaveMyHours=async()=>{
+    const pin=String(hoursPin||"").trim();
+    if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit per-staff PIN.","warn");return;}
+    setHoursSaving(true);
+    let saved=0,failed=0;
+    try{
+      for(const row of hoursRows){
+        if(!row.dirty)continue;
+        // Skip blank rows that have no existing entry — nothing
+        // to do. Owner-only DELETE for clearing existing entries
+        // is handled outside this UI.
+        if(!row.existing_id&&!row.start&&!row.end&&(parseInt(row.break,10)||0)===0&&!row.note)continue;
+        try{
+          await upsertStaffHours({
+            pin,
+            userId:auth.user.id,
+            workDate:row.date,
+            startTime:row.start||null,
+            endTime:row.end||null,
+            breakMinutes:parseInt(row.break,10)||0,
+            note:row.note||"",
+          });
+          saved++;
+        }catch(e){
+          failed++;
+          pop&&pop("Save failed for "+formatDateLabel(row.date)+": "+sS(e&&e.message),"err");
+        }
+      }
+      if(saved>0){
+        pop&&pop("Saved "+saved+" day"+(saved===1?"":"s")+(failed>0?" ("+failed+" failed)":"."),"ok");
+        await refreshMyHours();
+        setHoursPin("");
+      }else if(failed===0){
+        pop&&pop("No changes to save.","warn");
+      }
+    }finally{setHoursSaving(false);}
   };
 
   // Section B — Invite state.
@@ -212,6 +302,30 @@ export default function Staff({pop,setShowStaff}){
         <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSetMyPin} disabled={myBusy||!myPinInput}>{myBusy?"…":"Save PIN"}</button>
         <button style={c.bsm()} onClick={onSaveJobTitle} disabled={myBusy}>{myBusy?"…":"Save job title"}</button>
         {myPinSet&&<button style={c.bsm(T.redBg,T.red)} onClick={onClearMyPin} disabled={myBusy}>Clear PIN</button>}
+      </div>
+    </div>
+
+    {/* ─── Section A.5 — My Hours (last 14 days) ──────────────── */}
+    <div style={{...c.card({padding:14}),marginBottom:14}}>
+      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>My Hours (last 14 days)</div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Catch-up entry for your own shifts. Edit any date in the past 14 days; PIN-required save covers all changed rows.</div>
+      <F label="Your per-staff PIN (4–12 digits)" type="password" value={hoursPin} onChange={setHoursPin} placeholder="••••"/>
+      {hoursLoading?<div style={{fontSize:11,color:T.muted,marginTop:8}}>Loading…</div>:hoursRows.length===0?<div style={{fontSize:11,color:T.muted,marginTop:8}}>No rows.</div>:<div style={{marginTop:8}}>
+        <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,fontSize:10,color:T.muted,letterSpacing:"0.05em",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid "+T.border+"55"}}>
+          <div>Date</div><div>Start</div><div>End</div><div>Break (min)</div><div>Note</div>
+        </div>
+        {hoursRows.map((row,idx)=>(
+          <div key={row.date} style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,padding:"6px 0",borderBottom:"1px solid "+T.border+"22",alignItems:"center"}}>
+            <div style={{fontSize:11,color:T.text}}>{formatDateLabel(row.date)}{row.dirty?<span style={{color:T.gold,marginLeft:6}}>•</span>:null}</div>
+            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.start} onChange={e=>updateHoursRow(idx,{start:e.target.value})}/>
+            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.end} onChange={e=>updateHoursRow(idx,{end:e.target.value})}/>
+            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="number" min="0" max="1440" value={row.break} onChange={e=>updateHoursRow(idx,{break:e.target.value})}/>
+            <input style={c.inp({padding:"6px 8px",fontSize:12})} type="text" value={row.note} onChange={e=>updateHoursRow(idx,{note:e.target.value})} placeholder="optional"/>
+          </div>
+        ))}
+      </div>}
+      <div style={{marginTop:10}}>
+        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSaveMyHours} disabled={hoursSaving||hoursLoading||!hoursPin}>{hoursSaving?"Saving…":"Save changed rows"}</button>
       </div>
     </div>
 

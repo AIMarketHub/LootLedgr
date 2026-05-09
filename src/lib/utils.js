@@ -34,6 +34,10 @@ export const isExpired7yr=iso=>iso&&new Date(iso)<new Date();
 // Time helpers.
 export const nowISO=()=>new Date().toISOString();
 export const todayStr=()=>nowISO().slice(0,10);
+// Phase 3.5-A-2 — N days ago as a YYYY-MM-DD string (local time
+// normalised to UTC midnight via toISOString().slice(0,10)). Used
+// by the Staff modal "My Hours" 14-day catch-up grid.
+export const daysAgoISO=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().slice(0,10);};
 
 // Invoice-number date prefix (DDMMYY).
 export const invDay=()=>{const d=new Date();return String(d.getDate()).padStart(2,"0")+String(d.getMonth()+1).padStart(2,"0")+String(d.getFullYear()).slice(-2);};

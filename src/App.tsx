@@ -1293,7 +1293,7 @@ export default function Loot(){
           pop={pop}
         />}
 
-        {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={dlAccounting} setShowEOD={setShowEOD}/>}
+        {showEOD&&<EOD todayTxData={todayTxData} dlAccounting={dlAccounting} setShowEOD={setShowEOD} pop={pop}/>}
 
         {showVendors&&<Vendors
           vendors={vendors} setVendors={setVendors}

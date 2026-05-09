@@ -439,3 +439,48 @@ export async function setMyJobTitle(title){
   if(error)throw error;
   return data;
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Phase 3.5-A-2 — staff_hours wrappers (table + RPCs from 0014).
+// Reads use direct RLS-gated SELECT; writes go through the
+// SECURITY DEFINER RPCs so PIN + role checks happen server-side
+// in the same transaction as the audit_log row.
+// ──────────────────────────────────────────────────────────────────
+
+// Read staff_hours rows for a shop in [fromDate, toDate] inclusive.
+// Returns rows ordered by work_date desc. Empty array on no rows.
+export async function listStaffHours(shopId,fromDate,toDate){
+  const{data,error}=await supabase
+    .from("staff_hours")
+    .select("id, user_id, work_date, start_time, end_time, break_minutes, note, updated_at, updated_by")
+    .eq("shop_id",shopId)
+    .gte("work_date",fromDate)
+    .lte("work_date",toDate)
+    .order("work_date",{ascending:false});
+  if(error)throw error;
+  return data||[];
+}
+
+// PIN-gated upsert. ON CONFLICT (shop_id, user_id, work_date) DO
+// UPDATE per the RPC. Caller must supply their own PIN; cross-user
+// writes additionally require owner/manager role server-side.
+export async function upsertStaffHours({pin,userId,workDate,startTime,endTime,breakMinutes,note}){
+  const{data,error}=await supabase.rpc("upsert_staff_hours",{
+    p_pin:pin,
+    p_user_id:userId,
+    p_work_date:workDate,
+    p_start_time:startTime||null,
+    p_end_time:endTime||null,
+    p_break_minutes:breakMinutes||0,
+    p_note:note||"",
+  });
+  if(error)throw error;
+  return data;
+}
+
+// PIN-gated delete. Owner-only server-side.
+export async function deleteStaffHours(pin,id){
+  const{data,error}=await supabase.rpc("delete_staff_hours",{p_pin:pin,p_id:id});
+  if(error)throw error;
+  return data;
+}
