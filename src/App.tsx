@@ -140,10 +140,11 @@ export default function Loot(){
   const[showVendors,setShowVendors]=useState(false);
   const[editVendor,setEditVendor]=useState(null);
   const[vendorForm,setVendorForm]=useState({});
+  // staffList kept as orphan localStorage state for backup
+  // export compat; no UI consumer post-3d-4-c. Future cleanup
+  // can drop the state if no reader appears.
   const[staffList,setStaffList]=useState(()=>store.get("staffList",[]));
   const[showStaff,setShowStaff]=useState(false);
-  const[staffForm,setStaffForm]=useState({});
-  const[activeStaff,setActiveStaff]=useState(()=>store.get("activeStaff",""));
   const[showEOD,setShowEOD]=useState(false);
   const[frozenSnap,setFrozenSnap]=useState(()=>store.get("frozenSnap",null));
   const[spotLog,setSpotLog]=useState(()=>store.get("spotLog",[]));
@@ -373,7 +374,11 @@ export default function Loot(){
   useEffect(()=>store.set("logoLib",logoLib),[logoLib]);
   useEffect(()=>{if(logoLib.length===0&&SEED_LOGO){setLogoLib([{id:"default-logo",data:SEED_LOGO,isLogo:true}]);setSettings(p=>p.logoImg?p:{...p,logoImg:SEED_LOGO});}},[]);
   useEffect(()=>store.set("staffList",staffList),[staffList]);
-  useEffect(()=>store.set("activeStaff",activeStaff),[activeStaff]);
+  // 3d-4-c — one-shot retirement of the legacy gf_activeStaff
+  // localStorage key. Identity comes from auth (auth.userRecord)
+  // post-3d-2; the legacy selector + state are gone. Idempotent —
+  // removeItem on a missing key is a no-op.
+  useEffect(()=>{try{localStorage.removeItem("gf_activeStaff");}catch(_){}},[]);
   useEffect(()=>store.set("frozenSnap",frozenSnap),[frozenSnap]);
   useEffect(()=>store.set("spotLog",spotLog),[spotLog]);
   useEffect(()=>store.set("blacklist",blacklist),[blacklist]);
@@ -954,7 +959,6 @@ export default function Loot(){
             settings={settings} gSpot={gSpot} sSpot={sSpot}
             scaleStatus={scaleStatus} scaleDevice={scaleDevice} scaleLive={scaleLive}
             txList={txList} stock={stock} catalog={catalog}
-            activeStaff={activeStaff} staffList={staffList}
             duressActive={duressActive}
             resetTx={resetTx} setScreen={setScreen}
             setShowEOD={setShowEOD} setShowVendors={setShowVendors} setShowStaff={setShowStaff} setShowBackup={setShowBackup} setShowPolice={setShowPolice}
@@ -993,7 +997,7 @@ export default function Loot(){
             setShowFlag={setShowFlag} setShowCat={setShowCat} setScreen={setScreen}
             selectedClientId={selectedClientId} setSelectedClientId={setSelectedClientId}
             clientStep={clientStep} setClientStep={setClientStep}
-            setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
+            setPinModal={setPinModal} setPinVal={setPinVal}
             isHobbyProspector={isHobbyProspector} setIsHobbyProspector={setIsHobbyProspector}
             vicMinersRightNumber={vicMinersRightNumber} setVicMinersRightNumber={setVicMinersRightNumber}
             tfsCachedList={tfsCachedList} setTfsAllMatches={setTfsAllMatches}
@@ -1020,7 +1024,7 @@ export default function Loot(){
             isBlacklistedName={isBlacklistedName} setBlacklist={setBlacklist}
             setCliNoteId={setCliNoteId} setCliNoteVal={setCliNoteVal}
             pop={pop}
-            setPinModal={setPinModal} setPinVal={setPinVal} activeStaff={activeStaff}
+            setPinModal={setPinModal} setPinVal={setPinVal}
             withAdminGate={withAdminGate}
             setSelTx={setSelTx}
           />}
@@ -1138,7 +1142,6 @@ export default function Loot(){
           settingsOpen={settingsOpen} toggleSection={toggleSection}
           setShowSet={setShowSet}
           withAdminGate={withAdminGate}
-          activeStaff={activeStaff}
         />}
 
         {showApi&&<ApiDiagnostics
@@ -1173,13 +1176,7 @@ export default function Loot(){
           pop={pop} setShowVendors={setShowVendors}
         />}
 
-        {showStaff&&<Staff
-          staffList={staffList} setStaffList={setStaffList}
-          staffForm={staffForm} setStaffForm={setStaffForm}
-          activeStaff={activeStaff} setActiveStaff={setActiveStaff}
-          pop={pop} setShowStaff={setShowStaff}
-          withAdminGate={withAdminGate}
-        />}
+        {showStaff&&<Staff pop={pop} setShowStaff={setShowStaff}/>}
 
         {cliNoteId&&<Modal title="📝 Client Note" onClose={()=>setCliNoteId(null)}>
           <F label="Note (internal — not shown to client)" value={cliNoteVal} onChange={setCliNoteVal} as="textarea"/>

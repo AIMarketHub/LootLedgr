@@ -47,7 +47,7 @@ function FormField({fieldKey,data,setData}){
   return <F label={meta.label} value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
 }
 
-export default function PrivacyPolicyForm({settings,setSettings,activeStaff,pop,onClose}){
+export default function PrivacyPolicyForm({settings,setSettings,pop,onClose}){
   // Initial seed precedence per file header. Same pattern as
   // AmlProgramForm — setSeed lets a successful save resync the
   // dirty-state baseline so the unsaved-changes indicator clears.

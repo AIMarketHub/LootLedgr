@@ -173,7 +173,6 @@ export default function Settings({
   settingsOpen,toggleSection,
   setShowSet,
   withAdminGate,
-  activeStaff,
 }){
   // Phase 2.7 follow-up batch 2 — adminGate wrapper. Falls through
   // to fn() when the gate isn't wired (defensive — same single-
@@ -915,14 +914,14 @@ export default function Settings({
       Without this ordering AdminPinSetup opens but stays hidden
       behind the Settings overlay (the bug fix this commit makes). */}
   {showAdminSetup&&<AdminPinSetup settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowAdminSetup(false)}/>}
-  {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
-  {showAmlHistory&&<AmlProgramHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowAmlHistory(false)} onRestoredOpenForm={()=>setShowAmlForm(true)}/>}
+  {showAmlForm&&<AmlProgramForm settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowAmlForm(false)}/>}
+  {showAmlHistory&&<AmlProgramHistory settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowAmlHistory(false)} onRestoredOpenForm={()=>setShowAmlForm(true)}/>}
   {showAmlPdf&&<AmlProgramPdf settings={settings} pop={pop} onClose={()=>setShowAmlPdf(false)}/>}
-  {showPrivacyForm&&<PrivacyPolicyForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyForm(false)}/>}
-  {showPrivacyHistory&&<PrivacyPolicyHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowPrivacyHistory(false)} onRestoredOpenForm={()=>setShowPrivacyForm(true)}/>}
+  {showPrivacyForm&&<PrivacyPolicyForm settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowPrivacyForm(false)}/>}
+  {showPrivacyHistory&&<PrivacyPolicyHistory settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowPrivacyHistory(false)} onRestoredOpenForm={()=>setShowPrivacyForm(true)}/>}
   {showPrivacyPdf&&<PrivacyPolicyPdf settings={settings} pop={pop} onClose={()=>setShowPrivacyPdf(false)}/>}
-  {showTosForm&&<TermsOfServiceForm settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowTosForm(false)}/>}
-  {showTosHistory&&<TermsOfServiceHistory settings={settings} setSettings={setSettings} activeStaff={activeStaff} pop={pop} onClose={()=>setShowTosHistory(false)} onRestoredOpenForm={()=>setShowTosForm(true)}/>}
+  {showTosForm&&<TermsOfServiceForm settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowTosForm(false)}/>}
+  {showTosHistory&&<TermsOfServiceHistory settings={settings} setSettings={setSettings} pop={pop} onClose={()=>setShowTosHistory(false)} onRestoredOpenForm={()=>setShowTosForm(true)}/>}
   {showTosPdf&&<TermsOfServicePdf settings={settings} pop={pop} onClose={()=>setShowTosPdf(false)}/>}
   {showAccountViewer&&<LegalDocsViewer kind={showAccountViewer} settings={settings} onClose={()=>setShowAccountViewer(null)}/>}
   {showAcceptanceHistory&&<AcceptanceHistoryModal settings={settings} userRecord={userRecord} onClose={()=>setShowAcceptanceHistory(false)}/>}

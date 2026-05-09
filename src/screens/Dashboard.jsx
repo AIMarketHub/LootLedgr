@@ -31,7 +31,6 @@ export default function Dashboard({
   settings,gSpot,sSpot,
   scaleStatus,scaleDevice,scaleLive,
   txList,stock,catalog,
-  activeStaff,staffList,
   duressActive,
   resetTx,setScreen,
   setShowEOD,setShowVendors,setShowStaff,setShowBackup,setShowPolice,
@@ -147,7 +146,6 @@ export default function Dashboard({
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowVendors(true)}>🏪 Suppliers</button>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowStaff(true)}>👥 Staff</button>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowBackup(true)}>💾 Backup</button>
-      {activeStaff&&staffList.find(s=>s.id===activeStaff)&&<span style={{fontSize:11,color:T.green,padding:"5px 8px"}}>👤 {(staffList.find(s=>s.id===activeStaff)||{}).name}</span>}
     </div>
     <div style={{display:"flex",justifyContent:"center",marginTop:8}}>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowPolice(true)}>🚔 Police Report</button>

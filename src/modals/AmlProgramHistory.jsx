@@ -49,7 +49,7 @@ function VersionDetail({version}){
   </div>;
 }
 
-export default function AmlProgramHistory({settings,setSettings,activeStaff,pop,onClose,onRestoredOpenForm}){
+export default function AmlProgramHistory({settings,setSettings,pop,onClose,onRestoredOpenForm}){
   const prog=(settings&&settings.amlProgram)||{currentVersion:null,versions:[]};
   const versions=Array.isArray(prog.versions)?[...prog.versions].sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||"")):[];
   const hasDraft=!!(prog.draft&&prog.draft.data);

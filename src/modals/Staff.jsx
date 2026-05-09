@@ -1,25 +1,29 @@
 // LootLedger — Staff modal.
-// Mechanically extracted from src/App.tsx during Phase 2 step 10h
-// (briefing §7.3). No semantic changes; markup preserved verbatim.
 //
-// Add staff members (name + optional role + optional PIN), pick the
-// active one (used by the staff section of the new-transaction
-// flow), and delete entries. The active selection persists via the
-// `activeStaff` state in App.tsx, which is itself written through
-// to localStorage by the existing useEffect.
+// Phase 3 commit 3d-4-c (2026-05-09) — fully Supabase-backed.
+// Four sections, all reading/writing through the auth context +
+// new RPCs (3d-1 + 3d-4-a + 3d-4-b):
+//   A — My PIN + Job Title (current user; set_my_pin /
+//       set_my_job_title RPCs).
+//   B — Invite Staff Member (owner / manager only;
+//       create_staff_invite RPC; copy-link affordance).
+//   C — Pending Invites (read from staff_invites filtered to
+//       current shop, unclaimed + unexpired).
+//   D — Active Staff (read from users filtered to current shop;
+//       owner-only "Reset PIN" per non-self row via
+//       set_staff_pin RPC).
 //
-// Per-staff PIN (added 2026-04-29 Phase 2.7 follow-up): stored on
-// the staff record but does NOT gate authentication yet. Phase 3
-// will read these values for the real auth layer. Until then the
-// field is purely compliance-tracking metadata. Validation: 4–12
-// digits or blank; non-digit input is rejected silently. Display
-// in the staff list is masked (•••• style) so the PIN never
-// appears in plain text. The 4–12 range matches the Admin PIN
-// policy app-wide.
+// What was retired in 3d-4-c:
+//   - Legacy localStorage staffList[] add/edit/delete form.
+//   - Legacy active-staff dropdown selector.
+//   - activeStaff / setActiveStaff prop drilling.
+//   - withAdminGate prop (the new sections gate via the SQL
+//     layer + role checks, not the shop-level Admin PIN).
+//   - Local editId / editForm state + handlers.
 
 import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
-import {sS,uid} from "../lib/utils.js";
+import {sS} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle} from "../lib/auth/saas.js";
@@ -61,13 +65,7 @@ function userLabel(u){
   return full||sS(u.email)||"(no name)";
 }
 
-export default function Staff({
-  staffList,setStaffList,
-  staffForm,setStaffForm,
-  activeStaff,setActiveStaff,
-  pop,setShowStaff,
-  withAdminGate,
-}){
+export default function Staff({pop,setShowStaff}){
   // ─── Phase 3 commit 3d-4-b — Supabase-backed sections ────────
   const auth=useAuth();
   const role=(auth&&auth.role)||null;
@@ -201,39 +199,6 @@ export default function Staff({
     }
   };
 
-  // ─── Legacy local-only state (3d-4-c retires) ────────────────
-  const[editId,setEditId]=React.useState(null);
-  const[editForm,setEditForm]=React.useState({});
-  const gate=(reason,fn)=>typeof withAdminGate==="function"?withAdminGate(reason,fn):fn();
-  const startEdit=s=>{
-    gate("Edit staff member: "+sS(s.name||"(no name)"),()=>{
-      setEditId(s.id);
-      setEditForm({name:s.name||"",role:s.role||"",pin:s.pin||""});
-    });
-  };
-  const cancelEdit=()=>{setEditId(null);setEditForm({});};
-  const saveEditImpl=()=>{
-    if(!editForm.name){pop("Name required.","warn");return;}
-    const pin=normalizePin(editForm.pin);
-    if(pin===null){pop("PIN must be 4–12 digits, or blank.","warn");return;}
-    setStaffList(p=>p.map(x=>x.id===editId?{...x,name:editForm.name,role:editForm.role,pin}:x));
-    cancelEdit();
-    pop("Staff member updated.","ok");
-  };
-  const saveEdit=()=>gate("Save staff member: "+sS(editForm.name||"(no name)"),saveEditImpl);
-  const addStaffImpl=()=>{
-    if(!staffForm.name){pop("Name required.","warn");return;}
-    const pin=normalizePin(staffForm.pin);
-    if(pin===null){pop("PIN must be 4–12 digits, or blank.","warn");return;}
-    setStaffList(p=>[...p,{...staffForm,pin,id:uid()}]);
-    setStaffForm({});
-    pop("Staff member added.","ok");
-  };
-  const addStaff=()=>gate("Add staff member: "+sS(staffForm.name||"(no name)"),addStaffImpl);
-  const deleteStaff=s=>gate("Delete staff member: "+sS(s.name||"(no name)"),()=>{
-    setStaffList(p=>p.filter(x=>x.id!==s.id));
-    pop("Staff member deleted.","ok");
-  });
   return <Modal title="👥 Staff" onClose={()=>setShowStaff(false)}>
     {/* ─── Section A — My PIN + Job Title ─────────────────────── */}
     <div style={{...c.card({padding:14}),marginBottom:14}}>
@@ -310,42 +275,5 @@ export default function Staff({
       })}
     </div>
 
-    {/* ─── Legacy local-only sections (retired in 3d-4-c) ─────── */}
-    <div style={{fontSize:10,color:T.muted,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,marginTop:14}}>Legacy local-only staff list</div>
-    <div style={{marginBottom:14}}>
-      <div style={c.g2(10)}>
-        <F label="Staff Name" required value={staffForm.name||""} onChange={v=>setStaffForm(p=>({...p,name:v}))}/>
-        <F label="Role" value={staffForm.role||""} onChange={v=>setStaffForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
-        <F label="PIN (4–12 digits)" type="password" value={staffForm.pin||""} onChange={v=>setStaffForm(p=>({...p,pin:v}))} placeholder="optional" note="Stored against this staff member. Phase 3 will use it for staff-level auth; for now it is recorded but not enforced."/>
-      </div>
-      <button style={c.btn(T.gold)} onClick={addStaff}>Add Staff Member</button>
-    </div>
-    <div style={{marginBottom:14}}>
-      <label style={c.lbl}>Active Staff Member</label>
-      <select style={{...c.sel(),width:"100%"}} value={activeStaff} onChange={e=>setActiveStaff(e.target.value)}>
-        <option value="">— None selected —</option>
-        {(staffList||[]).map(s=><option key={s.id} value={s.id}>{sS(s.name)}{s.role?" ("+s.role+")":""}</option>)}
-      </select>
-    </div>
-    {(staffList||[]).map(s=>editId===s.id?<div key={s.id} style={{...c.card({padding:12}),marginBottom:8}}>
-      <div style={c.g2(10)}>
-        <F label="Staff Name" required value={editForm.name||""} onChange={v=>setEditForm(p=>({...p,name:v}))}/>
-        <F label="Role" value={editForm.role||""} onChange={v=>setEditForm(p=>({...p,role:v}))} placeholder="e.g. Buyer, Manager"/>
-        <F label="PIN (4–12 digits)" type="password" value={editForm.pin||""} onChange={v=>setEditForm(p=>({...p,pin:v}))} placeholder="optional"/>
-      </div>
-      <div style={{display:"flex",gap:8}}>
-        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={saveEdit}>Save</button>
-        <button style={c.bsm()} onClick={cancelEdit}>Cancel</button>
-      </div>
-    </div>:<div key={s.id} style={{...c.card({padding:12}),marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <div>
-        <div style={{fontWeight:"bold",color:T.white}}>{sS(s.name)}</div>
-        <div style={{fontSize:11,color:T.muted}}>{sS(s.role)}{s.pin?" · PIN "+"•".repeat(sS(s.pin).length):" · No PIN"}</div>
-      </div>
-      <div style={{display:"flex",gap:6}}>
-        <button style={c.bsm()} onClick={()=>startEdit(s)}>Edit</button>
-        <button style={c.bsm(T.redBg,T.red)} onClick={()=>deleteStaff(s)}>🗑</button>
-      </div>
-    </div>)}
   </Modal>;
 }

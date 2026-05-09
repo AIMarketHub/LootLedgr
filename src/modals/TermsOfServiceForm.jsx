@@ -37,7 +37,7 @@ function FormField({fieldKey,data,setData}){
   return <F label={meta.label} value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
 }
 
-export default function TermsOfServiceForm({settings,setSettings,activeStaff,pop,onClose}){
+export default function TermsOfServiceForm({settings,setSettings,pop,onClose}){
   const[seed,setSeed]=useState(()=>{
     const prog=(settings&&settings.termsOfService)||{};
     if(prog.draft&&prog.draft.data)return{...buildDefaults(settings),...prog.draft.data};

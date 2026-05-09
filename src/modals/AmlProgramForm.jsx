@@ -115,7 +115,7 @@ function FormField({fieldKey,data,setData}){
   return <F label={meta.label} value={value==null?"":String(value)} onChange={set} note={meta.help}/>;
 }
 
-export default function AmlProgramForm({settings,setSettings,activeStaff,pop,onClose}){
+export default function AmlProgramForm({settings,setSettings,pop,onClose}){
   // Initial seed at mount + a setter so successful saves can resync
   // it to the just-saved data. Without the setter, dirty stays
   // true forever after any save (Save Draft and Save & Approve

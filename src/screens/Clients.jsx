@@ -37,7 +37,7 @@ export default function Clients({
   setCliNoteId,setCliNoteVal,
   pop,
   // Phase 2.7.11 — blacklist soft-block gate plumbing
-  setPinModal,setPinVal,activeStaff,
+  setPinModal,setPinVal,
   // Phase 2.7 follow-up batch 2 — Admin-PIN gate for destructive
   // ClientDetail actions (Edit toggle, Save, Erase photo).
   withAdminGate,
@@ -223,7 +223,6 @@ export default function Clients({
       onClose={()=>{setSelectedClient(null);loadClients();}}
       withAdminGate={withAdminGate}
       setSelTx={setSelTx}
-      activeStaff={activeStaff}
     />}
   </div>;
 }

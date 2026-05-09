@@ -90,8 +90,8 @@ export default function NewTx({
   selectedClientId,setSelectedClientId,
   clientStep,setClientStep,
   // Phase 2.7.11 — blacklist soft-block gate (reuses the existing
-  // setPinModal pattern; activeStaff drives audit-entry staffId).
-  setPinModal,setPinVal,activeStaff,
+  // setPinModal pattern; auth identity drives audit-entry staffId).
+  setPinModal,setPinVal,
   // Stage 1.C — hobby prospector flag (tax-treatment marker; no
   // effect on KYC / TTR / SMR / privacy / retention).
   isHobbyProspector,setIsHobbyProspector,
@@ -849,7 +849,7 @@ export default function NewTx({
             onSelect={cl=>{
               requireBlacklistOverride({
                 client:cl,
-                callbacks:{pop,setPinModal,setPinVal,activeStaff},
+                callbacks:{pop,setPinModal,setPinVal},
                 onApproved:()=>{
                   setClient({...cl});
                   setSelectedClientId(cl.id);

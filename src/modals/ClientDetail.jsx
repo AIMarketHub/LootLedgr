@@ -58,7 +58,7 @@ function modesOf(tx){
   return has;
 }
 
-export default function ClientDetail({client,txList,onSave,onClose,pop,withAdminGate,setSelTx,activeStaff}){
+export default function ClientDetail({client,txList,onSave,onClose,pop,withAdminGate,setSelTx}){
   const[editing,setEditing]=useState(false);
   const[form,setForm]=useState({});
   const[showGate,setShowGate]=useState(false);
@@ -114,7 +114,7 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
       const updated=await clients.update(client.id,{
         archived:true,
         archivedAt:nowISO(),
-        archivedBy:getCurrentUserLabel()||sS(activeStaff||"")||null,
+        archivedBy:getCurrentUserLabel()||null,
         archivedByActor:getCurrentUserId(),
       });
       if(updated){
@@ -215,11 +215,10 @@ export default function ClientDetail({client,txList,onSave,onClose,pop,withAdmin
   // adds blacklistClearedAt / blacklistClearedBy alongside.
   const applyBlacklistChange=async next=>{
     const now=nowISO();
-    // Phase 3 commit 3d-2 — display label from auth identity;
-    // legacy activeStaff is the fallback when the auth context
-    // hasn't resolved (e.g. a pre-auth race). The actor uuid
-    // companion lands alongside for the new audit layer.
-    const staff=getCurrentUserLabel()!=="Unknown"?getCurrentUserLabel():sS(activeStaff||"Unknown");
+    // Phase 3 commit 3d-2 — display label from auth identity.
+    // 3d-4-c retired the legacy activeStaff fallback; auth label
+    // is the canonical actor source post-3d-2.
+    const staff=getCurrentUserLabel();
     const actor=getCurrentUserId();
     const patch=next
       ?{blacklisted:true,blacklistedAt:now,blacklistedBy:staff,blacklistedByActor:actor,blacklistReason:client.blacklistReason||""}

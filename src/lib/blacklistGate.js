@@ -12,7 +12,7 @@
 //   import {requireBlacklistOverride} from "../lib/blacklistGate.js";
 //   requireBlacklistOverride({
 //     client,
-//     callbacks: {pop, setPinModal, setPinVal, activeStaff},
+//     callbacks: {pop, setPinModal, setPinVal},
 //     onApproved: () => doTheActualThing(client),
 //   });
 //
@@ -25,15 +25,13 @@
 //
 // AUDIT ENTRY SHAPE
 //
-//   { timestamp, staffId, reason }
+//   { timestamp, staffId, staffActor, reason }
 //
 // Stored as an entry in client.blacklistOverrides (JSONB array).
-// staffId comes from settings.activeStaff today (pre-Phase-3, this
-// is the till's currently-selected staff string; post-Phase-3,
-// it'll be the auth user id). reason is a fixed string for now —
-// briefing §9 Gap 6 has stricter min-length requirements for the
-// general compliance-override audit, but the blacklist case is
-// narrower and the spec didn't ask for free-text capture.
+// staffId is the auth display label (first+family or email);
+// staffActor is the auth.uid() uuid for the new audit_log layer.
+// 3d-4-c retired the legacy activeStaff fallback; auth identity
+// is the canonical source post-3d-2.
 
 import {sS} from "./utils.js";
 import {recordBlacklistOverride} from "./clients.js";
@@ -44,7 +42,7 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
     onApproved&&onApproved();
     return;
   }
-  const{pop,setPinModal,setPinVal,activeStaff}=callbacks||{};
+  const{pop,setPinModal,setPinVal}=callbacks||{};
   if(typeof setPinModal!=="function"){
     // Caller bug — surface clearly. Fail closed (don't approve).
     pop&&pop("Blacklist override cannot be applied: PIN modal not wired.","err");
@@ -54,16 +52,12 @@ export function requireBlacklistOverride({client,callbacks,onApproved}){
     reason:"⛔ BLACKLISTED CLIENT — Admin PIN required to proceed.\n\nClient: "+sS(client.fullName||"(no name)"),
     cb:async()=>{
       try{
-        // Phase 3 commit 3d-2 — staffId is the freetext display
-        // label (kept for ClientDetail history-render backward
-        // compat); staffActor is the auth.uid() for the new
-        // audit_log layer wired up in 3d-3. activeStaff is the
-        // pre-Phase-3 selector value, retained as a fallback for
-        // sessions that haven't completed the auth identity swap.
-        const lbl=getCurrentUserLabel();
+        // staffId is the auth display label; staffActor is the
+        // auth.uid() for the new audit_log layer wired up in 3d-3.
+        // 3d-4-c retired the legacy activeStaff fallback.
         await recordBlacklistOverride(client.id,{
           timestamp:new Date().toISOString(),
-          staffId:lbl!=="Unknown"?lbl:sS(activeStaff||""),
+          staffId:getCurrentUserLabel(),
           staffActor:getCurrentUserId(),
           reason:"Override approved via PIN",
         });
