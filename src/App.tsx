@@ -156,7 +156,29 @@ export default function Loot(){
   const[scaleDevice,setScaleDevice]=useState(null);
   const[scaleStatus,setScaleStatus]=useState("off");
   const[duressActive,setDuressActive]=useState(false);
-  const[appUnlocked,setAppUnlocked]=useState(()=>{const s=store.get("settings",{});if(!s.requirePin)return true;const t=s.sessionTimeout||"never";if(t==="never")return !!store.get("sessionActive",false);if(t==="close")return false;const limits={"1h":3600000,"8h":28800000};return Date.now()-store.get("sessionLast",0)<(limits[t]||Infinity);});
+  const[appUnlocked,setAppUnlocked]=useState(()=>{
+    // Auth fix (2026-05-09) — fresh-login bypass. signIn / signUp /
+    // signUpForInvite in saas.js set this flag on success so a just-
+    // signed-in user lands at /app without hitting the lock screen.
+    // Lock screen still fires on reload-after-idle (sessionActive
+    // gates that branch below) and on explicit lock — only the
+    // post-fresh-login navigation is bypassed.
+    try{
+      if(localStorage.getItem("gf_freshLogin")==="1"){
+        localStorage.removeItem("gf_freshLogin");
+        store.set("sessionActive",true);
+        store.set("sessionLast",Date.now());
+        return true;
+      }
+    }catch(_){/* non-fatal — fall through to legacy gate */}
+    const s=store.get("settings",{});
+    if(!s.requirePin)return true;
+    const t=s.sessionTimeout||"never";
+    if(t==="never")return !!store.get("sessionActive",false);
+    if(t==="close")return false;
+    const limits={"1h":3600000,"8h":28800000};
+    return Date.now()-store.get("sessionLast",0)<(limits[t]||Infinity);
+  });
   const[appPinInput,setAppPinInput]=useState("");
   // Stage 1.C lock-screen fix — gates PIN entry on Supabase
   // settings load. Without this, a stale localStorage cache from a

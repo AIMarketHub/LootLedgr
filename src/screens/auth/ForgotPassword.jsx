@@ -24,7 +24,7 @@ export default function ForgotPassword(){
     const r=await resetPasswordViaEmail(email.trim());
     setBusy(false);
     if(!r.ok){setErr(translateAuthError(r.error||"Could not send reset email."));return;}
-    setInfo("Check your email for a reset link. It may take a minute to arrive — also check spam.");
+    setInfo("Check your email for a reset link. Click it to set a new password. The link may take a minute to arrive — also check spam.");
   };
 
   return <AuthLayout

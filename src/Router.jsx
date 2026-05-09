@@ -32,6 +32,12 @@ const TfsListAdmin=lazy(()=>import("./screens/admin/TfsListAdmin.jsx"));
 const RequireAdmin=lazy(()=>import("./components/RequireAdmin.jsx"));
 // Phase 3 commit 3d-4-b — staff invite-claim entry point.
 const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
+// Auth fix (2026-05-09) — password-reset landing page (target of
+// the email link sent by ForgotPassword). detectSessionInUrl=true
+// in the supabase client config means the recovery session is
+// auto-loaded from the URL fragment; the screen renders a new-
+// password form and calls supabase.auth.updateUser({password}).
+const ResetPassword=lazy(()=>import("./screens/auth/ResetPassword.jsx"));
 
 function RootRedirect(){
   const{user,loading}=useAuth();
@@ -51,6 +57,7 @@ export default function Router(){
           <Route path="/signup" element={<Signup/>}/>
           <Route path="/forgot" element={<ForgotPassword/>}/>
           <Route path="/claim-invite" element={<ClaimInvite/>}/>
+          <Route path="/reset-password" element={<ResetPassword/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
           <Route path="/admin/tfs" element={<RequireAdmin><TfsListAdmin/></RequireAdmin>}/>
           <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>

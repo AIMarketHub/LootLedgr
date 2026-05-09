@@ -181,6 +181,12 @@ export async function signUp({
   // a SELECT for the shop. The users row is keyed on auth.uid()
   // which equals authUser.id; we don't need a round-trip for it.
   const shopRow=await safe(()=>supabase.from("shops").select("*").eq("id",r.data.shop_id).maybeSingle());
+  // Auth fix (2026-05-09) — fresh-login bypass for the lock
+  // screen. App.tsx boot reads this flag in the appUnlocked
+  // initializer; if present it auto-unlocks (and clears the
+  // flag), so a successful signup doesn't dump the user at the
+  // PIN gate. See also signIn / signUpForInvite below.
+  try{localStorage.setItem("gf_freshLogin","1");}catch(_){/* non-fatal */}
   return{
     ok:true,
     data:{
@@ -211,6 +217,9 @@ export async function signIn({identifier,password}){
     ?supabase.auth.signInWithPassword({email:identifier,password})
     :supabase.auth.signInWithPassword({phone:identifier,password}));
   if(!r.ok)return{ok:false,error:r.error};
+  // Auth fix (2026-05-09) — fresh-login bypass for the lock
+  // screen. See signUp() for the rationale.
+  try{localStorage.setItem("gf_freshLogin","1");}catch(_){/* non-fatal */}
   return{ok:true,data:r.data};
 }
 
@@ -228,8 +237,16 @@ export async function signOut(){
 // ──────────────────────────────────────────────────────────────────
 export async function resetPasswordViaEmail(email){
   if(!email)return{ok:false,error:"Email required."};
+  // Auth fix (2026-05-09) — redirectTo points to the new
+  // /reset-password screen. Supabase's detectSessionInUrl=true
+  // (configured at line 44) auto-loads the recovery session
+  // from the URL fragment when ResetPassword.jsx mounts; the
+  // user just has to set + confirm a new password.
+  // STUDIO ACTION REQUIRED: add `${SITE_URL}/reset-password` to
+  // Project Settings → Auth → URL Configuration → Redirect URLs.
+  // Otherwise Supabase rejects the redirectTo at runtime.
   return safe(()=>supabase.auth.resetPasswordForEmail(email,{
-    redirectTo:typeof window!=="undefined"?window.location.origin+"/login":undefined,
+    redirectTo:typeof window!=="undefined"?window.location.origin+"/reset-password":undefined,
   }));
 }
 
@@ -383,6 +400,9 @@ export async function signUpForInvite({email,password,firstName,familyName,phone
   if(!r.ok)return{ok:false,error:"Signup failed: "+r.error};
   const authUser=r.data&&r.data.user;
   if(!authUser||!authUser.id)return{ok:false,error:"Signup returned no user id."};
+  // Auth fix (2026-05-09) — fresh-login bypass for the lock
+  // screen. See signUp() for the rationale.
+  try{localStorage.setItem("gf_freshLogin","1");}catch(_){/* non-fatal */}
   return{ok:true,data:{user:authUser,session:r.data&&r.data.session||null}};
 }
 
