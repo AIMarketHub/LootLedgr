@@ -222,16 +222,24 @@ Retry policy:
 - Per-provider quirks: MYOB's API is slower; allow longer timeout
   per call.
 
-Mock mode (TWO ORTHOGONAL TOGGLES preserved per Adjustment 4):
+Mock mode (per Adjustment 4 + Adjustment 18):
 - Every integration has a "MOCK" implementation that returns
   success without touching external services.
-- Settings has "Hardware mode": [Live / Mock].
+
+**Hardware Mode (per-device toggles):**
+- 5 per-device toggles: Printer, Scale, Scanner, Signature pad,
+  Cash drawer. Each independently Live or Mock.
+- "Mock all hardware" / "Live all hardware" convenience buttons
+  flip all 5 toggles together.
+- Hardware mode is independent of Accounting provider mode
+  (separate setting in 5.2-F).
+
+**Accounting Mode:**
 - Settings has "Accounting mode": [None / Xero / MYOB /
   QuickBooks / Mock-Xero / Mock-MYOB / Mock-QuickBooks].
-- "Mock all" convenience button in Settings flips both toggles
-  simultaneously.
-- Mock writes to local logs so the rest of the app can be fully
-  exercised. Switches at runtime, no rebuild.
+
+Mock writes to local logs so the rest of the app can be fully
+exercised. Switches at runtime, no rebuild.
 
 Comprehensive logging:
 - Every API call logged: timestamp, endpoint, payload, response,
@@ -799,7 +807,7 @@ src/lib/integrations/accounting/
 ### Shared `provider_sync_log` table (Adjustment 2)
 
 Single shared table at the abstraction layer. NOT per-provider
-dedupe tables. Lives in migration `0016_provider_sync_log.sql` (5.2-F).
+dedupe tables. Lives in migration `0017_provider_sync_log.sql` (5.2-F).
 
 Schema:
 
@@ -1018,7 +1026,7 @@ The per-shop subdomain routing model (assignment policy,
 reserved words, OAuth callback pattern, auth flow) is fully
 specified in Section 18.
 
-Schema migration bundled into 5.2-PRE: `0018_shop_subdomains.sql`
+Schema migration bundled into 5.2-PRE: `0019_shop_subdomains.sql`
 — see Section 18 for the full schema additions and reserved
 words list.
 
@@ -1109,7 +1117,7 @@ Examples:
 
 ### 18.1 — Schema additions
 
-Migration `0018_shop_subdomains.sql`, bundled into 5.2-PRE:
+Migration `0019_shop_subdomains.sql`, bundled into 5.2-PRE:
 
 ```sql
 ALTER TABLE shops ADD COLUMN subdomain text UNIQUE;
@@ -1299,7 +1307,7 @@ No banners, no countdown UI, no payment integration in Phase
 5.5 (subscription billing system) will build enforcement on
 top of.
 
-Schema additions for migration `0018_shop_subdomains.sql`
+Schema additions for migration `0019_shop_subdomains.sql`
 (subscription columns added alongside subdomain column):
 
 ```sql
@@ -1355,8 +1363,8 @@ draft:
    `integrations/` convention).
 2. **Idempotency:** Single shared `provider_sync_log` table at
    abstraction layer (5.2-F). Schema in Section 12.
-3. **Migration numbering:** `0016_provider_sync_log.sql`,
-   `0017_internal_bills.sql`.
+3. **Migration numbering:** `0017_provider_sync_log.sql`,
+   `0018_internal_bills.sql`.
 4. **Mock toggles:** Two orthogonal toggles preserved + "Mock all"
    convenience button in Settings.
 5. **Pre-5.2-B prerequisites:** Daylesford Square Developer account
@@ -1414,7 +1422,7 @@ audit pass:
     `.lootledger.au`, SMTP2GO sender → `noreply@lootledger.au`.
 12. **Per-shop subdomain routing model** (new **Section 18**;
     existing §18 → §19 and §19 → §20). Schema migration
-    `0018_shop_subdomains.sql` adds `shops.subdomain` UNIQUE
+    `0019_shop_subdomains.sql` adds `shops.subdomain` UNIQUE
     column with CHECK `[a-z0-9]{1,32}`. Reserved-words list
     (admin/api/www/etc.) rejected at signup. Routing logic
     extracts subdomain from hostname, looks up `shop_id`, falls
@@ -1467,3 +1475,15 @@ audit pass:
     payment integration in Phase 5.2 — these columns are
     purely state markers for Phase 5.5 (subscription billing
     system) to build on.
+17. **Migration numbering corrected.** Numbering in the original
+    v3.2 spec assumed 5.2-F migrations would ship before 5.2-A.
+    Actual ship order: 0016 (`hardware_log`, 5.2-A), 0017
+    (`provider_sync_log`, 5.2-F), 0018 (`internal_bills`, 5.2-F),
+    0019 (`shop_subdomains` + subscription columns, 5.2-PRE).
+    All references updated throughout the doc.
+18. **Hardware mode toggle granularity confirmed per-device.**
+    §5 wording in original spec was a single global toggle;
+    clarified to per-device (Printer, Scale, Scanner, Signature
+    pad, Cash drawer) with "Mock all hardware" / "Live all
+    hardware" convenience buttons. Independent of accounting
+    provider mode (which has its own separate setting in 5.2-F).

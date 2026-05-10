@@ -9,6 +9,14 @@ import {THRESH,checkCompliance,cashAmountFromTx,isTtrRequired,calcUnitPrice,calc
 import {clients,findOrCreateByIdNumber,pickClientRecordFields} from "./lib/clients.js";
 import {syncTfsCache,getCachedTfsList,getCachedMetadata} from "./lib/tfs/storage.js";
 import {requireAdminPin} from "./lib/adminGate.js";
+// Phase 5.2-A — scale hardware driver. App.tsx still owns the
+// React state (scaleStatus / scaleDevice / scaleLive) for cross-
+// component access; the driver now owns the connect/disconnect
+// business logic and notifies state changes through the
+// handlers registered below. SCALE_STD_SVC / NUS_SVC / parse*
+// imports above remain for back-compat — the constants are now
+// referenced inside src/lib/hardware/scale.js as well.
+import {scale as scaleDriver} from "./lib/hardware/index.js";
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
@@ -684,23 +692,23 @@ export default function Loot(){
     pushIntegrations(settings,tx).then(msgs=>{if(msgs&&msgs.length)pop(msgs.join(" | ").slice(0,200),"ok");}).catch(()=>{});
   };
 
+  // Phase 5.2-A — connectScale / disconnectScale now delegate to
+  // src/lib/hardware/scale.js. Behaviour preserved: Standard BLE
+  // → Nordic UART → custom UUID protocol fall-through, gattserver-
+  // disconnected listener, same pop() messages, same React state.
+  // Per-device Live/Mock toggle in Settings → Hardware controls
+  // whether the real Bluetooth code or the Mock branch runs.
   const connectScale=async()=>{
-    if(!navigator.bluetooth){pop("Web Bluetooth not supported. Use Chrome or Edge on Android.","err");return;}
-    try{
-      setScaleStatus("connecting");pop("Opening Bluetooth scanner…","ok");
-      const proto=settings.scaleProtocol||"auto",optServices=[];
-      if(proto==="auto"||proto==="standard")optServices.push(SCALE_STD_SVC);
-      if(proto==="auto"||proto==="nordic_uart")optServices.push(NUS_SVC);
-      if(proto==="custom"&&settings.scaleCustomServiceUUID)optServices.push(settings.scaleCustomServiceUUID.toLowerCase());
-      const device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:optServices});
-      setScaleDevice(device);const server=await device.gatt.connect();let connected=false;
-      if(proto==="auto"||proto==="standard"){try{const svc=await server.getPrimaryService(SCALE_STD_SVC);const ch=await svc.getCharacteristic(SCALE_STD_CHAR);await ch.startNotifications();ch.addEventListener("characteristicvaluechanged",e=>{const r=parseStdWeight(e.target.value);if(r)setScaleLive(r);});connected=true;setScaleStatus("connected");pop("Scale connected (Standard BLE).","ok");}catch(_){}}
-      if((proto==="auto"||proto==="nordic_uart")&&!connected){try{const svc=await server.getPrimaryService(NUS_SVC);const tx=await svc.getCharacteristic(NUS_TX);await tx.startNotifications();let buf="";tx.addEventListener("characteristicvaluechanged",e=>{buf+=new TextDecoder().decode(e.target.value);if(buf.length>30){const r=parseAsciiWeight(buf);if(r)setScaleLive(r);buf="";}});connected=true;setScaleStatus("connected");pop("Scale connected (Nordic UART).","ok");}catch(_){}}
-      if(!connected){setScaleStatus("error");pop("Connected but no scale service found. Try a different Protocol in Settings.","warn");}
-      device.addEventListener("gattserverdisconnected",()=>{setScaleStatus("off");setScaleLive(null);setScaleDevice(null);});
-    }catch(e){setScaleStatus("off");if(e.name!=="NotFoundError")pop("Scale: "+e.message,"err");}
+    scaleDriver.setSettings(settings);
+    scaleDriver.setHandlers({
+      onStatus:setScaleStatus,
+      onDevice:setScaleDevice,
+      onLive:setScaleLive,
+      pop:pop,
+    });
+    await scaleDriver.connect();
   };
-  const disconnectScale=()=>{if(scaleDevice&&scaleDevice.gatt&&scaleDevice.gatt.connected){try{scaleDevice.gatt.disconnect();}catch(_){}}setScaleStatus("off");setScaleDevice(null);setScaleLive(null);};
+  const disconnectScale=()=>{scaleDriver.disconnect();};
 
   const triggerDuress=async()=>{
     setDuressActive(true);

@@ -54,6 +54,15 @@ import LegalDocsViewer from "./LegalDocsViewer.jsx";
 import TfsScreenLogPanel from "./TfsScreenLogPanel.jsx";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
+// Phase 5.2-A — hardware drivers + per-device mode toggles. Each
+// driver persists its own Live/Mock mode to localStorage; the
+// section below reads/writes via getAllModes / getDriver.setMode
+// and the "Mock all hardware" / "Live all hardware" convenience
+// buttons flip the lot via setAllModes.
+import {Link} from "react-router-dom";
+import {DEVICES as HW_DEVICES,getDriver as getHwDriver,getAllModes as getAllHwModes,setAllModes as setAllHwModes} from "../lib/hardware/index.js";
+
+const HW_LABELS={printer:"Printer",scale:"Scale",scanner:"Scanner",signature:"Signature pad",cashDrawer:"Cash drawer"};
 
 // 24 alphabet chars → "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX". Defensive
 // against decrypt that for some reason returned an unexpected
@@ -186,6 +195,22 @@ export default function Settings({
   // keystroke gating would be unusable; one prompt per session is
   // the right grain.
   const[thresholdsUnlocked,setThresholdsUnlocked]=useState(false);
+  // Phase 5.2-A — per-device hardware-mode toggles. Initial state
+  // read from each driver (which itself reads from localStorage on
+  // module load). Toggle handlers call setMode + mirror into local
+  // state so the radio inputs update immediately. Independent of
+  // accounting provider mode (separate setting in Phase 5.2-F).
+  const[hwModes,setHwModes]=useState(()=>getAllHwModes());
+  const setOneHwMode=(device,mode)=>{
+    const d=getHwDriver(device);
+    if(!d)return;
+    d.setMode(mode);
+    setHwModes(prev=>({...prev,[device]:mode}));
+  };
+  const setAllHw=(mode)=>{
+    setAllHwModes(mode);
+    setHwModes(getAllHwModes());
+  };
   const makeGatedTightenHandler=(key,legalMin)=>{
     const inner=makeTightenHandler(setSettings,pop,key,legalMin);
     return v=>{
@@ -369,6 +394,31 @@ export default function Settings({
         <SF label="Protocol" value={settings.scaleProtocol||"auto"} onChange={v=>setSettings(p=>({...p,scaleProtocol:v}))} options={[{value:"auto",label:"Auto-detect (try both)"},{value:"standard",label:"Standard BLE Weight Scale"},{value:"nordic_uart",label:"Nordic UART (NUS)"},{value:"custom",label:"Custom UUID"}]}/>
         {settings.scaleProtocol==="custom"&&<div style={c.g2(10)}><F label="Service UUID" value={settings.scaleCustomServiceUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomServiceUUID:v}))}/><F label="Characteristic UUID" value={settings.scaleCustomCharUUID||""} onChange={v=>setSettings(p=>({...p,scaleCustomCharUUID:v}))}/></div>}
         <SF label="Display Unit" value={settings.scaleUnit||"g"} onChange={v=>setSettings(p=>({...p,scaleUnit:v}))} options={[{value:"g",label:"Grams (g)"},{value:"ozt",label:"Troy oz (ozt)"},{value:"oz",label:"Avoirdupois oz"}]}/>
+      </div>],
+      ["hardware","🛠 Hardware Mode",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:11,color:T.muted,marginBottom:14,lineHeight:1.5}}>
+          Each device runs Live (real hardware) or Mock (simulated, for development without hardware attached). Mock writes to local logs so the rest of the app can be exercised without anything plugged in. Toggles persist per-machine in localStorage. Independent of accounting provider mode (separate setting in Phase 5.2-F).
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+          <button style={c.bsm(T.border,T.muted)} onClick={()=>setAllHw("mock")}>Mock all hardware</button>
+          <button style={c.bsm(T.gold,T.bg)} onClick={()=>setAllHw("live")}>Live all hardware</button>
+        </div>
+        {HW_DEVICES.map(d=>(
+          <div key={d} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+T.border+"22"}}>
+            <span style={{fontSize:13,color:T.text}}>{HW_LABELS[d]||d}</span>
+            <div style={{display:"flex",gap:14}}>
+              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+                <input type="radio" name={"hwmode-"+d} checked={hwModes[d]==="live"} onChange={()=>setOneHwMode(d,"live")}/>Live
+              </label>
+              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer"}}>
+                <input type="radio" name={"hwmode-"+d} checked={hwModes[d]==="mock"} onChange={()=>setOneHwMode(d,"mock")}/>Mock
+              </label>
+            </div>
+          </div>
+        ))}
+        <div style={{marginTop:14}}>
+          <Link to="/admin/diagnostics" style={{color:T.gold,fontWeight:600,textDecoration:"none",fontSize:12}}>Run diagnostics →</Link>
+        </div>
       </div>],
       ["security","🔒 Security",<div style={{paddingBottom:14}}>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,marginBottom:14}}><input type="checkbox" checked={!!settings.requirePin} onChange={e=>onRequirePinToggle(e.target.checked)}/>Require PIN to open app</label>

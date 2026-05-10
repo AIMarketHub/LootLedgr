@@ -29,6 +29,11 @@ const App=lazy(()=>import("./App.tsx"));
 const TrialExpired=lazy(()=>import("./screens/TrialExpired.jsx"));
 const AdminPanel=lazy(()=>import("./screens/admin/AdminPanel.jsx"));
 const TfsListAdmin=lazy(()=>import("./screens/admin/TfsListAdmin.jsx"));
+// Phase 5.2-A — hardware abstraction + provider diagnostics
+// admin screen. Coexists with the older src/modals/ApiDiagnostics
+// modal (deferred removal, see project_deferred_items.md "Phase
+// 5.2 cleanup deferred").
+const Diagnostics=lazy(()=>import("./screens/diagnostics/index.jsx"));
 const RequireAdmin=lazy(()=>import("./components/RequireAdmin.jsx"));
 // Phase 3 commit 3d-4-b — staff invite-claim entry point.
 const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
@@ -60,6 +65,7 @@ export default function Router(){
           <Route path="/reset-password" element={<ResetPassword/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
           <Route path="/admin/tfs" element={<RequireAdmin><TfsListAdmin/></RequireAdmin>}/>
+          <Route path="/admin/diagnostics" element={<RequireAdmin><Diagnostics/></RequireAdmin>}/>
           <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>
           <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
