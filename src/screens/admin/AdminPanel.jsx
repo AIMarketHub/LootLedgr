@@ -112,6 +112,7 @@ export default function AdminPanel(){
         <div style={{fontSize:12,color:"#666"}}>
           Signed in as <strong>{user&&user.email}</strong> ·{" "}
           <Link to="/admin/tfs" style={styles.link}>TFS list</Link> ·{" "}
+          <Link to="/admin/diagnostics" style={styles.link}>🛠 Diagnostics</Link> ·{" "}
           <Link to="/app" style={styles.link}>Back to app</Link> ·{" "}
           <button onClick={onSignOut} style={{background:"none",border:"none",color:"#c9a84c",fontWeight:600,cursor:"pointer",padding:0,fontFamily:"inherit",fontSize:12}}>Sign out</button>
         </div>
