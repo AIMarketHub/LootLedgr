@@ -19,12 +19,12 @@
 // (src/components/RequireAuth.jsx).
 
 import React,{createContext,useContext,useEffect,useState,useCallback,useRef} from "react";
-import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isLockedOut} from "../lib/auth/saas.js";
+import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isPlatformAdmin,isLockedOut} from "../lib/auth/saas.js";
 import {setCurrentShopId,setCurrentUserId} from "../lib/storage.js";
 
 const AuthCtx=createContext({
   user:null,userRecord:null,shop:null,role:null,
-  admin:false,locked:false,loading:true,
+  admin:false,isPlatformAdmin:false,locked:false,loading:true,
   refresh:()=>{},
 });
 
@@ -33,7 +33,7 @@ export function useAuth(){return useContext(AuthCtx);}
 export function AuthProvider({children}){
   const[state,setState]=useState({
     user:null,userRecord:null,shop:null,role:null,
-    admin:false,locked:false,loading:true,
+    admin:false,isPlatformAdmin:false,locked:false,loading:true,
   });
   // Tracks whether we currently have a signed-in user. Used to
   // distinguish a real SIGNED_IN transition (logged-out → logged-in)
@@ -48,14 +48,15 @@ export function AuthProvider({children}){
       hadUserRef.current=false;
       setCurrentShopId(null);
       setCurrentUserId(null,null);
-      setState({user:null,userRecord:null,shop:null,role:null,admin:false,locked:false,loading:false});
+      setState({user:null,userRecord:null,shop:null,role:null,admin:false,isPlatformAdmin:false,locked:false,loading:false});
       return;
     }
     hadUserRef.current=true;
-    const[userRecord,shop,admin,locked]=await Promise.all([
+    const[userRecord,shop,admin,platformAdmin,locked]=await Promise.all([
       getCurrentUserRecord(),
       getCurrentShop(),
       isAdmin(),
+      isPlatformAdmin(),
       isLockedOut(),
     ]);
     // Cache the shop id in storage.js so module-level sb.* helpers
@@ -80,6 +81,7 @@ export function AuthProvider({children}){
       shop,
       role:userRecord&&userRecord.role||null,
       admin,
+      isPlatformAdmin:platformAdmin,
       locked,
       loading:false,
     });

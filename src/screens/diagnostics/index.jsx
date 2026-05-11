@@ -55,7 +55,7 @@ const styles={
 };
 
 export default function Diagnostics(){
-  const{user}=useAuth();
+  const{user,isPlatformAdmin}=useAuth();
   const nav=useNavigate();
   const[running,setRunning]=useState(false);
   const[progress,setProgress]=useState({current:null,completed:0,total:0});
@@ -93,7 +93,7 @@ export default function Diagnostics(){
         </div>
         <div style={{fontSize:12,color:"#666"}}>
           Signed in as <strong>{user&&user.email}</strong> ·{" "}
-          <Link to="/admin" style={styles.link}>Admin panel</Link> ·{" "}
+          {isPlatformAdmin&&<><a style={styles.link} href="https://admin.lootledger.au">Platform admin ↗</a> ·{" "}</>}
           <button onClick={()=>nav("/app")} style={{background:"none",border:"none",color:"#c9a84c",fontWeight:600,cursor:"pointer",padding:0,fontFamily:"inherit",fontSize:12}}>Back to app</button>
         </div>
       </div>

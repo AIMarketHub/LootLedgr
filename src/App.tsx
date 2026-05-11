@@ -1142,7 +1142,7 @@ export default function Loot(){
           <span>Shop: <strong style={{color:T.gold}}>{sS(auth.shop.slug)}</strong>{auth.shop.business_name?" — "+sS(auth.shop.business_name):""}</span>
           <span style={{display:"flex",gap:10,alignItems:"center"}}>
             {auth.user&&auth.user.email&&<span style={{color:T.muted}}>{sS(auth.user.email)}</span>}
-            {auth.admin&&<a href="/admin" style={{color:T.gold,textDecoration:"none",fontWeight:"bold"}}>Admin</a>}
+            {auth.isPlatformAdmin&&<a href="https://admin.lootledger.au" style={{color:T.gold,textDecoration:"none",fontWeight:"bold"}}>Admin ↗</a>}
             <button style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:0,textDecoration:"underline"}} onClick={async()=>{await saasSignOut();if(auth.refresh)await auth.refresh();window.location.assign("/login");}}>Sign out</button>
           </span>
         </div>}

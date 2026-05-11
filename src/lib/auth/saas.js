@@ -360,6 +360,19 @@ export async function isAdmin(){
   return!!data;
 }
 
+// Phase 5.2-PRE-2 — platform admin role (UUID-based, separate
+// from the legacy email-based `admins` allowlist above).
+// Returns true iff the signed-in user has a row in the
+// platform_admins table (RLS in 0020 restricts SELECT to
+// platform admins, so this returns false for non-admins
+// without leaking the table contents).
+export async function isPlatformAdmin(){
+  const u=await getCurrentUser();
+  if(!u||!u.id)return false;
+  const{data}=await supabase.from("platform_admins").select("id").eq("user_id",u.id).maybeSingle();
+  return!!data;
+}
+
 // True iff trial_ends_at is in the past AND subscription_active is
 // false. Used by RequireAuth to decide whether to redirect to
 // /trial-expired. null shop → also locked out (no active shop is
