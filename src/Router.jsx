@@ -43,9 +43,26 @@ const Diagnostics=lazy(()=>import("./screens/diagnostics/index.jsx"));
 const RequireAdmin=lazy(()=>import("./components/RequireAdmin.jsx"));
 // Phase 5.2-PRE-2 — platform admin shell. Mounted only when
 // detectTenantHost returns mode='admin' (i.e. on the
-// admin.lootledger.au host).
-const PlatformShopsDashboard=lazy(()=>import("./screens/platform/index.jsx"));
+// admin.lootledger.au host). v2 expanded the MVP shops
+// dashboard into a full multi-section app shell.
 const RequirePlatformAdmin=lazy(()=>import("./components/RequirePlatformAdmin.jsx"));
+const PlatformShell=lazy(()=>import("./screens/platform/Shell.jsx"));
+const PlatformShops=lazy(()=>import("./screens/platform/Shops.jsx"));
+const PlatformTfs=lazy(()=>import("./screens/platform/Tfs.jsx"));
+const PlatformDiagnostics=lazy(()=>import("./screens/platform/Diagnostics.jsx"));
+const PlatformAuditLog=lazy(()=>import("./screens/platform/AuditLog.jsx"));
+const PlatformUsers=lazy(()=>import("./screens/platform/Users.jsx"));
+const PlatformHealth=lazy(()=>import("./screens/platform/Health.jsx"));
+const PlatformAdmins=lazy(()=>import("./screens/platform/Admins.jsx"));
+const PlatformSearch=lazy(()=>import("./screens/platform/Search.jsx"));
+const PlatformSecurity=lazy(()=>import("./screens/platform/Security.jsx"));
+const PlatformJobs=lazy(()=>import("./screens/platform/Jobs.jsx"));
+const PlatformFlags=lazy(()=>import("./screens/platform/FeatureFlags.jsx"));
+const PlatformSubs=lazy(()=>import("./screens/platform/Subscriptions.jsx"));
+const PlatformShopCreate=lazy(()=>import("./screens/platform/ShopCreate.jsx"));
+const PlatformImpersonate=lazy(()=>import("./screens/platform/Impersonate.jsx"));
+const PlatformAustrac=lazy(()=>import("./screens/platform/Austrac.jsx"));
+const PlatformAgedAudit=lazy(()=>import("./screens/platform/AgedAudit.jsx"));
 // Phase 3 commit 3d-4-b — staff invite-claim entry point.
 const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
 // Auth fix (2026-05-09) — password-reset landing page (target of
@@ -81,8 +98,26 @@ export default function Router(){
         <Suspense fallback={loadingFallback}>
           <RequirePlatformAdmin>
             <Routes>
-              <Route path="/" element={<PlatformShopsDashboard/>}/>
-              <Route path="*" element={<Navigate to="/" replace/>}/>
+              <Route element={<PlatformShell/>}>
+                <Route index element={<Navigate to="/shops" replace/>}/>
+                <Route path="/shops" element={<PlatformShops/>}/>
+                <Route path="/health" element={<PlatformHealth/>}/>
+                <Route path="/tfs" element={<PlatformTfs/>}/>
+                <Route path="/subscriptions" element={<PlatformSubs/>}/>
+                <Route path="/diagnostics" element={<PlatformDiagnostics/>}/>
+                <Route path="/jobs" element={<PlatformJobs/>}/>
+                <Route path="/search" element={<PlatformSearch/>}/>
+                <Route path="/audit" element={<PlatformAuditLog/>}/>
+                <Route path="/users" element={<PlatformUsers/>}/>
+                <Route path="/impersonate" element={<PlatformImpersonate/>}/>
+                <Route path="/admins" element={<PlatformAdmins/>}/>
+                <Route path="/shop-create" element={<PlatformShopCreate/>}/>
+                <Route path="/flags" element={<PlatformFlags/>}/>
+                <Route path="/security" element={<PlatformSecurity/>}/>
+                <Route path="/austrac" element={<PlatformAustrac/>}/>
+                <Route path="/aged-audit" element={<PlatformAgedAudit/>}/>
+                <Route path="*" element={<Navigate to="/shops" replace/>}/>
+              </Route>
             </Routes>
           </RequirePlatformAdmin>
         </Suspense>
@@ -101,9 +136,15 @@ export default function Router(){
           <Route path="/claim-invite" element={<ClaimInvite/>}/>
           <Route path="/reset-password" element={<ResetPassword/>}/>
           <Route path="/trial-expired" element={<TrialExpired/>}/>
-          <Route path="/admin/tfs" element={<RequireAdmin><TfsListAdmin/></RequireAdmin>}/>
+          {/* Per-shop /admin/* routes: Phase 5.2-PRE-2 v2 moved
+              the cross-shop AdminPanel + TfsListAdmin to
+              admin.lootledger.au. The diagnostics route stays
+              on shop subdomain because it tests per-machine
+              hardware. The legacy AdminPanel.jsx and
+              TfsListAdmin.jsx files stay in the repo per
+              "only add, never remove"; their routes are just
+              unwired. */}
           <Route path="/admin/diagnostics" element={<RequireAdmin><Diagnostics/></RequireAdmin>}/>
-          <Route path="/admin/*" element={<RequireAdmin><AdminPanel/></RequireAdmin>}/>
           <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
