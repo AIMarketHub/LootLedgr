@@ -939,20 +939,22 @@ Status:
 
 ## Section 16 — Commit Boundary (5.2-PRE through 5.2-H)
 
-Sub-phases (v3.2 — 5.2-PRE prepended per Adjustment 11; rest
-re-sequenced per Adjustment 7 from v3.1 — H before G):
+Sub-phases (v3.2 — 5.2-PRE prepended per Adjustment 11; PRE-2
+inserted per Adjustment 20; rest re-sequenced per Adjustment 7
+from v3.1 — H before G):
 
 | Order | Phase | Title |
 |---|---|---|
 | 1 | 5.2-PRE | Domain migration to lootledger.au + per-shop subdomains + wildcard SSL — **blocked on R10** |
-| 2 | 5.2-A | Hardware abstraction layer + diagnostics page foundation |
-| 3 | 5.2-E | SMTP2GO + email send infrastructure |
-| 4 | 5.2-B | Square integration + token security + idempotency |
-| 5 | 5.2-D | ABA batch generation |
-| 6 | 5.2-F | AccountingProvider abstraction + None mode |
-| 7 | 5.2-C | Xero integration (FIRST EXTERNAL PROVIDER) |
-| 8 | 5.2-H | QuickBooks Online integration (SECOND EXTERNAL PROVIDER) |
-| 9 | 5.2-G | MYOB integration (THIRD EXTERNAL PROVIDER) — **blocked on R9** |
+| 2 | 5.2-PRE-2 | Admin role hierarchy + `admin.lootledger.au` (see Section 20) |
+| 3 | 5.2-A | Hardware abstraction layer + diagnostics page foundation |
+| 4 | 5.2-E | SMTP2GO + email send infrastructure |
+| 5 | 5.2-B | Square integration + token security + idempotency |
+| 6 | 5.2-D | ABA batch generation |
+| 7 | 5.2-F | AccountingProvider abstraction + None mode |
+| 8 | 5.2-C | Xero integration (FIRST EXTERNAL PROVIDER) |
+| 9 | 5.2-H | QuickBooks Online integration (SECOND EXTERNAL PROVIDER) |
+| 10 | 5.2-G | MYOB integration (THIRD EXTERNAL PROVIDER) — **blocked on R9** |
 
 Rationale:
 - **PRE first**: domain + per-shop subdomain routing + wildcard
@@ -961,6 +963,13 @@ Rationale:
   the OAuth pivot. Doing PRE first lets every provider's OAuth app
   be configured ONCE with a stable apex callback. R10 (Netlify
   wildcard SSL plan-tier verification) gates PRE.
+- **PRE-2 next**: platform admin role hierarchy + the
+  `admin.lootledger.au` subdomain alias (see Section 20). Lands
+  before A so the platform admin surface exists before any later
+  sub-phase needs it (e.g. cross-shop diagnostics, future TFS
+  list management). Also clears the architecture question of
+  "where does cross-shop work live" before more code accretes
+  on per-shop subdomains.
 - A next: foundation.
 - E next: emails work for everything else.
 - B next: Square is the simplest integration with the most
@@ -1333,7 +1342,196 @@ All previous Q1-Q6 resolved:
 
 ---
 
-## Section 20 — Deferred / Out of Scope
+## Section 20 — Phase 5.2-PRE-2: Admin Role Hierarchy
+(Adjustment 20 from v3.2; existing Section 20 → Section 21)
+
+Phase 5.2-PRE established per-shop subdomain routing with tenant
+isolation (RLS + wrong-tenant guard). PRE-2 establishes the role
+hierarchy ABOVE the existing shop-level roles
+(owner/manager/staff from Phase 3) for cross-shop platform
+administration.
+
+### 20.1 — Two-level role model
+
+**Platform Admin (NEW in PRE-2):**
+- Cross-shop role; not tied to any single shop.
+- Held by platform operators only (currently: platform owner —
+  Guillaume Weber / Daylesford).
+- Accessed via `admin.lootledger.au` subdomain.
+- Can see all shops, manage platform-level resources (TFS list
+  updates, subscription state, platform health), perform support
+  functions.
+- Does NOT replace per-shop admin. Platform admin is additive — it
+  sits above the shop role hierarchy.
+
+**Shop Admin (existing, formalized in PRE-2):**
+- Per-shop role; bound to ONE shop_id via existing `users` /
+  `users_role` mapping.
+- Held by the shop owner + any users with manager role in that
+  shop.
+- Accessed via `{shop}.lootledger.au/admin/*` routes.
+- Manages their own shop's staff, settings, audit log, EOD
+  reports, hardware diagnostics, TFS screening workflow (using
+  the platform TFS list).
+- This is what's already partially built (AdminPanel on shop
+  subdomains today, accessible via owner role).
+
+### 20.2 — Why two levels (architectural rationale)
+
+Each level owns work that makes sense at its scope:
+
+- **Shop owners run their own business.** Adding/removing staff,
+  editing shop settings, configuring hardware, running daily
+  compliance checks — these are the shop owner's responsibilities.
+  They must be able to do this 24/7 without involving the platform
+  owner. AUSTRAC compliance for AML/CTF requires the dealer be
+  responsible for their own program — making platform admin a
+  chokepoint here creates legal exposure.
+
+- **Platform admin manages the platform.** Onboarding new shops,
+  updating the TFS list (shared across all shops), monitoring
+  platform health, providing support, eventually subscription
+  billing (Phase 5.5).
+
+Single-admin-only model rejected at architecture review
+2026-05-11 due to scaling concerns (platform owner becoming IT
+support chokepoint) and compliance concerns (above).
+
+### 20.3 — Schema additions (migration `0020_platform_admin.sql`, bundles into PRE-2)
+
+Separate `platform_admins` table (auditable; future-proof for
+multi-admin):
+
+```sql
+CREATE TABLE platform_admins (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL UNIQUE
+                REFERENCES auth.users(id) ON DELETE CASCADE,
+  granted_at  timestamptz NOT NULL DEFAULT now(),
+  granted_by  uuid REFERENCES auth.users(id),
+  notes       text
+);
+
+CREATE INDEX platform_admins_user_idx ON platform_admins(user_id);
+
+-- Seed: platform owner (Guillaume Weber).
+INSERT INTO platform_admins (user_id, notes)
+VALUES (
+  'db754093-830e-4c2a-b228-d322e71490b2',
+  'Platform owner; seeded at PRE-2 migration.'
+);
+
+-- Helper function for RLS policies that need platform-admin
+-- bypass (e.g. TFS list management, cross-shop queries).
+CREATE OR REPLACE FUNCTION current_is_platform_admin()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM platform_admins
+    WHERE user_id = auth.uid()
+  );
+$$;
+
+ALTER TABLE platform_admins ENABLE ROW LEVEL SECURITY;
+
+-- Only platform admins can read the table; only platform
+-- admins can grant new platform admins.
+CREATE POLICY platform_admins_read ON platform_admins
+  FOR SELECT USING (current_is_platform_admin());
+CREATE POLICY platform_admins_write ON platform_admins
+  FOR INSERT WITH CHECK (current_is_platform_admin());
+-- No UPDATE/DELETE policies — revoking platform admin is
+-- intentionally manual via DB direct access for now.
+```
+
+**Numbering note:** PRE-2 ships migration `0020_platform_admin.sql`
+because PRE-2 lands before 5.2-F per the Section 16 commit
+boundary. The 5.2-F migration reservations from Adjustment 17
+(`0017_provider_sync_log` / `0018_internal_bills`) thus shift
+to `0021` / `0022` when 5.2-F actually ships.
+
+### 20.4 — Routing rules
+
+Subdomain routing extends Section 18 with one new entry:
+
+- `admin.lootledger.au` — Platform admin app. Gated by
+  `current_is_platform_admin()` check. Non-admins redirected to
+  `lootledger.au` with error.
+
+Existing routing rules unchanged:
+- `lootledger.au` — apex (login/marketing).
+- `{shop}.lootledger.au/admin/*` — shop admin (existing).
+- `{shop}.lootledger.au/app/*` — shop app (existing).
+
+Reserved word `admin` was already in the reserved subdomain list
+from Section 18 — no schema change needed; the existing CHECK
+constraint blocks `admin` as a shop subdomain.
+
+### 20.5 — `admin.lootledger.au` scope (PRE-2 minimum)
+
+PRE-2 ships ONE feature on `admin.lootledger.au`:
+
+**(a) Shops dashboard** — read-only table listing all shops on
+the platform. Columns: `business_name`, `subdomain`,
+`subscription_plan`, `trial_starts_at`, `created_at`,
+`last_activity` (optional, can be deferred). Useful as a landing
+page so platform admin has a place to start.
+
+Future features (deferred — separate sub-phases after PRE-2):
+
+- **(b) Cross-shop search.** Find clients/transactions across
+  all shops (support use case). Phase 5.X follow-up.
+- **(c) Platform health metrics.** Error rates, signups, active
+  users. Phase 5.X follow-up.
+- **(d) Subscription management UI.** Toggle billing, extend
+  trials, mark exempt. Phase 5.5 (subscription billing system).
+- **(e) Cross-shop user management.** View/disable users across
+  shops. Phase 5.X.
+- **(f) TFS list management.** Upload AUSTRAC updates; manage
+  global TFS database. Move existing `/admin/tfs` from shop
+  subdomain to platform admin — deferred to a follow-up after
+  PRE-2 lands the basic routing.
+
+### 20.6 — Shop admin routes (unchanged scope)
+
+Per-shop `/admin/*` routes stay on shop subdomains. Currently
+has: hardware diagnostics, TFS list (until migration to
+platform admin), shop settings management via the existing
+AdminPanel.
+
+No changes to shop admin RLS in PRE-2.
+
+### 20.7 — DNS + Netlify alias for `admin.lootledger.au`
+
+PRE-2 setup (similar to PRE for daylesford / ballarat):
+
+1. VentraIP DNS: wildcard CNAME `*.lootledger.au` already covers
+   `admin.lootledger.au` — NO new DNS record needed.
+2. Netlify project "lootledger": add domain alias
+   `admin.lootledger.au`.
+3. SSL cert auto-extends to cover the new alias.
+4. Verify browser-level HTTPS works.
+
+### 20.8 — Implementation order
+
+PRE-2 ships in one commit boundary:
+
+1. Migration `0020_platform_admin.sql` (table + RLS + helper
+   function + seed platform owner).
+2. Apply migration in dev Studio.
+3. New routes file or extension of `Router.jsx` detecting
+   `admin.lootledger.au` and rendering platform admin app shell.
+4. Platform admin guard component (`RequirePlatformAdmin`)
+   calling `current_is_platform_admin()` server-side via
+   `sbFetch`.
+5. Shops dashboard page (read-only table — feature (a)).
+6. Add `admin.lootledger.au` as Netlify domain alias.
+7. Browser verify: `admin.lootledger.au` loads platform admin
+   dashboard for platform owner; redirects non-admins.
+
+---
+
+## Section 21 — Deferred / Out of Scope
 
 Out of Phase 5.2:
 - $2k cash hard-block toggle (Phase 4 deferred).
@@ -1413,7 +1611,8 @@ audit pass:
 
 11. **Domain migration with per-shop subdomains** (Section 16,
     new sub-phase **5.2-PRE** prepended). New sub-phase order:
-    PRE → A → E → B → D → F → C → H → G. Tasks: Netlify apex +
+    PRE → PRE-2 → A → E → B → D → F → C → H → G (PRE-2 inserted
+    by Adjustment 20). Tasks: Netlify apex +
     wildcard `*.lootledger.au`, AU-registrar DNS records,
     Let's Encrypt DNS-01 wildcard cert (Pro tier+), 301
     redirects from lootledger.com.au / lootledger.net /
@@ -1495,3 +1694,29 @@ audit pass:
     in §18.8 + Adjustment 16 + this summary updated. Migration
     0019 sets `trial_starts_at = now()` on the new Ballarat row
     instead of adding a duplicate column.
+20. **Phase 5.2-PRE-2 formalized.** Admin role hierarchy
+    hardening with separate `admin.lootledger.au` for
+    platform-level work (full spec in **Section 20**; existing
+    Section 20 → Section 21). Two-level model: Platform Admin
+    (cross-shop, held by platform owner, accessed via
+    `admin.lootledger.au`) sits ABOVE existing shop-level roles
+    (owner / manager / staff). New schema: `platform_admins`
+    table + `current_is_platform_admin()` helper function
+    (migration `0020_platform_admin.sql`). PRE-2 ships shops
+    dashboard as MVP scope; cross-shop search, health metrics,
+    subscription UI, user management, TFS list management all
+    deferred to follow-up sub-phases. Per-shop `/admin/*`
+    routes unchanged. Sub-phase order updated everywhere to
+    `PRE → PRE-2 → A → E → B → D → F → C → H → G`.
+
+    Single-admin-only model rejected at chat review 2026-05-11
+    due to scaling concerns (platform owner becoming IT support
+    chokepoint) and compliance concerns (AUSTRAC requires
+    dealer be responsible for their own AML/CTF program;
+    routing all compliance through platform admin creates
+    legal exposure).
+
+    **Migration-numbering implication:** PRE-2 takes `0020`,
+    so the 5.2-F reservations from Adjustment 17
+    (`0017_provider_sync_log` / `0018_internal_bills`) shift
+    forward to `0021` / `0022` when 5.2-F actually ships.
