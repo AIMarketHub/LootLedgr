@@ -157,6 +157,23 @@ export const sbFetch=async(path,opts={})=>{
 // not-ok; the empty-body sentinel and any parsed JSON are ok.
 export const sbOk=r=>r!=null&&!r.__sbError;
 
+// Phase 5.2-PRE — subdomain → shop lookup. Used by the app boot
+// sequence on a *.lootledger.au URL to resolve the shop_id from
+// hostname. Returns null on:
+//   - empty / reserved-word / format-invalid subdomain
+//   - network failure
+//   - no row matches
+// Reserved-word + format guards happen client-side before the
+// network call to avoid wasting round-trips on garbage input.
+import {isReservedSubdomain,isValidSubdomainFormat} from "./tenancy.js";
+export async function getShopBySubdomain(subdomain){
+  if(!subdomain||isReservedSubdomain(subdomain))return null;
+  if(!isValidSubdomainFormat(subdomain))return null;
+  const r=await sbFetch("shops?subdomain=eq."+encodeURIComponent(subdomain)+"&select=*");
+  if(!sbOk(r))return null;
+  return Array.isArray(r)&&r.length>0?r[0]:null;
+}
+
 const ts=()=>new Date().toISOString();
 // PostgREST `?on_conflict=` must name the EXACT columns of the
 // table's PRIMARY KEY (or a UNIQUE constraint). The four mirrored

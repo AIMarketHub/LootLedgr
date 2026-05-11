@@ -6,9 +6,10 @@
 import React,{useState} from "react";
 import {Link,useNavigate,useLocation} from "react-router-dom";
 import AuthLayout,{authStyles as A,PasswordField} from "./AuthLayout.jsx";
-import {signIn} from "../../lib/auth/saas.js";
+import {signIn,getCurrentShop} from "../../lib/auth/saas.js";
 import {translateAuthError} from "../../lib/auth/errorMessages.js";
 import {useAuth} from "../../components/AuthProvider.jsx";
+import {detectTenantHost,buildShopUrl} from "../../lib/tenancy.js";
 
 export default function Login(){
   const[identifier,setIdentifier]=useState("");
@@ -28,6 +29,25 @@ export default function Login(){
     setBusy(false);
     if(!r.ok){setErr(translateAuthError(r.error||"Sign in failed."));return;}
     await refresh();
+    // Phase 5.2-PRE — apex login → shop subdomain. If we're on
+    // the apex (lootledger.au) and the user's shop has a
+    // subdomain set, hand off to the subdomain via a real
+    // navigation so the cookie-scoped session carries over.
+    // Dev hosts and existing-subdomain navigation stay on
+    // react-router (no cross-origin redirect needed). The
+    // wrong-subdomain guard in RequireAuth handles the case
+    // where someone manually types the wrong subdomain.
+    const detected=detectTenantHost(typeof window!=="undefined"?window.location.hostname:"");
+    if(detected.mode==="apex"){
+      const shop=await getCurrentShop();
+      if(shop&&shop.subdomain){
+        const target=buildShopUrl(shop.subdomain,{path:next});
+        if(target&&target!==window.location.href){
+          window.location.replace(target);
+          return;
+        }
+      }
+    }
     nav(next,{replace:true});
   };
 

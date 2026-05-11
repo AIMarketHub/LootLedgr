@@ -30,18 +30,74 @@
 //   and drives the RequireAuth guard's trial-expired redirect.
 
 import {createClient} from "@supabase/supabase-js";
+import {getCookie,setCookie,removeCookie} from "./cookies.js";
 
 const SB_URL=import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY=import.meta.env.VITE_SUPABASE_KEY;
 
-// Single shared client for the whole app. Persists session in
-// localStorage by default (gf_supabase_auth) so the user stays
-// signed in across reloads.
+// Phase 5.2-PRE (2026-05-11) — cross-subdomain auth via cookies
+// scoped to `.lootledger.au`. When running on the production
+// custom domain or any of its subdomains, the Supabase session
+// lives in a cookie readable by every shop subdomain. Dev hosts
+// (localhost, lootledger.netlify.app) keep the default
+// localStorage strategy — no cross-subdomain need.
+//
+// One-time tradeoff: any existing localStorage session at
+// lootledger.au is invalidated on next page load (the storage
+// bucket changes), forcing a re-login. Acknowledged per chat
+// decision 2026-05-11.
+const _hostname=typeof window!=="undefined"?window.location.hostname:"";
+const _useCookieStorage=_hostname.endsWith("lootledger.au");
+
+// Browsers' per-cookie limit is 4096 bytes (name + value +
+// attributes). Supabase session payloads can approach this with
+// refresh tokens. Above the safety threshold we fall back to
+// localStorage and console.warn — Phase 5.5 cleanup can add
+// chunked-cookie storage if it actually starts firing.
+const COOKIE_SIZE_LIMIT=3500;
+
+const _cookieStorage={
+  getItem:(k)=>{
+    if(typeof window==="undefined")return null;
+    const v=getCookie(k);
+    if(v!=null)return v;
+    // Fallback read covers payloads written via the size-guard
+    // setItem branch below — keeps getItem/setItem symmetric.
+    try{return window.localStorage.getItem(k);}catch(e){return null;}
+  },
+  setItem:(k,v)=>{
+    if(typeof window==="undefined")return;
+    if(v&&String(v).length>COOKIE_SIZE_LIMIT){
+      console.warn("[loot-auth] session payload "+String(v).length+"B exceeds "+COOKIE_SIZE_LIMIT+"B; falling back to localStorage");
+      try{window.localStorage.setItem(k,v);}catch(e){}
+      return;
+    }
+    setCookie(k,v,{
+      domain:".lootledger.au",
+      path:"/",
+      sameSite:"Lax",
+      secure:true,
+      maxAge:60*60*24*365,
+    });
+  },
+  removeItem:(k)=>{
+    if(typeof window==="undefined")return;
+    removeCookie(k,{domain:".lootledger.au",path:"/"});
+    try{window.localStorage.removeItem(k);}catch(e){}
+  },
+};
+
+// Single shared client for the whole app. Storage strategy is
+// chosen above based on hostname; persistSession + autoRefresh
+// behave the same regardless.
 export const supabase=createClient(SB_URL,SB_KEY,{
   auth:{
     persistSession:true,
     autoRefreshToken:true,
     detectSessionInUrl:true,
+    storage:_useCookieStorage
+      ?_cookieStorage
+      :(typeof window!=="undefined"?window.localStorage:undefined),
   },
 });
 

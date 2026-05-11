@@ -1296,11 +1296,11 @@ logic in Phase 5.2):**
 
 - Daylesford (platform-owner's own shop):
   `shops.subscription_plan = 'platform_exempt'`
-  `shops.trial_started_at = NULL`
+  `shops.trial_starts_at = NULL`
 
 - Ballarat (platform-owner's boss's shop):
   `shops.subscription_plan = 'trial'`
-  `shops.trial_started_at = <migration date>`
+  `shops.trial_starts_at = <migration date>`
 
 No banners, no countdown UI, no payment integration in Phase
 5.2. These two columns exist purely to record state that Phase
@@ -1312,7 +1312,7 @@ Schema additions for migration `0019_shop_subdomains.sql`
 
 ```sql
 ALTER TABLE shops ADD COLUMN subscription_plan text DEFAULT 'trial';
-ALTER TABLE shops ADD COLUMN trial_started_at timestamptz;
+ALTER TABLE shops ADD COLUMN trial_starts_at timestamptz;
 ```
 
 ---
@@ -1470,7 +1470,7 @@ audit pass:
 
     **Subscription state at migration locked (data-only).**
     Daylesford = `platform_exempt`. Ballarat = `trial`. Schema
-    adds `subscription_plan` + `trial_started_at` columns to
+    adds `subscription_plan` + `trial_starts_at` columns to
     `shops` table. NO enforcement logic, banners, billing, or
     payment integration in Phase 5.2 — these columns are
     purely state markers for Phase 5.5 (subscription billing
@@ -1487,3 +1487,11 @@ audit pass:
     pad, Cash drawer) with "Mock all hardware" / "Live all
     hardware" convenience buttons. Independent of accounting
     provider mode (which has its own separate setting in 5.2-F).
+19. **`trial_started_at` → reuse existing `trial_starts_at`.**
+    Original v3.2 spec proposed adding a new `trial_started_at`
+    column on `shops`; collides with existing `trial_starts_at`
+    from migration 0003 (NOT NULL DEFAULT now()). Decision
+    2026-05-11: reuse the existing column. All spec references
+    in §18.8 + Adjustment 16 + this summary updated. Migration
+    0019 sets `trial_starts_at = now()` on the new Ballarat row
+    instead of adding a duplicate column.

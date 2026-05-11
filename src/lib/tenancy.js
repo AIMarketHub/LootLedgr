@@ -1,18 +1,25 @@
 // LootLedger — multi-tenant subdomain helpers.
 // Stage 1.A SaaS foundation (2026-05-02).
+// Phase 5.2-PRE refactor (2026-05-11): Fork A — `subdomain`
+// (separate column added in migration 0019_shop_subdomains.sql)
+// is now the canonical routing key. The existing `slug` column
+// (kebab-case from business name) stays as the human-readable
+// identifier — surfaced in the admin panel, support tools, and
+// the dashboard top-bar — but is no longer used for routing.
 //
-// Each shop gets a slug at signup (kebab-case from business
-// name, dedupe via -2/-3 suffix). In production the slug becomes
-// the subdomain: ballarat.lootledger.com.au. In dev we run on
-// lootledger.netlify.app and on localhost — there are no real
-// subdomains, so the helpers fall back to "the user's shop" via
-// the auth context.
+// Each shop's subdomain is `[a-z0-9]{1,32}` (no hyphens). For
+// the platform launch tenants:
+//   daylesford.lootledger.au → Daylesford (platform-owner)
+//   ballarat.lootledger.au   → Ballarat (platform-owner's boss)
 //
-// The Router runs the subdomain check on mount via useShopSlug
-// hook; if the URL slug doesn't match the user's shop slug, the
-// hook returns a redirect target. App.tsx renders the slug at the
-// top of the dashboard so the dealer can see which shop they're
-// signed into.
+// In dev (lootledger.netlify.app, localhost) there's no real
+// subdomain — the helpers fall back to "the user's shop" via
+// the auth context and skip cross-host enforcement.
+//
+// Cross-subdomain redirect: RequireAuth runs the check on every
+// route resolve; if window.location's subdomain doesn't match
+// the user's shop.subdomain, it window.location.replace's to the
+// correct host.
 
 const APEX_HOSTS=new Set([
   // Apex (no subdomain) hostnames where the app should show the
@@ -35,15 +42,26 @@ const DEV_HOSTS=new Set([
   "0.0.0.0",
 ]);
 
+// Reserved subdomain words rejected at signup. List documented
+// in supabase/migrations/0019_shop_subdomains.sql for cross-
+// reference. Enforced in code, not at the DB level.
+export const RESERVED_SUBDOMAINS=[
+  "admin","api","www","auth","mail","smtp","ftp",
+  "blog","app","help","support","status","dev",
+  "staging","test","demo","docs","secure","login",
+  "signup","dashboard","root","mx","cpanel",
+  "webmail","ns1","ns2",
+];
+
 // Returns one of:
-//   { mode: "dev"    }                  → development, no host check
-//   { mode: "apex"   }                  → marketing / login site
-//   { mode: "tenant", slug: "ballarat" } → real tenant subdomain
-//   { mode: "admin"  }                  → admin.lootledger.* — reserved
+//   { mode: "dev"     }                       → development, no host check
+//   { mode: "apex"    }                       → marketing / login site
+//   { mode: "tenant", subdomain: "ballarat" } → real tenant subdomain
+//   { mode: "admin"   }                       → admin.lootledger.* — reserved
 //
-// Callers branch on .mode. The slug is whatever sits to the left
-// of the apex hostname; if the user is on
-// "ballarat.lootledger.com.au", slug is "ballarat".
+// Callers branch on .mode. The subdomain is whatever sits to
+// the left of the apex hostname; if the user is on
+// "ballarat.lootledger.au", subdomain is "ballarat".
 export function detectTenantHost(host){
   const h=String(host||(typeof window!=="undefined"?window.location.hostname:"")||"").toLowerCase();
   if(!h)return{mode:"dev"};
@@ -53,27 +71,27 @@ export function detectTenantHost(host){
   // panel. Stage 2 may move /admin onto its own subdomain; for
   // now /admin under /app routing handles it.
   if(/^admin\./.test(h))return{mode:"admin"};
-  // Any other host with at least 3 segments (slug.lootledger.au,
-  // slug.lootledger.com.au, slug.foo.bar) → take the leftmost as
-  // the tenant slug. We don't enforce that the rest matches a
-  // known apex — keeps the helper resilient to custom domains
-  // and staging hosts.
+  // Any other host with at least 3 segments (subdomain.lootledger.au,
+  // subdomain.lootledger.com.au, subdomain.foo.bar) → take the
+  // leftmost as the tenant subdomain. We don't enforce that the
+  // rest matches a known apex — keeps the helper resilient to
+  // custom domains and staging hosts.
   const parts=h.split(".");
   if(parts.length<3)return{mode:"dev"};
-  return{mode:"tenant",slug:parts[0]};
+  return{mode:"tenant",subdomain:parts[0]};
 }
 
-// Convenience: returns the slug or null. Use detectTenantHost for
-// the full mode.
+// Convenience: returns the subdomain or null. Use detectTenantHost
+// for the full mode.
 export function getCurrentShopFromSubdomain(host){
   const r=detectTenantHost(host);
-  return r.mode==="tenant"?r.slug:null;
+  return r.mode==="tenant"?r.subdomain:null;
 }
 
-// Builds the URL for a given shop slug, preserving the current
-// path / query string. Used by the cross-subdomain redirect when
-// the user signs in on the wrong host.
-export function buildShopUrl(slug,opts){
+// Builds the URL for a given shop subdomain, preserving the
+// current path / query string. Used by the cross-subdomain
+// redirect when the user signs in on the wrong host.
+export function buildShopUrl(subdomain,opts){
   if(typeof window==="undefined")return "";
   const o=opts||{};
   const proto=window.location.protocol;
@@ -83,11 +101,56 @@ export function buildShopUrl(slug,opts){
   // The user's shop is identified by auth context, not hostname.
   const r=detectTenantHost(host);
   if(r.mode==="dev")return o.path||window.location.pathname;
-  // In production, swap the leftmost subdomain for the target slug.
+  // Production / apex paths: swap the leftmost subdomain for the
+  // target. When current host is the apex (no subdomain), prepend
+  // the subdomain to the existing host parts instead of replacing.
   const parts=host.split(".");
-  if(parts.length<3)return o.path||window.location.pathname;
-  parts[0]=String(slug||"").toLowerCase();
+  const sd=String(subdomain||"").toLowerCase();
+  if(r.mode==="apex"){
+    // Apex like "lootledger.au" → "{sd}.lootledger.au"
+    parts.unshift(sd);
+  }else if(parts.length>=3){
+    // Already a subdomain → swap leftmost
+    parts[0]=sd;
+  }else{
+    return o.path||window.location.pathname;
+  }
   const newHost=parts.join(".");
   const path=o.path||window.location.pathname;
   return proto+"//"+newHost+port+path;
+}
+
+// True if the subdomain string is a reserved word.
+// Case-insensitive.
+export function isReservedSubdomain(s){
+  if(!s)return false;
+  return RESERVED_SUBDOMAINS.indexOf(String(s).toLowerCase())!==-1;
+}
+
+// True if subdomain matches the storage format constraint:
+// 1-32 chars, lowercase alphanumeric only. Mirrors the CHECK
+// constraint added by 0019_shop_subdomains.sql.
+export function isValidSubdomainFormat(s){
+  if(!s)return false;
+  return /^[a-z0-9]{1,32}$/.test(s);
+}
+
+// Sanitize a candidate subdomain (e.g. from a shop name during
+// signup). NFD-decompose to strip diacritics, lowercase, strip
+// non-[a-z0-9], truncate to 32 chars. Returns null if result is
+// empty after sanitization.
+//
+// Examples:
+//   "Daylesford Gold Trades" → "daylesfordgoldtrades"
+//   "Café d'Or" → "cafedor"
+//   "!!!" → null
+export function sanitizeSubdomainCandidate(input){
+  if(!input)return null;
+  const cleaned=String(input)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g,"")
+    .replace(/[^a-z0-9]/g,"")
+    .slice(0,32);
+  return cleaned.length===0?null:cleaned;
 }
