@@ -56,14 +56,30 @@ const _useCookieStorage=_hostname.endsWith("lootledger.au");
 // chunked-cookie storage if it actually starts firing.
 const COOKIE_SIZE_LIMIT=3500;
 
+function _saasDebug(){
+  if(typeof window==="undefined")return false;
+  return!!window.__LOOT_AUTH_COOKIE_DEBUG__;
+}
+function _saasLog(){
+  if(!_saasDebug())return;
+  try{console.log.apply(console,["[loot-saas]"].concat(Array.prototype.slice.call(arguments)));}catch(e){}
+}
+
 const _cookieStorage={
   getItem:(k)=>{
     if(typeof window==="undefined")return null;
     const v=getCookie(k);
-    if(v!=null)return v;
+    if(v!=null){
+      _saasLog("getItem cookie",k,"→ len="+v.length);
+      return v;
+    }
     // Fallback read covers payloads written via the size-guard
     // setItem branch below — keeps getItem/setItem symmetric.
-    try{return window.localStorage.getItem(k);}catch(e){return null;}
+    try{
+      const ls=window.localStorage.getItem(k);
+      _saasLog("getItem localStorage",k,"→",ls==null?"null":"len="+ls.length);
+      return ls;
+    }catch(e){return null;}
   },
   setItem:(k,v)=>{
     if(typeof window==="undefined")return;
@@ -72,6 +88,7 @@ const _cookieStorage={
       try{window.localStorage.setItem(k,v);}catch(e){}
       return;
     }
+    _saasLog("setItem cookie",k,"len="+(v?String(v).length:0));
     setCookie(k,v,{
       domain:".lootledger.au",
       path:"/",
@@ -82,10 +99,18 @@ const _cookieStorage={
   },
   removeItem:(k)=>{
     if(typeof window==="undefined")return;
+    _saasLog("removeItem",k);
     removeCookie(k,{domain:".lootledger.au",path:"/"});
     try{window.localStorage.removeItem(k);}catch(e){}
   },
 };
+
+if(typeof window!=="undefined"){
+  // Boot-time visibility into the storage strategy choice. Only
+  // logs when DEBUG flag is on (set window.__LOOT_AUTH_COOKIE_DEBUG__
+  // = true before reload to enable).
+  _saasLog("init: hostname="+_hostname+" useCookieStorage="+_useCookieStorage);
+}
 
 // Single shared client for the whole app. Storage strategy is
 // chosen above based on hostname; persistSession + autoRefresh
