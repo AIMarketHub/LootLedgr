@@ -17,6 +17,9 @@ import {requireAdminPin} from "./lib/adminGate.js";
 // imports above remain for back-compat — the constants are now
 // referenced inside src/lib/hardware/scale.js as well.
 import {scale as scaleDriver} from "./lib/hardware/index.js";
+// Phase 5.2-E — Send-to-accountant email helper. Calls the
+// send-email Edge Function which envoys to SMTP2GO.
+import {sendEmail} from "./lib/email.js";
 import {LIGHT,T,c} from "./theme.js";
 import {Modal,F,Notif} from "./components/ui";
 import StockCard from "./components/StockCard.jsx";
@@ -216,6 +219,13 @@ export default function Loot(){
   const[showAbout,setShowAbout]=useState(false);
   const[showApi,setShowApi]=useState(false);
   const[selTx,setSelTx]=useState(null);
+  // Phase 5.2-E — "Send to accountant" modal state. Held while
+  // the operator edits the subject + note before confirming send.
+  const[acctSendTx,setAcctSendTx]=useState(null);
+  const[acctSendKind,setAcctSendKind]=useState(""); // "buy" | "eod" (eod set from EOD modal)
+  const[acctSendSubject,setAcctSendSubject]=useState("");
+  const[acctSendNote,setAcctSendNote]=useState("");
+  const[acctSendBusy,setAcctSendBusy]=useState(false);
   const[notify,setNotify]=useState(null);
   const[apiError,setApiError]=useState("");
   const[editProd,setEditProd]=useState(null);
@@ -709,6 +719,69 @@ export default function Loot(){
     await scaleDriver.connect();
   };
   const disconnectScale=()=>{scaleDriver.disconnect();};
+
+  // Phase 5.2-E — "Send to accountant" helpers for the Buy
+  // transaction detail modal. Build subject + plain-text body
+  // from the tx, open the send modal, then fire via sendEmail
+  // (which envelopes through the send-email Edge Function).
+  // Client name is masked to first + last initial (PII
+  // minimisation — the accountant doesn't need full name to
+  // reconcile the buy).
+  const acctMaskedClientName=(tx:any)=>{
+    const full=String((tx&&tx.client&&tx.client.fullName)||"").trim();
+    if(!full)return "—";
+    const parts=full.split(/\s+/);
+    if(parts.length<=1)return parts[0];
+    return parts[0]+" "+parts[parts.length-1].charAt(0).toUpperCase()+".";
+  };
+  const acctBuildBuyBody=(tx:any,note:string)=>{
+    const lines=[];
+    if(note&&note.trim())lines.push(note.trim(),"");
+    lines.push("Transaction "+sS(tx.id));
+    lines.push("Date: "+fmtDate(tx.date));
+    lines.push("Client: "+acctMaskedClientName(tx));
+    lines.push("");
+    lines.push("Items:");
+    (tx.items||[]).forEach((i:any)=>{
+      lines.push("  - "+sS(i.product&&i.product.label)+" ("+String(i.mode||"").toUpperCase()+")");
+    });
+    lines.push("");
+    if(tx.buyTotal>0)lines.push("Buy Total:  "+fmtAUD(tx.buyTotal));
+    if(tx.sellTotal>0)lines.push("Sell Total: "+fmtAUD(tx.sellTotal));
+    lines.push("Net:        "+fmtAUD(Math.abs(tx.net||0))+" "+(sN(tx.net)>=0?"(client pays)":"(we pay)"));
+    lines.push("Payment:    "+sS(tx.payment).toUpperCase());
+    lines.push("");
+    lines.push("--");
+    lines.push(sS((auth.shop&&auth.shop.business_name)||"LootLedger"));
+    return lines.join("\n");
+  };
+  const openAcctSendBuy=(tx:any)=>{
+    if(!auth.shop||!auth.shop.accountant_email){pop("Set accountant email in Settings → Accountant Details first.","warn");return;}
+    const shopName=sS((auth.shop&&auth.shop.business_name)||"Shop");
+    setAcctSendTx(tx);
+    setAcctSendKind("buy");
+    setAcctSendSubject("["+shopName+"] Buy transaction "+sS(tx.id)+" — "+fmtDate(tx.date));
+    setAcctSendNote("");
+  };
+  const sendAcctEmail=async()=>{
+    if(!acctSendTx||!auth.shop||!auth.shop.accountant_email)return;
+    setAcctSendBusy(true);
+    const body=acctBuildBuyBody(acctSendTx,acctSendNote);
+    const r=await sendEmail({
+      to:auth.shop.accountant_email,
+      subject:acctSendSubject,
+      body:body,
+      replyTo:(auth.user&&auth.user.email)||null,
+      template:"accountant_send_buy",
+    });
+    setAcctSendBusy(false);
+    if(r&&r.ok){
+      pop("Email sent to "+sS(auth.shop.accountant_name||auth.shop.accountant_email)+".","ok");
+      setAcctSendTx(null);
+    }else{
+      pop("Send failed: "+sS((r&&r.error)||"unknown"),"err");
+    }
+  };
 
   const triggerDuress=async()=>{
     setDuressActive(true);
@@ -1311,6 +1384,29 @@ export default function Loot(){
             <TxPhotoManager selTx={selTx} store={store} setTxList={setTxList} setSelTx={setSelTx}/>
           </div>
           {selTx.ttrRequired&&selTx.ttrStatus!=="FILED"&&<button style={c.btn(T.green,T.bg,{marginTop:14})} onClick={()=>{setTxList(p=>p.map(t=>t.id===selTx.id?{...t,ttrStatus:"FILED"}:t));setSelTx(p=>({...p,ttrStatus:"FILED"}));pop("TTR marked as filed.","ok");}}>✓ Mark TTR Filed</button>}
+          {auth.shop&&auth.shop.accountant_email
+            ?<button style={c.bsm(T.goldBg,T.gold,{marginTop:10,marginLeft:selTx.ttrRequired&&selTx.ttrStatus!=="FILED"?10:0})} onClick={()=>openAcctSendBuy(selTx)}>📧 Send to accountant</button>
+            :<button style={c.bsm(T.border,T.muted,{marginTop:10,marginLeft:selTx.ttrRequired&&selTx.ttrStatus!=="FILED"?10:0,cursor:"not-allowed"})} disabled title="Set accountant email in Settings → Accountant Details first.">📧 Send to accountant</button>}
+        </Modal>}
+
+        {acctSendTx&&<Modal title="📧 Send to accountant" onClose={()=>{if(!acctSendBusy)setAcctSendTx(null);}} wide>
+          <div style={{marginBottom:10,fontSize:12,color:T.muted}}>
+            Sending to <strong style={{color:T.white}}>{sS((auth.shop&&auth.shop.accountant_name)||(auth.shop&&auth.shop.accountant_email))}</strong>
+            {auth.shop&&auth.shop.accountant_name&&auth.shop.accountant_email?" <"+sS(auth.shop.accountant_email)+">":""}
+          </div>
+          <F label="Subject" value={acctSendSubject} onChange={(v:string)=>setAcctSendSubject(v)}/>
+          <div style={{marginTop:10}}>
+            <label style={c.lbl}>Note (optional, prepended to body)</label>
+            <textarea style={{...c.inp(),minHeight:80,resize:"vertical",fontFamily:"inherit"}} value={acctSendNote} onChange={e=>setAcctSendNote(e.target.value)} placeholder="Any context to include — e.g. 'Reconcile against deposit on the 15th.'"/>
+          </div>
+          <div style={{marginTop:10}}>
+            <label style={c.lbl}>Body preview</label>
+            <pre style={{background:T.surface,border:"1px solid "+T.border,padding:"10px 12px",fontSize:11,overflow:"auto",maxHeight:240,whiteSpace:"pre-wrap",margin:0,fontFamily:"monospace",color:T.text}}>{acctBuildBuyBody(acctSendTx,acctSendNote)}</pre>
+          </div>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:14}}>
+            <button style={c.bsm()} onClick={()=>setAcctSendTx(null)} disabled={acctSendBusy}>Cancel</button>
+            <button style={c.btn(T.green,T.bg)} onClick={sendAcctEmail} disabled={acctSendBusy||!acctSendSubject.trim()}>{acctSendBusy?"Sending…":"📧 Send"}</button>
+          </div>
         </Modal>}
 
         {receiptTx&&<Modal title="🧾 Receipt" onClose={()=>setReceiptTx(null)} wide>

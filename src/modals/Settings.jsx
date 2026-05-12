@@ -54,6 +54,10 @@ import LegalDocsViewer from "./LegalDocsViewer.jsx";
 import TfsScreenLogPanel from "./TfsScreenLogPanel.jsx";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
+// Phase 5.2-E — accountant contact fields live on the shops
+// table (added by migration 0022) not in settings.data JSON,
+// so the save path is a direct shops update via supabase.
+import {supabase} from "../lib/auth/saas.js";
 // Phase 5.2-A — hardware drivers + per-device mode toggles. Each
 // driver persists its own Live/Mock mode to localStorage; the
 // section below reads/writes via getAllModes / getDriver.setMode
@@ -256,7 +260,34 @@ export default function Settings({
   // Settings → Account reads the user's stamped acceptance
   // versions from AuthProvider's userRecord (same source the
   // gate consults). userRecord is null only during initial load.
-  const{userRecord,admin}=useAuth();
+  const{userRecord,admin,shop:authShop,refresh:authRefresh}=useAuth();
+  // Phase 5.2-E — accountant fields editing state. Reads
+  // initial values from useAuth().shop; saves to shops table
+  // via supabase, then triggers an auth refresh so the rest
+  // of the app picks up the new values.
+  const[acctName,setAcctName]=useState((authShop&&authShop.accountant_name)||"");
+  const[acctEmail,setAcctEmail]=useState((authShop&&authShop.accountant_email)||"");
+  const[acctSaving,setAcctSaving]=useState(false);
+  const[acctMsg,setAcctMsg]=useState("");
+  useEffect(()=>{
+    setAcctName((authShop&&authShop.accountant_name)||"");
+    setAcctEmail((authShop&&authShop.accountant_email)||"");
+  },[authShop&&authShop.accountant_name,authShop&&authShop.accountant_email]);
+  const saveAccountantInfo=async()=>{
+    if(!authShop||!authShop.id){setAcctMsg("No shop in context.");return;}
+    const email=String(acctEmail||"").trim();
+    if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setAcctMsg("Invalid email.");return;}
+    setAcctSaving(true);setAcctMsg("");
+    const{error}=await supabase.from("shops").update({
+      accountant_name:String(acctName||"").trim()||null,
+      accountant_email:email||null,
+    }).eq("id",authShop.id);
+    setAcctSaving(false);
+    if(error){setAcctMsg("Save failed: "+(error.message||"unknown"));return;}
+    setAcctMsg("Saved.");
+    if(typeof authRefresh==="function")try{await authRefresh();}catch(_){}
+    if(typeof pop==="function")pop("Accountant details saved.","ok");
+  };
   // Show / Change PIN modals — both gated by the Admin gate on the
   // outer click. The result modals are unconditional once the gate
   // approves, so we don't need a separate "open after PIN" plumb;
@@ -370,6 +401,19 @@ export default function Settings({
           <F label="Police Station Name" value={settings.policeStation||""} onChange={v=>setSettings(p=>({...p,policeStation:v}))} placeholder="e.g. Ballarat Police Station"/>
           <F label="Police Station Email" value={settings.policeEmail||""} onChange={v=>setSettings(p=>({...p,policeEmail:v}))} placeholder="ballaratcid@police.vic.gov.au"/>
           <SF label="State / Territory" value={settings.state||"VIC"} onChange={v=>setSettings(p=>({...p,state:v}))} options={["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(x=>({value:x,label:x}))}/>
+        </div>
+      </div>],
+      ["accountant","📧 Accountant Details",<div style={{paddingBottom:14}}>
+        <div style={{fontSize:11,color:T.muted,marginBottom:12,lineHeight:1.5}}>
+          Used by the <strong>Send to accountant</strong> button on the transaction detail modal and on the daily report. Leave blank to hide the button.
+        </div>
+        <div style={c.g2(10)}>
+          <F label="Accountant Name" value={acctName} onChange={v=>setAcctName(v)} placeholder="e.g. Jane Smith"/>
+          <F label="Accountant Email" value={acctEmail} onChange={v=>setAcctEmail(v)} placeholder="jane@accountants.com.au"/>
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10}}>
+          <button style={c.bsm(T.gold,T.bg)} onClick={saveAccountantInfo} disabled={acctSaving}>{acctSaving?"Saving…":"Save accountant details"}</button>
+          {acctMsg&&<span style={{fontSize:11,color:acctMsg==="Saved."?T.green:T.red}}>{acctMsg}</span>}
         </div>
       </div>],
       ["appearance","🎨 Appearance",<div style={{paddingBottom:14}}>

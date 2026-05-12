@@ -28,6 +28,8 @@ import Modal from "../components/ui/Modal.jsx";
 import {F} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
 import {supabase,listStaffHours,upsertStaffHours,lockStaffHours,unlockStaffHours} from "../lib/auth/saas.js";
+// Phase 5.2-E — Send-to-accountant for the EOD daily summary.
+import {sendEmail} from "../lib/email.js";
 
 // Display label for a user row (mirrors the helper in Staff.jsx).
 function userLabel(u){
@@ -71,6 +73,14 @@ export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
   const role=(auth&&auth.role)||null;
   const callerCanWriteOthers=role==="owner"||role==="manager";
   const today=todayStr();
+
+  // Phase 5.2-E — Send-to-accountant inline panel state. Lives at
+  // the EOD level (not a separate Modal) so it nests cleanly
+  // inside the existing modal.
+  const[acctSendOpen,setAcctSendOpen]=useState(false);
+  const[acctSendSubject,setAcctSendSubject]=useState("");
+  const[acctSendNote,setAcctSendNote]=useState("");
+  const[acctSendBusy,setAcctSendBusy]=useState(false);
 
   // Hours sub-section state.
   const[hoursPin,setHoursPin]=useState("");
@@ -294,10 +304,89 @@ export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
           </div>
         </div>}
 
-        <div style={{display:"flex",gap:10,marginTop:14}}>
-          <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlAccounting();setShowEOD(false);}}>📊 Download Accounting</button>
-          <button style={c.bsm()} onClick={()=>setShowEOD(false)}>Close</button>
-        </div>
+        {(()=>{
+          // Send-to-accountant inline panel + button. Body builder
+          // closes over the IIFE's `txs` + `tot` so the daily
+          // summary stays accurate even if the EOD recomputes
+          // mid-session.
+          const shopName=sS((auth&&auth.shop&&auth.shop.business_name)||"Shop");
+          const dateLabel=formatDateAU(today);
+          const accountantEmail=(auth&&auth.shop&&auth.shop.accountant_email)||"";
+          const accountantName=(auth&&auth.shop&&auth.shop.accountant_name)||"";
+          const buildBody=(note)=>{
+            const lines=[];
+            if(note&&note.trim())lines.push(note.trim(),"");
+            lines.push("End of Day Report — "+dateLabel);
+            lines.push("Shop: "+shopName);
+            lines.push("");
+            lines.push("Transactions: "+txs.length);
+            lines.push("Buy Total:    "+fmtAUD(tot.buy));
+            lines.push("Sell Total:   "+fmtAUD(tot.sell));
+            lines.push("Net:          "+fmtAUD(tot.sell-tot.buy));
+            const pending=txs.filter(t=>t.ttrStatus==="PENDING").length;
+            if(pending>0){
+              lines.push("");
+              lines.push("⚠ "+pending+" TTR(s) PENDING — file with AUSTRAC Online today.");
+            }
+            lines.push("");
+            lines.push("--");
+            lines.push(shopName);
+            return lines.join("\n");
+          };
+          const openSend=()=>{
+            if(!accountantEmail){pop&&pop("Set accountant email in Settings → Accountant Details first.","warn");return;}
+            setAcctSendSubject("["+shopName+"] End of day report — "+dateLabel);
+            setAcctSendNote("");
+            setAcctSendOpen(true);
+          };
+          const send=async()=>{
+            if(!accountantEmail)return;
+            setAcctSendBusy(true);
+            const r=await sendEmail({
+              to:accountantEmail,
+              subject:acctSendSubject,
+              body:buildBody(acctSendNote),
+              replyTo:(auth&&auth.user&&auth.user.email)||null,
+              template:"accountant_send_eod",
+            });
+            setAcctSendBusy(false);
+            if(r&&r.ok){
+              if(pop)pop("Email sent to "+sS(accountantName||accountantEmail)+".","ok");
+              setAcctSendOpen(false);
+            }else{
+              if(pop)pop("Send failed: "+sS((r&&r.error)||"unknown"),"err");
+            }
+          };
+          return <>
+            {acctSendOpen&&<div style={{...c.card({padding:14}),marginTop:14,borderColor:T.gold}}>
+              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>📧 Send EOD to accountant</div>
+              <div style={{marginBottom:8,fontSize:11,color:T.muted}}>
+                Sending to <strong style={{color:T.white}}>{sS(accountantName||accountantEmail)}</strong>
+                {accountantName&&accountantEmail?" <"+sS(accountantEmail)+">":""}
+              </div>
+              <F label="Subject" value={acctSendSubject} onChange={v=>setAcctSendSubject(v)}/>
+              <div style={{marginTop:8}}>
+                <label style={c.lbl}>Note (optional, prepended to body)</label>
+                <textarea style={{...c.inp(),minHeight:60,resize:"vertical",fontFamily:"inherit"}} value={acctSendNote} onChange={e=>setAcctSendNote(e.target.value)} placeholder="Any context to include…"/>
+              </div>
+              <div style={{marginTop:8}}>
+                <label style={c.lbl}>Body preview</label>
+                <pre style={{background:T.surface,border:"1px solid "+T.border,padding:"8px 10px",fontSize:11,overflow:"auto",maxHeight:200,whiteSpace:"pre-wrap",margin:0,fontFamily:"monospace",color:T.text}}>{buildBody(acctSendNote)}</pre>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:10,justifyContent:"flex-end"}}>
+                <button style={c.bsm()} onClick={()=>setAcctSendOpen(false)} disabled={acctSendBusy}>Cancel</button>
+                <button style={c.btn(T.green,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={send} disabled={acctSendBusy||!acctSendSubject.trim()}>{acctSendBusy?"Sending…":"📧 Send"}</button>
+              </div>
+            </div>}
+            <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+              <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlAccounting();setShowEOD(false);}}>📊 Download Accounting</button>
+              {accountantEmail
+                ?<button style={c.bsm(T.goldBg,T.gold)} onClick={openSend} disabled={acctSendOpen}>📧 Send to accountant</button>
+                :<button style={c.bsm(T.border,T.muted,{cursor:"not-allowed"})} disabled title="Set accountant email in Settings → Accountant Details first.">📧 Send to accountant</button>}
+              <button style={c.bsm()} onClick={()=>setShowEOD(false)}>Close</button>
+            </div>
+          </>;
+        })()}
       </div>;
     })()}
   </Modal>;
