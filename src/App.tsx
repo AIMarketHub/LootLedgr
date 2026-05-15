@@ -44,6 +44,7 @@ import ForgotPin from "./modals/ForgotPin.jsx";
 import PoliceHoldModal from "./modals/PoliceHoldModal.jsx";
 import AccountingRangeModal from "./modals/AccountingRangeModal.jsx";
 import Logo from "./components/Logo.jsx";
+import {useNavigate} from "react-router-dom";
 import {useAuth} from "./components/AuthProvider.jsx";
 import {signOut as saasSignOut,supabase as sbClient,listStaffHours} from "./lib/auth/saas.js";
 // Phase 3.5-B (2026-05-09) — multi-tab XLSX accounting export.
@@ -57,6 +58,11 @@ export default function Loot(){
   // label and (Commit 6) for replacing SHOP_ID="default" with
   // the real shop UUID across storage.js / clients.js.
   const auth=useAuth();
+  // Phase 5.2 Commit 1 — staff workspace navigation. /staff is a
+  // sibling top-level route to /app/*, so we use react-router's
+  // navigate() to switch routes cleanly (no full page reload).
+  const navigate=useNavigate();
+  const openStaffWorkspace=()=>navigate("/staff");
   const[screen,setScreen]=useState("dashboard");
   const[gSpot,setGSpot]=useState(()=>store.get("gSpot",0));
   const[sSpot,setSSpot]=useState(()=>store.get("sSpot",0));
@@ -1263,6 +1269,7 @@ export default function Loot(){
             duressActive={duressActive}
             resetTx={resetTx} setScreen={setScreen}
             setShowEOD={setShowEOD} setShowVendors={setShowVendors} setShowStaff={setShowStaff} setShowBackup={setShowBackup} setShowPolice={setShowPolice}
+            openStaffWorkspace={openStaffWorkspace}
             triggerDuress={triggerDuress}
             tfsCacheMeta={tfsCacheMeta}
           />}

@@ -3,252 +3,347 @@
 // Day-end summary card: transaction count, buy total, sell total,
 // net, plus a TTR-pending banner when applicable.
 //
-// Phase 3.5-A-2 (2026-05-09) — adds a "Staff hours today" sub-
-// section. Operator (or self) selects which users worked today
-// and types start/end/break per user. Each save calls
-// upsert_staff_hours via the SECURITY DEFINER RPC; PIN required.
-// Cross-user writes require owner/manager role server-side.
-//
-// Phase 3.5-A-2.5 (2026-05-09) — adds duplicate-day confirmation
-// (per-row window.confirm with existing/new diff before
-// overwriting) plus lock-for-processing UI:
-//   - "🔒 Lock today's hours for processing" section button
-//     locks every checked-in row with the operator's PIN.
-//   - Per-row 🔒 badge + inline Unlock panel (requires the
-//     ROW OWNER's PIN, not the caller's — surfaces the
-//     "contact accountant" warning).
+// Phase 5.2 Commit 1 (2026-05-15):
+//   - Staff hours sub-section RELOCATED to /staff/profile → Hours
+//     tab (Dashboard → 🗂 Workspace). EOD now shows a one-line
+//     note pointing there. Removal authorized by the spec; the
+//     hours feature is moving, not deleted.
+//   - Send-to-accountant body upgraded from a flat text dump to:
+//       * Rich HTML (tabled report) for html_body.
+//       * Plain-text fallback for text_body.
+//       * TSV block at the bottom of the plain-text for Excel
+//         paste — staff can copy-paste straight into the
+//         accountant's spreadsheet.
+//   - New "📋 Add Invoice" button (next to Download Accounting /
+//     Send to accountant) that opens the Invoice Manager form
+//     inline so dealers can capture an invoice as part of the
+//     EOD wrap-up.
 //
 // `todayTxData` is computed at the App.tsx level (a useMemo over
 // txList filtered to today's date) and passed in as a prop.
 
-import React,{useState,useEffect,useCallback} from "react";
+import React,{useState} from "react";
 import {T,c} from "../theme.js";
-import {sN,sS,fmtAUD,todayStr,formatDateAU,formatDateTimeAU} from "../lib/utils.js";
+import {sN,sS,fmtAUD,todayStr,formatDateAU} from "../lib/utils.js";
 import Modal from "../components/ui/Modal.jsx";
 import {F} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
-import {supabase,listStaffHours,upsertStaffHours,lockStaffHours,unlockStaffHours} from "../lib/auth/saas.js";
-// Phase 5.2-E — Send-to-accountant for the EOD daily summary.
 import {sendEmail} from "../lib/email.js";
+import InvoiceForm from "../screens/accounting/InvoiceForm.jsx";
 
-// Display label for a user row (mirrors the helper in Staff.jsx).
-function userLabel(u){
-  if(!u)return "(unknown)";
-  const fn=sS(u.first_name||"");
-  const ln=sS(u.family_name||"");
-  const full=(fn+" "+ln).trim();
-  return full||sS(u.email)||"(no name)";
+// ────────────────────────────────────────────────────────────────
+// Body builders — text + HTML + TSV
+// ────────────────────────────────────────────────────────────────
+// All three operate on the same {shopName, dateLabel, note, txs,
+// tot} input so they stay aligned. Defensive against missing
+// fields on tx records — older saved tx shapes may lack some
+// fields, so every aggregation guards with sN / sS / Array.isArray.
+
+function paymentBreakdown(txs){
+  const buckets={};
+  (txs||[]).forEach(t=>{
+    const key=sS(t.payment||"unspecified").toLowerCase();
+    if(!buckets[key])buckets[key]={count:0,buy:0,sell:0};
+    buckets[key].count++;
+    buckets[key].buy+=sN(t.buyTotal);
+    buckets[key].sell+=sN(t.sellTotal);
+  });
+  return Object.keys(buckets).sort().map(k=>({key:k,...buckets[k]}));
 }
 
-// "HH:MM" display for a server time string ("13:45:00" → "13:45").
-function fmtT(t){return t?String(t).slice(0,5):"—";}
-
-// Build the multi-line text for the duplicate-day confirm. window.
-// confirm renders newlines; this is intentionally plain text rather
-// than a React modal because it must block the save loop and
-// accept/reject sequentially per user. The `date` arg is a YYYY-
-// MM-DD ISO string; formatted via formatDateAU for display.
-function diffPromptText(label,date,existing,next){
-  return "Hours already logged for "+label+" on "+formatDateAU(date)+".\n\n"
-    +"Existing:\n"
-    +"  Start "+fmtT(existing.start_time)+"  End "+fmtT(existing.end_time)
-    +"  Break "+sN(existing.break_minutes)+"m\n"
-    +(existing.note?"  Note: "+sS(existing.note)+"\n":"")
-    +"\nNew:\n"
-    +"  Start "+(next.start||"—")+"  End "+(next.end||"—")
-    +"  Break "+(parseInt(next.break,10)||0)+"m\n"
-    +(next.note?"  Note: "+next.note+"\n":"")
-    +"\nClick OK to overwrite, Cancel to skip this row.";
+function itemTypeBreakdown(txs){
+  const buckets={};
+  (txs||[]).forEach(t=>{
+    const items=Array.isArray(t.items)?t.items:[];
+    items.forEach(it=>{
+      if(!it)return;
+      const ttype=sS(it.product&&it.product.type||it.type||"other").toLowerCase();
+      const mode=sS(it.mode||"buy").toLowerCase();
+      const k=ttype+"::"+mode;
+      if(!buckets[k])buckets[k]={type:ttype,mode,count:0,total:0};
+      buckets[k].count++;
+      buckets[k].total+=sN(it.price);
+    });
+  });
+  return Object.values(buckets).sort((a,b)=>a.type.localeCompare(b.type)||a.mode.localeCompare(b.mode));
 }
 
-// Locked-at label using the consolidated formatDateTimeAU helper.
-// Renders as "Locked 09-05-2026 13:28".
-function fmtLockedAt(iso){
-  if(!iso)return "Locked";
-  return "Locked "+formatDateTimeAU(iso);
+function complianceRow(txs){
+  const ttrPending=(txs||[]).filter(t=>t&&t.ttrStatus==="PENDING").length;
+  const tfsBlocked=(txs||[]).filter(t=>t&&(t.tfsConfirmedBlock||t.tfsBlocked)).length;
+  const tfsOverride=(txs||[]).filter(t=>t&&(t.tfsOverrideApplied||t.tfsOverride)).length;
+  const clientIds=new Set();
+  (txs||[]).forEach(t=>{
+    const id=t&&(t.clientId||(t.client&&t.client.id));
+    if(id)clientIds.add(id);
+  });
+  return{ttrPending,tfsBlocked,tfsOverride,uniqueClients:clientIds.size};
 }
 
+function itemsRows(txs){
+  const out=[];
+  (txs||[]).forEach((t,txIdx)=>{
+    const items=Array.isArray(t.items)?t.items:[];
+    items.forEach(it=>{
+      if(!it)return;
+      const label=sS(it.label||(it.product&&it.product.label)||"(no label)");
+      const mode=sS(it.mode||"buy");
+      const qty=sN(it.qty)||1;
+      const total=sN(it.price);
+      const unit=qty>0?total/qty:total;
+      out.push({txIdx:txIdx+1,label,mode,qty,unit,total});
+    });
+  });
+  return out;
+}
+
+function buildText({shopName,dateLabel,note,txs,tot}){
+  const lines=[];
+  if(note&&note.trim())lines.push(note.trim(),"");
+  lines.push("End of Day Report — "+dateLabel);
+  lines.push("Shop: "+shopName);
+  lines.push("");
+  lines.push("SUMMARY");
+  lines.push("  Transactions: "+(txs||[]).length);
+  lines.push("  Buy Total:    "+fmtAUD(tot.buy));
+  lines.push("  Sell Total:   "+fmtAUD(tot.sell));
+  lines.push("  Net:          "+fmtAUD(tot.sell-tot.buy));
+
+  const comp=complianceRow(txs);
+  if(comp.ttrPending||comp.tfsBlocked||comp.tfsOverride||comp.uniqueClients){
+    lines.push("");
+    lines.push("COMPLIANCE");
+    lines.push("  TTR pending:    "+comp.ttrPending);
+    lines.push("  TFS blocked:    "+comp.tfsBlocked);
+    lines.push("  TFS override:   "+comp.tfsOverride);
+    lines.push("  Unique clients: "+comp.uniqueClients);
+  }
+
+  const pay=paymentBreakdown(txs);
+  if(pay.length){
+    lines.push("");
+    lines.push("PAYMENT METHODS");
+    pay.forEach(p=>{
+      lines.push("  "+p.key.padEnd(12)+" "+String(p.count).padStart(3)+"  buy "+fmtAUD(p.buy)+"  sell "+fmtAUD(p.sell));
+    });
+  }
+
+  const it=itemTypeBreakdown(txs);
+  if(it.length){
+    lines.push("");
+    lines.push("ITEM TYPES");
+    it.forEach(r=>{
+      lines.push("  "+(r.type+" / "+r.mode).padEnd(20)+" "+String(r.count).padStart(3)+"  "+fmtAUD(r.total));
+    });
+  }
+
+  const items=itemsRows(txs);
+  if(items.length){
+    lines.push("");
+    lines.push("ITEMS");
+    items.forEach(r=>{
+      lines.push("  Tx#"+r.txIdx+"  "+r.mode.toUpperCase().padEnd(5)+"  "+r.label+"  qty "+r.qty+"  "+fmtAUD(r.total));
+    });
+  }
+
+  // TSV block — for Excel paste. Tab-separated, no smart quoting
+  // (titles are dealer-controlled and won't contain tabs).
+  const tsv=[];
+  tsv.push("");
+  tsv.push("------------------------------------------------------------");
+  tsv.push("👇 COPY THE BLOCK BELOW AND PASTE INTO EXCEL — cells auto-populate");
+  tsv.push("------------------------------------------------------------");
+  tsv.push("");
+  tsv.push(["Section","Key","Count","Buy AUD","Sell AUD","Total AUD"].join("\t"));
+  tsv.push(["Summary","Transactions",(txs||[]).length,"","",""].join("\t"));
+  tsv.push(["Summary","Buy total","",tot.buy.toFixed(2),"",""].join("\t"));
+  tsv.push(["Summary","Sell total","","",tot.sell.toFixed(2),""].join("\t"));
+  tsv.push(["Summary","Net","","","",(tot.sell-tot.buy).toFixed(2)].join("\t"));
+  tsv.push(["Compliance","TTR pending",comp.ttrPending,"","",""].join("\t"));
+  tsv.push(["Compliance","TFS blocked",comp.tfsBlocked,"","",""].join("\t"));
+  tsv.push(["Compliance","TFS override",comp.tfsOverride,"","",""].join("\t"));
+  tsv.push(["Compliance","Unique clients",comp.uniqueClients,"","",""].join("\t"));
+  pay.forEach(p=>{
+    tsv.push(["Payment",p.key,p.count,p.buy.toFixed(2),p.sell.toFixed(2),""].join("\t"));
+  });
+  it.forEach(r=>{
+    tsv.push(["ItemType",r.type+" / "+r.mode,r.count,"","",r.total.toFixed(2)].join("\t"));
+  });
+  items.forEach(r=>{
+    tsv.push(["Item",r.label+" (tx#"+r.txIdx+", "+r.mode+")",r.qty,"","",r.total.toFixed(2)].join("\t"));
+  });
+  lines.push(tsv.join("\n"));
+
+  lines.push("");
+  lines.push("--");
+  lines.push(shopName);
+  return lines.join("\n");
+}
+
+function htmlEscape(s){
+  return String(s==null?"":s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+}
+
+function buildHtml({shopName,dateLabel,note,txs,tot}){
+  const comp=complianceRow(txs);
+  const pay=paymentBreakdown(txs);
+  const it=itemTypeBreakdown(txs);
+  const items=itemsRows(txs);
+
+  const tableStyle="border-collapse:collapse;width:100%;margin:8px 0 16px 0;font-family:Arial,sans-serif;font-size:13px";
+  const thStyle="background:#f5f5f5;border:1px solid #ddd;padding:6px 10px;text-align:left;color:#333";
+  const tdStyle="border:1px solid #ddd;padding:6px 10px;color:#222";
+  const tdNumStyle="border:1px solid #ddd;padding:6px 10px;color:#222;text-align:right";
+  const sectionTitle="font-family:Arial,sans-serif;font-size:14px;font-weight:bold;color:#222;margin:18px 0 4px 0;border-bottom:2px solid #c89a2f;padding-bottom:4px";
+
+  const lines=[];
+  lines.push("<div style=\"font-family:Arial,sans-serif;color:#222;max-width:680px\">");
+
+  if(note&&note.trim()){
+    lines.push("<div style=\"background:#fef9e7;border:1px solid #f5d76e;padding:10px 12px;margin-bottom:14px;border-radius:4px;white-space:pre-wrap\">"+htmlEscape(note.trim())+"</div>");
+  }
+
+  lines.push("<h2 style=\"font-size:18px;color:#222;margin:0 0 4px 0\">End of Day Report</h2>");
+  lines.push("<div style=\"font-size:13px;color:#555;margin-bottom:14px\">"+htmlEscape(shopName)+" — "+htmlEscape(dateLabel)+"</div>");
+
+  // SUMMARY table.
+  lines.push("<div style=\""+sectionTitle+"\">Summary</div>");
+  lines.push("<table style=\""+tableStyle+"\">");
+  lines.push("<tr><th style=\""+thStyle+"\">Metric</th><th style=\""+thStyle+";text-align:right\">Value</th></tr>");
+  lines.push("<tr><td style=\""+tdStyle+"\">Transactions</td><td style=\""+tdNumStyle+"\">"+(txs||[]).length+"</td></tr>");
+  lines.push("<tr><td style=\""+tdStyle+"\">Buy Total</td><td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(tot.buy))+"</td></tr>");
+  lines.push("<tr><td style=\""+tdStyle+"\">Sell Total</td><td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(tot.sell))+"</td></tr>");
+  lines.push("<tr><td style=\""+tdStyle+";font-weight:bold\">Net</td><td style=\""+tdNumStyle+";font-weight:bold\">"+htmlEscape(fmtAUD(tot.sell-tot.buy))+"</td></tr>");
+  lines.push("</table>");
+
+  // COMPLIANCE.
+  if(comp.ttrPending||comp.tfsBlocked||comp.tfsOverride||comp.uniqueClients){
+    lines.push("<div style=\""+sectionTitle+"\">Compliance</div>");
+    lines.push("<table style=\""+tableStyle+"\">");
+    lines.push("<tr><th style=\""+thStyle+"\">Check</th><th style=\""+thStyle+";text-align:right\">Count</th></tr>");
+    lines.push("<tr><td style=\""+tdStyle+"\">TTR pending</td><td style=\""+tdNumStyle+(comp.ttrPending>0?";color:#c00;font-weight:bold":"")+"\">"+comp.ttrPending+"</td></tr>");
+    lines.push("<tr><td style=\""+tdStyle+"\">TFS blocked</td><td style=\""+tdNumStyle+"\">"+comp.tfsBlocked+"</td></tr>");
+    lines.push("<tr><td style=\""+tdStyle+"\">TFS override applied</td><td style=\""+tdNumStyle+"\">"+comp.tfsOverride+"</td></tr>");
+    lines.push("<tr><td style=\""+tdStyle+"\">Unique clients</td><td style=\""+tdNumStyle+"\">"+comp.uniqueClients+"</td></tr>");
+    lines.push("</table>");
+  }
+
+  // PAYMENT METHODS.
+  if(pay.length){
+    lines.push("<div style=\""+sectionTitle+"\">Payment Methods</div>");
+    lines.push("<table style=\""+tableStyle+"\">");
+    lines.push("<tr><th style=\""+thStyle+"\">Method</th><th style=\""+thStyle+";text-align:right\">Count</th><th style=\""+thStyle+";text-align:right\">Buy</th><th style=\""+thStyle+";text-align:right\">Sell</th></tr>");
+    pay.forEach(p=>{
+      lines.push("<tr>"
+        +"<td style=\""+tdStyle+"\">"+htmlEscape(p.key)+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+p.count+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(p.buy))+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(p.sell))+"</td>"
+        +"</tr>");
+    });
+    lines.push("</table>");
+  }
+
+  // ITEM TYPES.
+  if(it.length){
+    lines.push("<div style=\""+sectionTitle+"\">Item Types</div>");
+    lines.push("<table style=\""+tableStyle+"\">");
+    lines.push("<tr><th style=\""+thStyle+"\">Type</th><th style=\""+thStyle+"\">Mode</th><th style=\""+thStyle+";text-align:right\">Count</th><th style=\""+thStyle+";text-align:right\">Total</th></tr>");
+    it.forEach(r=>{
+      lines.push("<tr>"
+        +"<td style=\""+tdStyle+"\">"+htmlEscape(r.type)+"</td>"
+        +"<td style=\""+tdStyle+"\">"+htmlEscape(r.mode)+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+r.count+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(r.total))+"</td>"
+        +"</tr>");
+    });
+    lines.push("</table>");
+  }
+
+  // ITEMS.
+  if(items.length){
+    lines.push("<div style=\""+sectionTitle+"\">Items</div>");
+    lines.push("<table style=\""+tableStyle+"\">");
+    lines.push("<tr><th style=\""+thStyle+"\">Tx#</th><th style=\""+thStyle+"\">Mode</th><th style=\""+thStyle+"\">Label</th><th style=\""+thStyle+";text-align:right\">Qty</th><th style=\""+thStyle+";text-align:right\">Unit</th><th style=\""+thStyle+";text-align:right\">Total</th></tr>");
+    items.forEach(r=>{
+      lines.push("<tr>"
+        +"<td style=\""+tdStyle+"\">"+r.txIdx+"</td>"
+        +"<td style=\""+tdStyle+"\">"+htmlEscape(r.mode)+"</td>"
+        +"<td style=\""+tdStyle+"\">"+htmlEscape(r.label)+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+r.qty+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(r.unit))+"</td>"
+        +"<td style=\""+tdNumStyle+"\">"+htmlEscape(fmtAUD(r.total))+"</td>"
+        +"</tr>");
+    });
+    lines.push("</table>");
+  }
+
+  lines.push("<div style=\"font-size:11px;color:#888;margin-top:18px;padding-top:10px;border-top:1px solid #eee\">"
+    +"Tip: a tab-separated copy of this report is included at the bottom of the plain-text version for direct Excel paste."
+    +"</div>");
+
+  lines.push("<div style=\"font-size:12px;color:#666;margin-top:14px\">— "+htmlEscape(shopName)+"</div>");
+  lines.push("</div>");
+  return lines.join("\n");
+}
+
+// ────────────────────────────────────────────────────────────────
+// Modal
+// ────────────────────────────────────────────────────────────────
 export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
   const auth=useAuth();
-  const role=(auth&&auth.role)||null;
-  const callerCanWriteOthers=role==="owner"||role==="manager";
   const today=todayStr();
 
-  // Phase 5.2-E — Send-to-accountant inline panel state. Lives at
-  // the EOD level (not a separate Modal) so it nests cleanly
-  // inside the existing modal.
+  // Phase 5.2-E — Send-to-accountant inline panel state.
   const[acctSendOpen,setAcctSendOpen]=useState(false);
   const[acctSendSubject,setAcctSendSubject]=useState("");
   const[acctSendNote,setAcctSendNote]=useState("");
   const[acctSendBusy,setAcctSendBusy]=useState(false);
 
-  // Hours sub-section state.
-  const[hoursPin,setHoursPin]=useState("");
-  const[usersInShop,setUsersInShop]=useState([]);
-  // perUser: {[user_id]: {checked, start, end, break, note,
-  //                       existing_id, locked, locked_at, locked_by}}
-  const[perUser,setPerUser]=useState({});
-  const[loadingHours,setLoadingHours]=useState(true);
-  const[savingHours,setSavingHours]=useState(false);
-  const[lockingAll,setLockingAll]=useState(false);
-  // Inline unlock panel state, keyed by user_id of the locked row
-  // currently being unlocked. {userId, pin, busy} or null.
-  const[unlockFor,setUnlockFor]=useState(null);
-
-  const refreshHours=useCallback(async()=>{
-    if(!auth||!auth.shop||!auth.shop.id)return;
-    setLoadingHours(true);
-    try{
-      const[usersRes,hoursRows]=await Promise.all([
-        supabase.from("users")
-          .select("id, role, first_name, family_name, email")
-          .eq("shop_id",auth.shop.id)
-          .order("role",{ascending:true}),
-        listStaffHours(String(auth.shop.id),today,today),
-      ]);
-      const users=Array.isArray(usersRes.data)?usersRes.data:[];
-      setUsersInShop(users);
-      const next={};
-      for(const u of users){
-        const existing=hoursRows.find(h=>h.user_id===u.id);
-        next[u.id]=existing?{
-          checked:true,
-          start:existing.start_time?String(existing.start_time).slice(0,5):"",
-          end:existing.end_time?String(existing.end_time).slice(0,5):"",
-          break:String(existing.break_minutes||0),
-          note:sS(existing.note),
-          existing_id:existing.id,
-          existing_row:existing,
-          locked:!!existing.locked,
-          locked_at:existing.locked_at||null,
-          locked_by:existing.locked_by||null,
-        }:{checked:false,start:"",end:"",break:"0",note:"",existing_id:null,existing_row:null,locked:false,locked_at:null,locked_by:null};
-      }
-      setPerUser(next);
-    }catch(e){
-      pop&&pop("Could not load staff hours: "+sS(e&&e.message),"err");
-    }finally{setLoadingHours(false);}
-  },[auth&&auth.shop&&auth.shop.id,today,pop]);
-
-  useEffect(()=>{refreshHours();},[refreshHours]);
-
-  const updatePerUser=(userId,patch)=>{
-    setPerUser(p=>({...p,[userId]:{...(p[userId]||{}),...patch}}));
-  };
-
-  const onSaveHours=async()=>{
-    const pin=String(hoursPin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){pop&&pop("Enter your 4-12 digit per-staff PIN.","warn");return;}
-    setSavingHours(true);
-    let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0;
-    try{
-      for(const u of usersInShop){
-        const row=perUser[u.id];
-        if(!row||!row.checked)continue;
-        // RPC enforces self vs cross-user role rules; this UI gate
-        // mirrors that for clearer error messages on the staff path.
-        if(u.id!==auth.user.id&&!callerCanWriteOthers){
-          continue; // staff trying to save for someone else — skip
-        }
-        // 3.5-A-2.5 — locked rows can't be overwritten. Server
-        // would refuse anyway; skip with a count for the toast.
-        if(row.locked){skippedLocked++;continue;}
-        // 3.5-A-2.5 — duplicate-day confirmation. Only when the
-        // user already has a stored row; pure inserts go straight
-        // through.
-        if(row.existing_id&&row.existing_row){
-          const ok=typeof window!=="undefined"&&window.confirm
-            ?window.confirm(diffPromptText(userLabel(u),today,row.existing_row,row))
-            :true;
-          if(!ok){skippedUserDeclined++;continue;}
-        }
-        try{
-          await upsertStaffHours({
-            pin,
-            userId:u.id,
-            workDate:today,
-            startTime:row.start||null,
-            endTime:row.end||null,
-            breakMinutes:parseInt(row.break,10)||0,
-            note:row.note||"",
-          });
-          saved++;
-        }catch(e){
-          failed++;
-          pop&&pop("Save failed for "+userLabel(u)+": "+sS(e&&e.message),"err");
-        }
-      }
-      if(saved>0){
-        const extras=[];
-        if(failed>0)extras.push(failed+" failed");
-        if(skippedLocked>0)extras.push(skippedLocked+" locked");
-        if(skippedUserDeclined>0)extras.push(skippedUserDeclined+" skipped");
-        pop&&pop("Saved "+saved+" staff hour entr"+(saved===1?"y":"ies")+(extras.length?" ("+extras.join(", ")+")":"."),"ok");
-        await refreshHours();
-        setHoursPin("");
-      }else if(failed===0&&skippedLocked===0&&skippedUserDeclined===0){
-        pop&&pop("Nothing checked to save.","warn");
-      }else if(skippedLocked>0&&failed===0&&saved===0){
-        pop&&pop("All checked rows are locked. Unlock first or skip.","warn");
-      }
-    }finally{setSavingHours(false);}
-  };
-
-  // 3.5-A-2.5 — section-level lock button. Locks every existing
-  // row that's still unlocked using the operator's PIN (caller PIN
-  // is what lock_staff_hours expects). Confirms first.
-  const onLockAll=async()=>{
-    const pin=String(hoursPin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){pop&&pop("Enter your 4-12 digit per-staff PIN.","warn");return;}
-    const lockable=usersInShop
-      .map(u=>({u,row:perUser[u.id]}))
-      .filter(x=>x.row&&x.row.existing_id&&!x.row.locked);
-    if(lockable.length===0){pop&&pop("No unlocked saved entries to lock.","warn");return;}
-    const confirmMsg="Lock "+lockable.length+" entr"+(lockable.length===1?"y":"ies")
-      +" for today? Once locked they cannot be edited or deleted without the row owner's PIN.";
-    if(typeof window!=="undefined"&&window.confirm&&!window.confirm(confirmMsg))return;
-    setLockingAll(true);
-    let locked=0,failed=0;
-    try{
-      for(const{u,row} of lockable){
-        try{
-          await lockStaffHours(pin,row.existing_id);
-          locked++;
-        }catch(e){
-          failed++;
-          pop&&pop("Lock failed for "+userLabel(u)+": "+sS(e&&e.message),"err");
-        }
-      }
-      if(locked>0)pop&&pop("Locked "+locked+" entr"+(locked===1?"y":"ies")+(failed>0?" ("+failed+" failed)":"."),"ok");
-      await refreshHours();
-    }finally{setLockingAll(false);}
-  };
-
-  // Inline-unlock confirm. Uses the ROW OWNER's PIN (typed into
-  // the panel), not hoursPin. lockable callers — anyone in the
-  // shop, but only the row owner knows the right PIN.
-  const onConfirmUnlock=async()=>{
-    if(!unlockFor)return;
-    const row=perUser[unlockFor.userId];
-    if(!row||!row.existing_id)return;
-    const pin=String(unlockFor.pin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){pop&&pop("Enter the row owner's 4-12 digit PIN.","warn");return;}
-    setUnlockFor(p=>({...p,busy:true}));
-    try{
-      await unlockStaffHours(pin,row.existing_id);
-      pop&&pop("Entry unlocked.","ok");
-      setUnlockFor(null);
-      await refreshHours();
-    }catch(e){
-      pop&&pop("Unlock failed: "+sS(e&&e.message),"err");
-      setUnlockFor(p=>({...p,busy:false}));
-    }
-  };
+  // Phase 5.2 Commit 1 — Add Invoice nested form.
+  const[invoiceOpen,setInvoiceOpen]=useState(false);
 
   return <Modal title="📋 End of Day Report" onClose={()=>setShowEOD(false)}>
     {(()=>{
       const txs=todayTxData;
       const tot={buy:txs.reduce((s,t)=>s+sN(t.buyTotal),0),sell:txs.reduce((s,t)=>s+sN(t.sellTotal),0)};
+      const shopName=sS((auth&&auth.shop&&auth.shop.business_name)||"Shop");
+      const dateLabel=formatDateAU(today);
+      const accountantEmail=(auth&&auth.shop&&auth.shop.accountant_email)||"";
+      const accountantName=(auth&&auth.shop&&auth.shop.accountant_name)||"";
+
+      const openSend=()=>{
+        if(!accountantEmail){pop&&pop("Set accountant email in Settings → 💼 Accounting first.","warn");return;}
+        setAcctSendSubject("["+shopName+"] End of day report — "+dateLabel);
+        setAcctSendNote("");
+        setAcctSendOpen(true);
+      };
+      const send=async()=>{
+        if(!accountantEmail)return;
+        setAcctSendBusy(true);
+        const ctx={shopName,dateLabel,note:acctSendNote,txs,tot};
+        const r=await sendEmail({
+          to:accountantEmail,
+          subject:acctSendSubject,
+          body:buildText(ctx),
+          htmlBody:buildHtml(ctx),
+          replyTo:(auth&&auth.user&&auth.user.email)||null,
+          template:"accountant_send_eod",
+        });
+        setAcctSendBusy(false);
+        if(r&&r.ok){
+          if(pop)pop("Email sent to "+sS(accountantName||accountantEmail)+".","ok");
+          setAcctSendOpen(false);
+        }else{
+          if(pop)pop("Send failed: "+sS((r&&r.error)||"unknown"),"err");
+        }
+      };
+
       return <div>
         <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:4}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long"})}</div>
         <div style={c.g2(10)}>
@@ -259,134 +354,55 @@ export default function EOD({todayTxData,dlAccounting,setShowEOD,pop}){
         </div>
         {txs.filter(t=>t.ttrStatus==="PENDING").length>0&&<div style={{...c.bnr("block"),marginTop:10}}>🔴 {txs.filter(t=>t.ttrStatus==="PENDING").length} TTR(s) pending — file with AUSTRAC Online today.</div>}
 
-        {/* Phase 3.5-A-2 — Staff hours today sub-section. */}
-        {auth&&auth.user&&<div style={{...c.card({padding:14}),marginTop:14}}>
-          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>Staff Hours Today</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:10}}>{callerCanWriteOthers?"Tick each user who worked today, fill their hours, then Save. Your PIN authorises the save.":"Tick yourself, fill your hours, then Save. Owner/manager can record other staff."}</div>
-          <F label="Your per-staff PIN (4–12 digits)" type="password" value={hoursPin} onChange={setHoursPin} placeholder="••••"/>
-          {loadingHours?<div style={{fontSize:11,color:T.muted,marginTop:8}}>Loading…</div>:usersInShop.length===0?<div style={{fontSize:11,color:T.muted,marginTop:8}}>No staff in this shop.</div>:usersInShop.map(u=>{
-            const row=perUser[u.id]||{checked:false,start:"",end:"",break:"0",note:"",locked:false};
-            const isMe=auth.user.id===u.id;
-            const canEditThis=isMe||callerCanWriteOthers;
-            const isLocked=!!row.locked;
-            const showUnlockPanel=unlockFor&&unlockFor.userId===u.id;
-            return <div key={u.id} style={{padding:"10px 0",borderBottom:"1px solid "+T.border+"33",opacity:canEditThis?1:0.5}}>
-              <label style={{display:"flex",alignItems:"center",gap:8,cursor:canEditThis?"pointer":"not-allowed",fontSize:12,flexWrap:"wrap"}}>
-                <input type="checkbox" checked={!!row.checked} disabled={!canEditThis||isLocked} onChange={e=>updatePerUser(u.id,{checked:e.target.checked})}/>
-                <span style={{color:T.white}}>{userLabel(u)}{isMe?" (you)":""}</span>
-                <span style={{fontSize:10,color:T.muted}}>{sS(u.role).toUpperCase()}</span>
-                {isLocked&&<span style={{fontSize:10,color:T.gold,background:T.goldBg||"transparent",border:"1px solid "+T.gold,borderRadius:3,padding:"2px 6px"}}>🔒 {fmtLockedAt(row.locked_at)}</span>}
-                {isLocked&&!showUnlockPanel&&<button type="button" style={c.bsm()} onClick={()=>setUnlockFor({userId:u.id,pin:"",busy:false})}>Unlock</button>}
-              </label>
-              {row.checked&&canEditThis&&!isLocked&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 2fr",gap:8,marginTop:6}}>
-                <F label="Start" type="time" value={row.start} onChange={v=>updatePerUser(u.id,{start:v})}/>
-                <F label="End" type="time" value={row.end} onChange={v=>updatePerUser(u.id,{end:v})}/>
-                <F label="Break (min)" type="number" value={row.break} onChange={v=>updatePerUser(u.id,{break:v})}/>
-                <F label="Note" value={row.note} onChange={v=>updatePerUser(u.id,{note:v})} placeholder="optional"/>
-              </div>}
-              {isLocked&&!showUnlockPanel&&<div style={{fontSize:11,color:T.muted,marginTop:6,paddingLeft:24}}>
-                Start {fmtT(row.existing_row&&row.existing_row.start_time)} · End {fmtT(row.existing_row&&row.existing_row.end_time)} · Break {sN(row.existing_row&&row.existing_row.break_minutes)}m{row.existing_row&&row.existing_row.note?" · "+sS(row.existing_row.note):""}
-              </div>}
-              {showUnlockPanel&&<div style={{...c.card({padding:10}),marginTop:8,background:T.warn||T.surface,borderColor:T.red||T.border}}>
-                <div style={{fontSize:11,color:T.red||T.gold,fontWeight:"bold",marginBottom:6}}>⚠ Hours locked in for accounting. Contact the accountant before modifying the timesheet.</div>
-                <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Unlocking <strong>{userLabel(u)}</strong> for {formatDateAU(today)} requires their per-staff PIN.</div>
-                <F label="Row owner's PIN (4–12 digits)" type="password" value={unlockFor.pin} onChange={v=>setUnlockFor(p=>({...p,pin:v}))} placeholder="••••"/>
-                <div style={{display:"flex",gap:8,marginTop:6}}>
-                  <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onConfirmUnlock} disabled={unlockFor.busy||!unlockFor.pin}>{unlockFor.busy?"…":"Confirm unlock"}</button>
-                  <button style={c.bsm()} onClick={()=>setUnlockFor(null)} disabled={unlockFor.busy}>Cancel</button>
-                </div>
-              </div>}
-            </div>;
-          })}
-          <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
-            <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSaveHours} disabled={savingHours||loadingHours||!hoursPin}>{savingHours?"Saving…":"Save staff hours"}</button>
-            <button style={c.bsm()} onClick={onLockAll} disabled={lockingAll||loadingHours||!hoursPin}>{lockingAll?"Locking…":"🔒 Lock today's hours for processing"}</button>
+        {/* Phase 5.2 Commit 1 — staff hours UI moved to /staff. */}
+        <div style={{...c.card({padding:14}),marginTop:14,borderColor:T.gold}}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:6,letterSpacing:"0.05em",textTransform:"uppercase"}}>Staff Hours</div>
+          <div style={{fontSize:11,color:T.muted,lineHeight:1.5}}>
+            Staff hours have moved to your staff profile. Open <strong style={{color:T.white}}>Dashboard → 🗂 Workspace → your tile → Hours</strong> to log or review hours.
+          </div>
+        </div>
+
+        {/* Send-to-accountant panel + Add Invoice nested form. */}
+        {acctSendOpen&&<div style={{...c.card({padding:14}),marginTop:14,borderColor:T.gold}}>
+          <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>📧 Send EOD to accountant</div>
+          <div style={{marginBottom:8,fontSize:11,color:T.muted}}>
+            Sending to <strong style={{color:T.white}}>{sS(accountantName||accountantEmail)}</strong>
+            {accountantName&&accountantEmail?" <"+sS(accountantEmail)+">":""}
+          </div>
+          <F label="Subject" value={acctSendSubject} onChange={v=>setAcctSendSubject(v)}/>
+          <div style={{marginTop:8}}>
+            <label style={c.lbl}>Note (optional, prepended to body)</label>
+            <textarea style={{...c.inp(),minHeight:60,resize:"vertical",fontFamily:"inherit"}} value={acctSendNote} onChange={e=>setAcctSendNote(e.target.value)} placeholder="Any context to include…"/>
+          </div>
+          <div style={{marginTop:8}}>
+            <label style={c.lbl}>Plain-text preview (HTML body sent in parallel)</label>
+            <pre style={{background:T.surface,border:"1px solid "+T.border,padding:"8px 10px",fontSize:11,overflow:"auto",maxHeight:220,whiteSpace:"pre-wrap",margin:0,fontFamily:"monospace",color:T.text}}>{buildText({shopName,dateLabel,note:acctSendNote,txs,tot})}</pre>
+          </div>
+          <div style={{display:"flex",gap:10,marginTop:10,justifyContent:"flex-end"}}>
+            <button style={c.bsm()} onClick={()=>setAcctSendOpen(false)} disabled={acctSendBusy}>Cancel</button>
+            <button style={c.btn(T.green,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={send} disabled={acctSendBusy||!acctSendSubject.trim()}>{acctSendBusy?"Sending…":"📧 Send"}</button>
           </div>
         </div>}
 
-        {(()=>{
-          // Send-to-accountant inline panel + button. Body builder
-          // closes over the IIFE's `txs` + `tot` so the daily
-          // summary stays accurate even if the EOD recomputes
-          // mid-session.
-          const shopName=sS((auth&&auth.shop&&auth.shop.business_name)||"Shop");
-          const dateLabel=formatDateAU(today);
-          const accountantEmail=(auth&&auth.shop&&auth.shop.accountant_email)||"";
-          const accountantName=(auth&&auth.shop&&auth.shop.accountant_name)||"";
-          const buildBody=(note)=>{
-            const lines=[];
-            if(note&&note.trim())lines.push(note.trim(),"");
-            lines.push("End of Day Report — "+dateLabel);
-            lines.push("Shop: "+shopName);
-            lines.push("");
-            lines.push("Transactions: "+txs.length);
-            lines.push("Buy Total:    "+fmtAUD(tot.buy));
-            lines.push("Sell Total:   "+fmtAUD(tot.sell));
-            lines.push("Net:          "+fmtAUD(tot.sell-tot.buy));
-            const pending=txs.filter(t=>t.ttrStatus==="PENDING").length;
-            if(pending>0){
-              lines.push("");
-              lines.push("⚠ "+pending+" TTR(s) PENDING — file with AUSTRAC Online today.");
-            }
-            lines.push("");
-            lines.push("--");
-            lines.push(shopName);
-            return lines.join("\n");
-          };
-          const openSend=()=>{
-            if(!accountantEmail){pop&&pop("Set accountant email in Settings → Accountant Details first.","warn");return;}
-            setAcctSendSubject("["+shopName+"] End of day report — "+dateLabel);
-            setAcctSendNote("");
-            setAcctSendOpen(true);
-          };
-          const send=async()=>{
-            if(!accountantEmail)return;
-            setAcctSendBusy(true);
-            const r=await sendEmail({
-              to:accountantEmail,
-              subject:acctSendSubject,
-              body:buildBody(acctSendNote),
-              replyTo:(auth&&auth.user&&auth.user.email)||null,
-              template:"accountant_send_eod",
-            });
-            setAcctSendBusy(false);
-            if(r&&r.ok){
-              if(pop)pop("Email sent to "+sS(accountantName||accountantEmail)+".","ok");
-              setAcctSendOpen(false);
-            }else{
-              if(pop)pop("Send failed: "+sS((r&&r.error)||"unknown"),"err");
-            }
-          };
-          return <>
-            {acctSendOpen&&<div style={{...c.card({padding:14}),marginTop:14,borderColor:T.gold}}>
-              <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>📧 Send EOD to accountant</div>
-              <div style={{marginBottom:8,fontSize:11,color:T.muted}}>
-                Sending to <strong style={{color:T.white}}>{sS(accountantName||accountantEmail)}</strong>
-                {accountantName&&accountantEmail?" <"+sS(accountantEmail)+">":""}
-              </div>
-              <F label="Subject" value={acctSendSubject} onChange={v=>setAcctSendSubject(v)}/>
-              <div style={{marginTop:8}}>
-                <label style={c.lbl}>Note (optional, prepended to body)</label>
-                <textarea style={{...c.inp(),minHeight:60,resize:"vertical",fontFamily:"inherit"}} value={acctSendNote} onChange={e=>setAcctSendNote(e.target.value)} placeholder="Any context to include…"/>
-              </div>
-              <div style={{marginTop:8}}>
-                <label style={c.lbl}>Body preview</label>
-                <pre style={{background:T.surface,border:"1px solid "+T.border,padding:"8px 10px",fontSize:11,overflow:"auto",maxHeight:200,whiteSpace:"pre-wrap",margin:0,fontFamily:"monospace",color:T.text}}>{buildBody(acctSendNote)}</pre>
-              </div>
-              <div style={{display:"flex",gap:10,marginTop:10,justifyContent:"flex-end"}}>
-                <button style={c.bsm()} onClick={()=>setAcctSendOpen(false)} disabled={acctSendBusy}>Cancel</button>
-                <button style={c.btn(T.green,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={send} disabled={acctSendBusy||!acctSendSubject.trim()}>{acctSendBusy?"Sending…":"📧 Send"}</button>
-              </div>
-            </div>}
-            <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
-              <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlAccounting();setShowEOD(false);}}>📊 Download Accounting</button>
-              {accountantEmail
-                ?<button style={c.bsm(T.goldBg,T.gold)} onClick={openSend} disabled={acctSendOpen}>📧 Send to accountant</button>
-                :<button style={c.bsm(T.border,T.muted,{cursor:"not-allowed"})} disabled title="Set accountant email in Settings → Accountant Details first.">📧 Send to accountant</button>}
-              <button style={c.bsm()} onClick={()=>setShowEOD(false)}>Close</button>
-            </div>
-          </>;
-        })()}
+        {invoiceOpen&&<div style={{...c.card({padding:0}),marginTop:14,borderColor:T.gold}}>
+          <InvoiceForm
+            shopId={(auth&&auth.shop&&String(auth.shop.id))||null}
+            userId={(auth&&auth.user&&auth.user.id)||null}
+            existing={null}
+            onSaved={()=>setInvoiceOpen(false)}
+            onCancel={()=>setInvoiceOpen(false)}
+            pop={pop}
+          />
+        </div>}
+
+        <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+          <button style={c.btn(T.gold,T.bg)} onClick={()=>{dlAccounting();setShowEOD(false);}}>📊 Download Accounting</button>
+          {accountantEmail
+            ?<button style={c.bsm(T.goldBg,T.gold)} onClick={openSend} disabled={acctSendOpen}>📧 Send to accountant</button>
+            :<button style={c.bsm(T.border,T.muted,{cursor:"not-allowed"})} disabled title="Set accountant email in Settings → 💼 Accounting first.">📧 Send to accountant</button>}
+          <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setInvoiceOpen(o=>!o)}>📋 {invoiceOpen?"Close invoice":"Add Invoice"}</button>
+          <button style={c.bsm()} onClick={()=>setShowEOD(false)}>Close</button>
+        </div>
       </div>;
     })()}
   </Modal>;

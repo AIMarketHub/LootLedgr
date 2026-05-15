@@ -34,6 +34,8 @@ export default function Dashboard({
   duressActive,
   resetTx,setScreen,
   setShowEOD,setShowVendors,setShowStaff,setShowBackup,setShowPolice,
+  // Phase 5.2 Commit 1 — opens the /staff workspace tile selector.
+  openStaffWorkspace,
   triggerDuress,
   // TFS Commit 4 — App boots syncTfsCache and stores the metadata
   // (last_updated_at, record_count, source_filename). When the
@@ -145,6 +147,7 @@ export default function Dashboard({
     <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:8,flexWrap:"wrap"}}>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowVendors(true)}>🏪 Suppliers</button>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowStaff(true)}>👥 Staff</button>
+      {typeof openStaffWorkspace==="function"&&<button style={c.bsm(T.border,T.muted)} onClick={openStaffWorkspace}>🗂 Workspace</button>}
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowBackup(true)}>💾 Backup</button>
     </div>
     <div style={{display:"flex",justifyContent:"center",marginTop:8}}>

@@ -65,6 +65,12 @@ const PlatformAustrac=lazy(()=>import("./screens/platform/Austrac.jsx"));
 const PlatformAgedAudit=lazy(()=>import("./screens/platform/AgedAudit.jsx"));
 // Phase 3 commit 3d-4-b — staff invite-claim entry point.
 const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
+// Phase 5.2 Commit 1 (2026-05-15) — staff workspace shell. Tile
+// selector at /staff; per-user tabbed profile at
+// /staff/profile/:userId (Hours tab fully wired this commit,
+// Documents / Contacts / Email tabs ship in Commit 2).
+const StaffTiles=lazy(()=>import("./screens/staff/StaffTiles.jsx"));
+const StaffProfile=lazy(()=>import("./screens/staff/Profile.jsx"));
 // Auth fix (2026-05-09) — password-reset landing page (target of
 // the email link sent by ForgotPassword). detectSessionInUrl=true
 // in the supabase client config means the recovery session is
@@ -145,6 +151,13 @@ export default function Router(){
               "only add, never remove"; their routes are just
               unwired. */}
           <Route path="/admin/diagnostics" element={<RequireAdmin><Diagnostics/></RequireAdmin>}/>
+          {/* Phase 5.2 Commit 1 — staff workspace. /staff is the
+              tile selector; /staff/profile/:userId is the per-user
+              shell. Default /staff/profile (no :userId) falls back
+              to the signed-in user's own id inside Profile.jsx. */}
+          <Route path="/staff" element={<RequireAuth><RequireLegalAcceptance><StaffTiles/></RequireLegalAcceptance></RequireAuth>}/>
+          <Route path="/staff/profile" element={<RequireAuth><RequireLegalAcceptance><StaffProfile/></RequireLegalAcceptance></RequireAuth>}/>
+          <Route path="/staff/profile/:userId" element={<RequireAuth><RequireLegalAcceptance><StaffProfile/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>

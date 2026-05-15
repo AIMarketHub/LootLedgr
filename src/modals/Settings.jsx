@@ -58,6 +58,11 @@ import {decryptPassphrase,encryptPassphrase} from "../lib/auth/passphrase.js";
 // table (added by migration 0022) not in settings.data JSON,
 // so the save path is a direct shops update via supabase.
 import {supabase} from "../lib/auth/saas.js";
+// Phase 5.2 Commit 1 — Invoice Manager sub-section nested inside
+// the Accounting accordion. List + form share the "invoices"
+// Supabase Storage bucket + the invoices table from 0023.
+import InvoicesList from "../screens/accounting/InvoicesList.jsx";
+import InvoiceForm from "../screens/accounting/InvoiceForm.jsx";
 // Phase 5.2-A — hardware drivers + per-device mode toggles. Each
 // driver persists its own Live/Mock mode to localStorage; the
 // section below reads/writes via getAllModes / getDriver.setMode
@@ -269,6 +274,13 @@ export default function Settings({
   const[acctEmail,setAcctEmail]=useState((authShop&&authShop.accountant_email)||"");
   const[acctSaving,setAcctSaving]=useState(false);
   const[acctMsg,setAcctMsg]=useState("");
+  // Phase 5.2 Commit 1 — Invoice Manager state. Form is mounted
+  // inline below the list; null = closed, undefined = add mode,
+  // object = edit mode. reloadKey forces the list to re-fetch
+  // after a save.
+  const[invFormOpen,setInvFormOpen]=useState(false);
+  const[invEditTarget,setInvEditTarget]=useState(null);
+  const[invReloadKey,setInvReloadKey]=useState(0);
   useEffect(()=>{
     setAcctName((authShop&&authShop.accountant_name)||"");
     setAcctEmail((authShop&&authShop.accountant_email)||"");
@@ -403,7 +415,9 @@ export default function Settings({
           <SF label="State / Territory" value={settings.state||"VIC"} onChange={v=>setSettings(p=>({...p,state:v}))} options={["VIC","NSW","QLD","SA","WA","NT","ACT","TAS"].map(x=>({value:x,label:x}))}/>
         </div>
       </div>],
-      ["accountant","📧 Accountant Details",<div style={{paddingBottom:14}}>
+      ["accountant","💼 Accounting",<div style={{paddingBottom:14}}>
+        {/* ── Accountant contact details (unchanged from 5.2-E) ── */}
+        <div style={{fontSize:12,fontWeight:"bold",color:T.gold,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:8}}>📧 Accountant details</div>
         <div style={{fontSize:11,color:T.muted,marginBottom:12,lineHeight:1.5}}>
           Used by the <strong>Send to accountant</strong> button on the transaction detail modal and on the daily report. Leave blank to hide the button.
         </div>
@@ -414,6 +428,38 @@ export default function Settings({
         <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10}}>
           <button style={c.bsm(T.gold,T.bg)} onClick={saveAccountantInfo} disabled={acctSaving}>{acctSaving?"Saving…":"Save accountant details"}</button>
           {acctMsg&&<span style={{fontSize:11,color:acctMsg==="Saved."?T.green:T.red}}>{acctMsg}</span>}
+        </div>
+
+        {/* ── Invoice Manager (Phase 5.2 Commit 1) ── */}
+        <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid "+T.border+"66"}}>
+          <div style={{fontSize:12,fontWeight:"bold",color:T.gold,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:8}}>📋 Invoice manager</div>
+          <div style={{fontSize:11,color:T.muted,marginBottom:12,lineHeight:1.5}}>
+            Capture supplier receipts and expense invoices (Bunnings, electricity, subcontractor bills, …). Image / PDF attachments live in the
+            <strong> invoices </strong>Storage bucket and are visible only to your shop.
+          </div>
+
+          {invFormOpen?<div style={{...c.card({padding:0}),marginBottom:12,borderColor:T.gold}}>
+            <InvoiceForm
+              shopId={(authShop&&String(authShop.id))||null}
+              userId={(userRecord&&userRecord.id)||null}
+              existing={invEditTarget||null}
+              onSaved={()=>{
+                setInvFormOpen(false);
+                setInvEditTarget(null);
+                setInvReloadKey(k=>k+1);
+              }}
+              onCancel={()=>{setInvFormOpen(false);setInvEditTarget(null);}}
+              pop={pop}
+            />
+          </div>:null}
+
+          <InvoicesList
+            shopId={(authShop&&String(authShop.id))||null}
+            onAdd={()=>{setInvEditTarget(null);setInvFormOpen(true);}}
+            onEdit={(row)=>{setInvEditTarget(row);setInvFormOpen(true);}}
+            reloadKey={invReloadKey}
+            pop={pop}
+          />
         </div>
       </div>],
       ["appearance","🎨 Appearance",<div style={{paddingBottom:14}}>

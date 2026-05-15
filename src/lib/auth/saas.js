@@ -510,6 +510,26 @@ export async function setMyJobTitle(title){
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Phase 5.2 Commit 1 (2026-05-15) — staff workspace PIN gate.
+// Tile click → verifyStaffPin against the target user's plaintext
+// pin column. Server-side lockout: 3 wrong → 10-min lock on the
+// target user. Returns the RPC's jsonb shape verbatim:
+//   {ok:true}
+//   {ok:false, error:'locked',  locked_until:'<iso>'}
+//   {ok:false, error:'no_pin'}
+//   {ok:false, error:'wrong',   remaining:N}
+//   {ok:false, error:'wrong',   locked_until:'<iso>'}
+// ──────────────────────────────────────────────────────────────────
+export async function verifyStaffPin(targetUserId,pin){
+  const{data,error}=await supabase.rpc("verify_staff_pin",{
+    p_target_user_id:targetUserId,
+    p_pin:pin,
+  });
+  if(error)throw error;
+  return data;
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Phase 3.5-A-2 — staff_hours wrappers (table + RPCs from 0014).
 // Reads use direct RLS-gated SELECT; writes go through the
 // SECURITY DEFINER RPCs so PIN + role checks happen server-side

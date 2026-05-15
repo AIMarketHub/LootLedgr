@@ -25,17 +25,21 @@ import {supabase} from "./auth/saas.js";
  * @param {string} args.to        Recipient email (required)
  * @param {string} args.subject   Subject line (required; capped 200 chars by the function)
  * @param {string} args.body      Plain-text body (required; capped 100KB)
+ * @param {string} [args.htmlBody] Optional rich HTML body. When omitted, the
+ *                                 Edge Function uses `body` for both the
+ *                                 text and HTML renditions (pre-existing
+ *                                 single-body behaviour).
  * @param {string} [args.replyTo] Optional Reply-To header
  * @param {string} [args.template] Optional template tag (recorded in email_log.template)
  * @returns {Promise<{ok: boolean, id?: string, error?: string}>}
  */
-export async function sendEmail({to,subject,body,replyTo,template}){
+export async function sendEmail({to,subject,body,htmlBody,replyTo,template}){
   if(!to||!subject||!body){
     return{ok:false,error:"Missing required fields (to, subject, body)"};
   }
   try{
     const{data,error}=await supabase.functions.invoke("send-email",{
-      body:{to:to,subject:subject,body:body,replyTo:replyTo||null,template:template||null},
+      body:{to:to,subject:subject,body:body,htmlBody:htmlBody||null,replyTo:replyTo||null,template:template||null},
     });
     if(error){
       return{ok:false,error:(error&&error.message)||String(error)};

@@ -24,12 +24,19 @@
 //
 // Request shape (POST /functions/v1/send-email):
 //   Authorization: Bearer <user-JWT>
-//   Body: { to, subject, body, replyTo?, template? }
+//   Body: { to, subject, body, htmlBody?, replyTo?, template? }
 //
 // Response shape:
 //   200 { ok: true, id: "<smtp2go email_id>" }
 //   4xx { ok: false, error: "<reason>" }
 //   5xx { ok: false, error: "<reason>" }
+//
+// 2026-05-15 — added optional htmlBody parameter (Phase 5.2
+// Commit 1, staff workspace + EOD email enhancement). When
+// htmlBody is supplied, body is the plain-text fallback and
+// htmlBody is the rich HTML rendition. When htmlBody is
+// omitted, the function falls back to the pre-existing
+// behaviour (body is used for both text_body and html_body).
 
 // @ts-ignore — Deno runtime; types resolve at deploy.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.105.1";
@@ -110,6 +117,7 @@ Deno.serve(async (req: Request) => {
     to?: unknown;
     subject?: unknown;
     body?: unknown;
+    htmlBody?: unknown;
     replyTo?: unknown;
     template?: unknown;
   };
@@ -122,6 +130,9 @@ Deno.serve(async (req: Request) => {
   const to = typeof payload.to === "string" ? payload.to.trim() : "";
   const subject = typeof payload.subject === "string" ? payload.subject.trim() : "";
   const body = typeof payload.body === "string" ? payload.body : "";
+  const htmlBody = typeof payload.htmlBody === "string" && payload.htmlBody.length > 0
+    ? payload.htmlBody
+    : null;
   const replyTo = typeof payload.replyTo === "string" && payload.replyTo.trim().length > 0
     ? payload.replyTo.trim()
     : null;
@@ -139,6 +150,10 @@ Deno.serve(async (req: Request) => {
 
   const cleanSubject = subject.slice(0, SUBJECT_LIMIT);
   const cleanBody = body.slice(0, BODY_LIMIT);
+  // When htmlBody is supplied, use it for the HTML rendition;
+  // otherwise mirror the plain body for both (pre-existing
+  // behaviour, kept for callers that pass only `body`).
+  const cleanHtmlBody = htmlBody !== null ? htmlBody.slice(0, BODY_LIMIT) : cleanBody;
   const preview = cleanBody.slice(0, PREVIEW_LIMIT);
 
   if (!SMTP2GO_API_KEY) {
@@ -182,7 +197,7 @@ Deno.serve(async (req: Request) => {
         sender: DEFAULT_FROM,
         subject: cleanSubject,
         text_body: cleanBody,
-        html_body: cleanBody,
+        html_body: cleanHtmlBody,
         custom_headers: replyTo ? [{ header: "Reply-To", value: replyTo }] : undefined,
       }),
     });
