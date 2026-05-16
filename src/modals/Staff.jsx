@@ -20,13 +20,22 @@
 //   - withAdminGate prop (the new sections gate via the SQL
 //     layer + role checks, not the shop-level Admin PIN).
 //   - Local editId / editForm state + handlers.
+//
+// What was retired in the 2026-05-16 fix-forward (after Phase 5.2
+// staff-workspace Commit 1):
+//   - Section A.5 "My Hours (last 14 days)" grid + its helpers,
+//     state, save/unlock handlers. Replaced with a notice pointing
+//     to the new /staff workspace (per-user profile Hours tab) and
+//     /staff/today (owner/manager bulk editor). Source file kept
+//     on disk per "only add, never remove"; only the section is
+//     gone.
 
 import React,{useState,useEffect,useCallback} from "react";
 import {T,c} from "../theme.js";
-import {sS,todayStr,daysAgoISO,formatDateTimeAU} from "../lib/utils.js";
+import {sS} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
-import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle,listStaffHours,upsertStaffHours,unlockStaffHours} from "../lib/auth/saas.js";
+import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle} from "../lib/auth/saas.js";
 
 // Trim, then accept only 4-12 digit strings or blank. Returns the
 // canonical value to store, or null if the input is rejected.
@@ -63,40 +72,6 @@ function userLabel(u){
   const ln=sS(u.family_name||"");
   const full=(fn+" "+ln).trim();
   return full||sS(u.email)||"(no name)";
-}
-
-// "Thu 09 May" label for the My Hours 14-day grid.
-function formatDateLabel(iso){
-  if(!iso)return "";
-  const d=new Date(iso+"T00:00:00");
-  if(isNaN(d.getTime()))return iso;
-  return d.toLocaleDateString("en-AU",{weekday:"short",day:"2-digit",month:"short"});
-}
-
-// 3.5-A-2.5 — duplicate-day confirm body. Mirrors the EOD.jsx
-// helper but inlined here so the two modals stay independent. The
-// "existing" arg is the raw row from listStaffHours; "next" is the
-// edited row from local state.
-function diffPromptText(date,existing,next){
-  const fmtT=t=>t?String(t).slice(0,5):"—";
-  const fmtBreak=v=>String(parseInt(v,10)||0)+"m";
-  return "Hours already logged for "+date+".\n\n"
-    +"Existing:\n"
-    +"  Start "+fmtT(existing.start_time)+"  End "+fmtT(existing.end_time)
-    +"  Break "+fmtBreak(existing.break_minutes)+"\n"
-    +(existing.note?"  Note: "+sS(existing.note)+"\n":"")
-    +"\nNew:\n"
-    +"  Start "+(next.start||"—")+"  End "+(next.end||"—")
-    +"  Break "+fmtBreak(next.break)+"\n"
-    +(next.note?"  Note: "+next.note+"\n":"")
-    +"\nClick OK to overwrite, Cancel to skip this day.";
-}
-
-// Locked-at label using the consolidated formatDateTimeAU helper.
-// Renders as "Locked 09-05-2026 13:28".
-function fmtLockedAt(iso){
-  if(!iso)return "Locked";
-  return "Locked "+formatDateTimeAU(iso);
 }
 
 export default function Staff({pop,setShowStaff}){
@@ -157,130 +132,14 @@ export default function Staff({pop,setShowStaff}){
     finally{setMyBusy(false);}
   };
 
-  // ─── Section A.5 — My Hours (14-day catch-up) ───────────────
-  // State: per-row {date, start, end, break, note, dirty,
-  // existing_id, existing_row, locked, locked_at}. Pre-filled from
-  // listStaffHours(...) on mount; dirty flag tracks edits since
-  // last successful save. 3.5-A-2.5 added the lock trio + the raw
-  // existing_row reference (kept so the duplicate-day confirm can
-  // diff existing-vs-new without a re-fetch).
-  const[hoursPin,setHoursPin]=useState("");
-  const[hoursRows,setHoursRows]=useState([]);
-  const[hoursLoading,setHoursLoading]=useState(true);
-  const[hoursSaving,setHoursSaving]=useState(false);
-  // Inline unlock-panel state, scoped to the row index currently
-  // being unlocked. {idx, pin, busy} or null.
-  const[unlockMine,setUnlockMine]=useState(null);
-
-  const refreshMyHours=useCallback(async()=>{
-    if(!auth||!auth.shop||!auth.shop.id||!auth.user||!auth.user.id)return;
-    setHoursLoading(true);
-    try{
-      const fromDate=daysAgoISO(13);
-      const toDate=todayStr();
-      const all=await listStaffHours(String(auth.shop.id),fromDate,toDate);
-      const mine=all.filter(r=>r.user_id===auth.user.id);
-      // Build 14-row grid (today + 13 days back, newest first).
-      const rows=[];
-      for(let i=0;i<14;i++){
-        const date=daysAgoISO(i);
-        const existing=mine.find(r=>r.work_date===date);
-        rows.push(existing?{
-          date,
-          start:existing.start_time?String(existing.start_time).slice(0,5):"",
-          end:existing.end_time?String(existing.end_time).slice(0,5):"",
-          break:String(existing.break_minutes||0),
-          note:sS(existing.note),
-          dirty:false,
-          existing_id:existing.id,
-          existing_row:existing,
-          locked:!!existing.locked,
-          locked_at:existing.locked_at||null,
-        }:{date,start:"",end:"",break:"0",note:"",dirty:false,existing_id:null,existing_row:null,locked:false,locked_at:null});
-      }
-      setHoursRows(rows);
-    }catch(e){
-      pop&&pop("Could not load your hours: "+sS(e&&e.message),"err");
-    }finally{setHoursLoading(false);}
-  },[auth&&auth.shop&&auth.shop.id,auth&&auth.user&&auth.user.id]);
-
-  useEffect(()=>{refreshMyHours();},[refreshMyHours]);
-
-  const updateHoursRow=(idx,patch)=>{
-    setHoursRows(p=>p.map((r,i)=>i===idx?{...r,...patch,dirty:true}:r));
-  };
-
-  const onSaveMyHours=async()=>{
-    const pin=String(hoursPin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit per-staff PIN.","warn");return;}
-    setHoursSaving(true);
-    let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0;
-    try{
-      for(const row of hoursRows){
-        if(!row.dirty)continue;
-        // Skip blank rows that have no existing entry — nothing
-        // to do. Owner-only DELETE for clearing existing entries
-        // is handled outside this UI.
-        if(!row.existing_id&&!row.start&&!row.end&&(parseInt(row.break,10)||0)===0&&!row.note)continue;
-        // 3.5-A-2.5 — locked rows can't be overwritten.
-        if(row.locked){skippedLocked++;continue;}
-        // 3.5-A-2.5 — duplicate-day confirmation when an existing
-        // row exists for this date.
-        if(row.existing_id&&row.existing_row){
-          const ok=typeof window!=="undefined"&&window.confirm
-            ?window.confirm(diffPromptText(formatDateLabel(row.date),row.existing_row,row))
-            :true;
-          if(!ok){skippedUserDeclined++;continue;}
-        }
-        try{
-          await upsertStaffHours({
-            pin,
-            userId:auth.user.id,
-            workDate:row.date,
-            startTime:row.start||null,
-            endTime:row.end||null,
-            breakMinutes:parseInt(row.break,10)||0,
-            note:row.note||"",
-          });
-          saved++;
-        }catch(e){
-          failed++;
-          pop&&pop("Save failed for "+formatDateLabel(row.date)+": "+sS(e&&e.message),"err");
-        }
-      }
-      if(saved>0){
-        const extras=[];
-        if(failed>0)extras.push(failed+" failed");
-        if(skippedLocked>0)extras.push(skippedLocked+" locked");
-        if(skippedUserDeclined>0)extras.push(skippedUserDeclined+" skipped");
-        pop&&pop("Saved "+saved+" day"+(saved===1?"":"s")+(extras.length?" ("+extras.join(", ")+")":"."),"ok");
-        await refreshMyHours();
-        setHoursPin("");
-      }else if(failed===0&&skippedLocked===0&&skippedUserDeclined===0){
-        pop&&pop("No changes to save.","warn");
-      }else if(skippedLocked>0&&saved===0&&failed===0){
-        pop&&pop("All changed rows are locked. Unlock first or skip.","warn");
-      }
-    }finally{setHoursSaving(false);}
-  };
-
-  const onConfirmUnlockMine=async()=>{
-    if(!unlockMine)return;
-    const row=hoursRows[unlockMine.idx];
-    if(!row||!row.existing_id)return;
-    const pin=String(unlockMine.pin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit PIN.","warn");return;}
-    setUnlockMine(p=>({...p,busy:true}));
-    try{
-      await unlockStaffHours(pin,row.existing_id);
-      pop&&pop("Entry unlocked.","ok");
-      setUnlockMine(null);
-      await refreshMyHours();
-    }catch(e){
-      pop&&pop("Unlock failed: "+sS(e&&e.message),"err");
-      setUnlockMine(p=>({...p,busy:false}));
-    }
-  };
+  // ─── Section A.5 retired 2026-05-16 ────────────────────────
+  // The "My Hours (last 14 days)" grid that lived here was
+  // replaced by the Staff Workspace at /staff (per-user profile
+  // Hours tab) plus the bulk hours editor at /staff/today
+  // (owner / manager only). See the redirect notice card in the
+  // JSX below for the user-facing pointer. Source-file removal
+  // is intentionally NOT done — the file stays on disk per
+  // "only add, never remove."
 
   // Section B — Invite state.
   const[inviteEmail,setInviteEmail]=useState("");
@@ -374,49 +233,17 @@ export default function Staff({pop,setShowStaff}){
       </div>
     </div>
 
-    {/* ─── Section A.5 — My Hours (last 14 days) ──────────────── */}
-    <div style={{...c.card({padding:14}),marginBottom:14}}>
-      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>My Hours (last 14 days)</div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>Catch-up entry for your own shifts. Edit any date in the past 14 days; PIN-required save covers all changed rows.</div>
-      <F label="Your per-staff PIN (4–12 digits)" type="password" value={hoursPin} onChange={setHoursPin} placeholder="••••"/>
-      {hoursLoading?<div style={{fontSize:11,color:T.muted,marginTop:8}}>Loading…</div>:hoursRows.length===0?<div style={{fontSize:11,color:T.muted,marginTop:8}}>No rows.</div>:<div style={{marginTop:8}}>
-        <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,fontSize:10,color:T.muted,letterSpacing:"0.05em",textTransform:"uppercase",paddingBottom:6,borderBottom:"1px solid "+T.border+"55"}}>
-          <div>Date</div><div>Start</div><div>End</div><div>Break (min)</div><div>Note</div>
-        </div>
-        {hoursRows.map((row,idx)=>{
-          const isLocked=!!row.locked;
-          const showUnlock=unlockMine&&unlockMine.idx===idx;
-          return <div key={row.date} style={{borderBottom:"1px solid "+T.border+"22"}}>
-            <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1fr 2fr",gap:8,padding:"6px 0",alignItems:"center",opacity:isLocked?0.7:1}}>
-              <div style={{fontSize:11,color:T.text,display:"flex",alignItems:"center",flexWrap:"wrap",gap:4}}>
-                <span>{formatDateLabel(row.date)}</span>
-                {row.dirty?<span style={{color:T.gold}}>•</span>:null}
-                {isLocked?<span style={{fontSize:9,color:T.gold,border:"1px solid "+T.gold,borderRadius:3,padding:"1px 4px"}} title={fmtLockedAt(row.locked_at)}>🔒</span>:null}
-              </div>
-              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.start} disabled={isLocked} onChange={e=>updateHoursRow(idx,{start:e.target.value})}/>
-              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="time" value={row.end} disabled={isLocked} onChange={e=>updateHoursRow(idx,{end:e.target.value})}/>
-              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="number" min="0" max="1440" value={row.break} disabled={isLocked} onChange={e=>updateHoursRow(idx,{break:e.target.value})}/>
-              <input style={c.inp({padding:"6px 8px",fontSize:12})} type="text" value={row.note} disabled={isLocked} onChange={e=>updateHoursRow(idx,{note:e.target.value})} placeholder="optional"/>
-            </div>
-            {isLocked&&!showUnlock&&<div style={{display:"flex",justifyContent:"flex-end",gap:8,padding:"0 0 8px"}}>
-              <span style={{fontSize:10,color:T.muted,alignSelf:"center"}}>{fmtLockedAt(row.locked_at)}</span>
-              <button type="button" style={c.bsm()} onClick={()=>setUnlockMine({idx,pin:"",busy:false})}>Unlock</button>
-            </div>}
-            {showUnlock&&<div style={{...c.card({padding:10}),margin:"0 0 8px",background:T.warn||T.surface,borderColor:T.red||T.border}}>
-              <div style={{fontSize:11,color:T.red||T.gold,fontWeight:"bold",marginBottom:6}}>⚠ Hours locked in for accounting. Contact the accountant before modifying the timesheet.</div>
-              <div style={{fontSize:11,color:T.muted,marginBottom:6}}>Unlocking <strong>{formatDateLabel(row.date)}</strong> requires your per-staff PIN.</div>
-              <F label="Your PIN (4–12 digits)" type="password" value={unlockMine.pin} onChange={v=>setUnlockMine(p=>({...p,pin:v}))} placeholder="••••"/>
-              <div style={{display:"flex",gap:8,marginTop:6}}>
-                <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onConfirmUnlockMine} disabled={unlockMine.busy||!unlockMine.pin}>{unlockMine.busy?"…":"Confirm unlock"}</button>
-                <button style={c.bsm()} onClick={()=>setUnlockMine(null)} disabled={unlockMine.busy}>Cancel</button>
-              </div>
-            </div>}
-          </div>;
-        })}
-      </div>}
-      <div style={{marginTop:10}}>
-        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSaveMyHours} disabled={hoursSaving||hoursLoading||!hoursPin}>{hoursSaving?"Saving…":"Save changed rows"}</button>
+    {/* ─── Section A.5 — RETIRED 2026-05-16 (redirect notice) ── */}
+    <div style={{...c.card({padding:14}),marginBottom:14,borderColor:T.gold}}>
+      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>My Hours — moved</div>
+      <div style={{fontSize:12,color:T.text,lineHeight:1.5,marginBottom:10}}>
+        Hours editing has moved out of this modal. There are now two surfaces:
       </div>
+      <ul style={{fontSize:12,color:T.text,lineHeight:1.6,paddingLeft:20,marginTop:0,marginBottom:10}}>
+        <li><strong>Your own hours</strong> — Dashboard → 🗂 Workspace → tap your tile → Hours tab. 14-day view with previous-week navigation, lock/unlock, and auto-save drafts.</li>
+        <li><strong>Boss bulk entry</strong> (owner/manager) — Dashboard → 🗂 Workspace → 📅 Bulk hours editor. Pick a date, tick the staff who worked, fill hours, save them all in one round-trip.</li>
+      </ul>
+      <div style={{fontSize:11,color:T.muted}}>Both surfaces read and write the same staff_hours rows — entries here surface there immediately, and vice versa.</div>
     </div>
 
     {/* ─── Section B — Invite staff member (owner / manager) ─── */}

@@ -114,7 +114,11 @@ export default function StaffTiles(){
           <div style={{fontSize:18,fontWeight:"bold",color:T.white}}>🗂 Staff Workspace</div>
           <div style={{fontSize:11,color:T.muted,marginTop:4}}>{(auth&&auth.shop&&auth.shop.business_name)||"Shop"} — tap your tile to open your profile.</div>
         </div>
-        <button style={c.bsm()} onClick={()=>navigate("/app")}>← Back to dashboard</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {/* Fix-forward 2026-05-16 — bulk hours editor link, owner/manager only. */}
+          {(auth&&(auth.role==="owner"||auth.role==="manager"))?<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>navigate("/staff/today")}>📅 Bulk hours editor</button>:null}
+          <button style={c.bsm()} onClick={()=>navigate("/app")}>← Back to dashboard</button>
+        </div>
       </div>
 
       {loading?<div style={{fontSize:12,color:T.muted}}>Loading…</div>:null}

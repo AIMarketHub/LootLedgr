@@ -71,6 +71,8 @@ const ClaimInvite=lazy(()=>import("./screens/auth/ClaimInvite.jsx"));
 // Documents / Contacts / Email tabs ship in Commit 2).
 const StaffTiles=lazy(()=>import("./screens/staff/StaffTiles.jsx"));
 const StaffProfile=lazy(()=>import("./screens/staff/Profile.jsx"));
+// Fix-forward 2026-05-16 — owner/manager bulk hours editor.
+const StaffToday=lazy(()=>import("./screens/staff/Today.jsx"));
 // Auth fix (2026-05-09) — password-reset landing page (target of
 // the email link sent by ForgotPassword). detectSessionInUrl=true
 // in the supabase client config means the recovery session is
@@ -156,6 +158,7 @@ export default function Router(){
               shell. Default /staff/profile (no :userId) falls back
               to the signed-in user's own id inside Profile.jsx. */}
           <Route path="/staff" element={<RequireAuth><RequireLegalAcceptance><StaffTiles/></RequireLegalAcceptance></RequireAuth>}/>
+          <Route path="/staff/today" element={<RequireAuth><RequireLegalAcceptance><StaffToday/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="/staff/profile" element={<RequireAuth><RequireLegalAcceptance><StaffProfile/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="/staff/profile/:userId" element={<RequireAuth><RequireLegalAcceptance><StaffProfile/></RequireLegalAcceptance></RequireAuth>}/>
           <Route path="/app/*" element={<RequireAuth><RequireLegalAcceptance><App/></RequireLegalAcceptance></RequireAuth>}/>
