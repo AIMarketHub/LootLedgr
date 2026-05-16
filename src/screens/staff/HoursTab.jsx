@@ -491,6 +491,7 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
   };
 
   const openSendConfirm=()=>{
+    console.log("[HoursTab.openSendConfirm] click; accountantEmail=",accountantEmail,"viewEnd=",viewEnd,"userId=",userId,"shopId=",shopId);
     if(!accountantEmail){pop&&pop("No accountant email set. Owner can set it in Settings → 💼 Accounting.","warn");return;}
     const weekStart=weekStartMonday(viewEnd);
     const wDates=weekDates(viewEnd);
@@ -506,16 +507,20 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
         locked:!!row.locked,
       };
     }).filter(Boolean);
+    console.log("[HoursTab.openSendConfirm] weekRows count:",weekRows.length,"weekStart:",isoDate(weekStart));
     if(weekRows.length===0){pop&&pop("No hours logged this week.","warn");return;}
     const built=buildTimesheetBodies(weekStart,weekRows,comparison.rows||[]);
     setSendConfirm({weekStart:isoDate(weekStart),weekRowsSnapshot:weekRows,built});
+    console.log("[HoursTab.openSendConfirm] confirm panel opened");
   };
 
   const onConfirmSendTimesheet=async()=>{
-    if(!sendConfirm)return;
+    console.log("[HoursTab.onConfirmSendTimesheet] confirm clicked");
+    if(!sendConfirm){console.warn("[HoursTab.onConfirmSendTimesheet] no sendConfirm state — bailing");return;}
     setSendingTimesheet(true);
     const built=sendConfirm.built;
     const subject="["+shopName+"] Weekly timesheet — "+staffName+" — week of "+formatDateAU(built.weekStartIso);
+    console.log("[HoursTab.onConfirmSendTimesheet] calling sendEmail to:",accountantEmail,"subject:",subject);
     const r=await sendEmail({
       to:accountantEmail,
       subject,
@@ -524,9 +529,11 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
       replyTo:(auth&&auth.user&&auth.user.email)||null,
       template:"weekly_timesheet",
     });
+    console.log("[HoursTab.onConfirmSendTimesheet] sendEmail returned:",r);
     if(!r||!r.ok){
       setSendingTimesheet(false);
       pop&&pop("Send failed: "+sS((r&&r.error)||"unknown"),"err");
+      console.warn("[HoursTab.onConfirmSendTimesheet] email send failed; toast 'Send failed'");
       return;
     }
     // Record the submission. Best-effort — surface failures but
@@ -536,18 +543,28 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
     // row's uuid PK returned by the Edge Function) rather than
     // r.id (which is the SMTP2GO send identifier — a non-UUID
     // string that Postgres rejects for a uuid column).
+    const insertPayload={
+      user_id:userId,
+      shop_id:shopId,
+      week_start_date:sendConfirm.weekStart,
+      hours_snapshot:sendConfirm.weekRowsSnapshot,
+      discrepancies:comparison.rows||[],
+      sent_to_email:accountantEmail,
+      email_log_id:r.logId||null,
+    };
+    console.log("[HoursTab.onConfirmSendTimesheet] about to insert timesheet_submissions payload:",{
+      user_id:insertPayload.user_id,
+      shop_id:insertPayload.shop_id,
+      week_start_date:insertPayload.week_start_date,
+      sent_to_email:insertPayload.sent_to_email,
+      email_log_id:insertPayload.email_log_id,
+      hours_snapshot_count:Array.isArray(insertPayload.hours_snapshot)?insertPayload.hours_snapshot.length:"?",
+      discrepancies_count:Array.isArray(insertPayload.discrepancies)?insertPayload.discrepancies.length:"?",
+    });
     try{
-      const{error}=await supabase.from("timesheet_submissions").insert({
-        user_id:userId,
-        shop_id:shopId,
-        week_start_date:sendConfirm.weekStart,
-        hours_snapshot:sendConfirm.weekRowsSnapshot,
-        discrepancies:comparison.rows||[],
-        sent_to_email:accountantEmail,
-        email_log_id:r.logId||null,
-      });
+      const{data,error}=await supabase.from("timesheet_submissions").insert(insertPayload).select();
+      console.log("[HoursTab.onConfirmSendTimesheet] insert result:",{data,error});
       if(error){
-        // Console-log so the next silent failure surfaces in F12.
         console.error("[timesheet_submissions insert FAILED]",
           {message:error.message,code:error.code,details:error.details,hint:error.hint});
         // Unique-index violation if the same week is submitted
@@ -559,6 +576,7 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
           pop&&pop("Email sent. Submission record failed: "+sS(error.message),"warn");
         }
       }else{
+        console.log("[HoursTab.onConfirmSendTimesheet] insert OK; toast 'Timesheet sent'");
         pop&&pop("Timesheet sent to "+accountantEmail+".","ok");
       }
     }catch(e){
@@ -567,6 +585,7 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
     }
     setSendingTimesheet(false);
     setSendConfirm(null);
+    console.log("[HoursTab.onConfirmSendTimesheet] DONE");
   };
 
   const currentJump=quickJumpForViewEnd(viewEnd);
