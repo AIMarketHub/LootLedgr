@@ -30,6 +30,9 @@ import {supabase} from "../../lib/auth/saas.js";
 import {SESSION_PIN_KEY} from "./StaffTiles.jsx";
 import HoursTab from "./HoursTab.jsx";
 import SettingsTab from "./SettingsTab.jsx";
+import DocumentsTab from "./DocumentsTab.jsx";
+import ContactsTab from "./ContactsTab.jsx";
+import EmailTab from "./EmailTab.jsx";
 
 const IDLE_LOCK_MS=10*60*1000;
 
@@ -201,22 +204,13 @@ export default function Profile(){
 
       <div style={c.card({padding:18})}>
         {tab==="hours"&&!loading&&targetUser?
-          <HoursTab userId={targetUserId} shopId={shopId} pin={sessionPin} pop={pop}/>:null}
-        {tab==="documents"?<div style={{padding:"40px 0",textAlign:"center",fontSize:12,color:T.muted}}>
-          <div style={{fontSize:32,marginBottom:10}}>📄</div>
-          <div>Documents tab — coming in Commit 2.</div>
-          <div style={{marginTop:6,fontSize:11}}>Personal contracts, ID copies, certifications. Stored in the staff-documents bucket.</div>
-        </div>:null}
-        {tab==="contacts"?<div style={{padding:"40px 0",textAlign:"center",fontSize:12,color:T.muted}}>
-          <div style={{fontSize:32,marginBottom:10}}>📇</div>
-          <div>Contacts tab — coming in Commit 2.</div>
-          <div style={{marginTop:6,fontSize:11}}>Personal rolodex with role tags.</div>
-        </div>:null}
-        {tab==="email"?<div style={{padding:"40px 0",textAlign:"center",fontSize:12,color:T.muted}}>
-          <div style={{fontSize:32,marginBottom:10}}>✉</div>
-          <div>Email tab — coming in Commit 2.</div>
-          <div style={{marginTop:6,fontSize:11}}>Compose emails to your contacts via SMTP2GO.</div>
-        </div>:null}
+          <HoursTab userId={targetUserId} shopId={shopId} pin={sessionPin} pop={pop} userLabel={targetUser?userLabel(targetUser):""}/>:null}
+        {tab==="documents"&&!loading&&targetUser?
+          <DocumentsTab userId={targetUserId} shopId={shopId} pin={sessionPin} pop={pop}/>:null}
+        {tab==="contacts"&&!loading&&targetUser?
+          <ContactsTab userId={targetUserId} pop={pop}/>:null}
+        {tab==="email"&&!loading&&targetUser?
+          <EmailTab userId={targetUserId} pop={pop}/>:null}
         {tab==="settings"&&isOwnProfile?<SettingsTab sessionPin={sessionPin} pop={pop}/>:null}
       </div>
     </div>
