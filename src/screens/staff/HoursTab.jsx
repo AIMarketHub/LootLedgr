@@ -238,15 +238,6 @@ export default function HoursTab({userId,shopId,pin,pop}){
   };
 
   const onSave=async()=>{
-    // ── DIAGNOSTIC LOGS (2026-05-16) — to be removed after USER
-    // confirms the silent-save bug is identified.
-    console.log("[HoursTab.onSave] CLICK received. state:",{
-      pinPresent:!!pin,
-      gridDates:Object.keys(grid),
-      dates,
-      saving, locking, loading,
-    });
-
     // Force-flush focused time input. <input type="time"> doesn't
     // always fire onChange until blur — clicking Save while the
     // input is still focused can leave React state empty. Blur +
@@ -254,20 +245,14 @@ export default function HoursTab({userId,shopId,pin,pop}){
     // the grid below.
     if(typeof document!=="undefined"&&document.activeElement&&document.activeElement.blur)document.activeElement.blur();
     await new Promise(r=>setTimeout(r,0));
-    console.log("[HoursTab.onSave] post-flush, grid sample:",dates.slice(0,3).map(d=>({date:d,row:grid[d]})));
 
-    if(!pin){
-      console.log("[HoursTab.onSave] no session PIN; bailing");
-      pop&&pop("Session PIN missing. Return to Staff Tiles and re-enter.","warn");return;
-    }
+    if(!pin){pop&&pop("Session PIN missing. Return to Staff Tiles and re-enter.","warn");return;}
     const candidates=dates.filter(d=>{
       const row=grid[d];
       if(!row||row.locked)return false;
       return rowChangedFromDb(row);
     });
-    console.log("[HoursTab.onSave] changed candidates:",candidates);
     if(candidates.length===0){
-      console.log("[HoursTab.onSave] no candidates; toast info + bail");
       pop&&pop("No changes to save.","info");
       return;
     }
@@ -276,7 +261,6 @@ export default function HoursTab({userId,shopId,pin,pop}){
     try{
       for(const d of candidates){
         const row=grid[d];
-        console.log("[HoursTab.onSave] processing date:",d,"row:",row);
         // Duplicate-day overwrite confirmation — only when an
         // existing DB row is being overwritten. New inserts
         // skip the prompt.
@@ -284,13 +268,9 @@ export default function HoursTab({userId,shopId,pin,pop}){
           const ok=typeof window!=="undefined"&&window.confirm
             ?window.confirm(diffPromptText(d,row.existing_row,row))
             :true;
-          if(!ok){
-            console.log("[HoursTab.onSave] overwrite declined:",d);
-            skippedUserDeclined++;continue;
-          }
+          if(!ok){skippedUserDeclined++;continue;}
         }
         try{
-          console.log("[HoursTab.onSave] calling upsertStaffHours for",d);
           await upsertStaffHours({
             pin,
             userId,
@@ -300,15 +280,12 @@ export default function HoursTab({userId,shopId,pin,pop}){
             breakMinutes:parseInt(row.break,10)||0,
             note:row.note||"",
           });
-          console.log("[HoursTab.onSave] upsert OK for",d);
           saved++;
         }catch(e){
-          console.error("[HoursTab.onSave] upsert threw for",d,e);
           failed++;
           pop&&pop("Save failed for "+formatDateAU(d)+": "+sS(e&&e.message),"err");
         }
       }
-      console.log("[HoursTab.onSave] loop done. counts:",{saved,failed,skippedUserDeclined});
       if(saved>0){
         const extras=[];
         if(failed>0)extras.push(failed+" failed");
@@ -430,15 +407,7 @@ export default function HoursTab({userId,shopId,pin,pop}){
       })}
     </div>}
     <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
-      {/* DIAGNOSTIC 2026-05-16 — Save button NOT disabled. Handler
-          logs disabled-conditions and toasts if preconditions
-          fail. Lets us see in F12 whether clicks reach the
-          handler at all. */}
-      <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"10px 18px"})} onClick={()=>{
-        console.log("[HoursTab.SaveButton] click event reached handler. disabled-conditions:",{saving,locking,loading});
-        if(saving||locking||loading){pop&&pop("Wait for current operation to finish.","warn");return;}
-        onSave();
-      }}>{saving?"Saving…":"💾 Save changed rows"}</button>
+      <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"10px 18px"})} onClick={onSave} disabled={saving||locking||loading}>{saving?"Saving…":"💾 Save changed rows"}</button>
       <button style={c.bsm(T.goldBg,T.gold)} onClick={onLockAll} disabled={saving||locking||loading||!pin}>{locking?"Locking…":"🔒 Lock hours in this view"}</button>
       <button style={c.bsm()} onClick={load} disabled={saving||locking||loading}>↻ Reload from DB</button>
     </div>

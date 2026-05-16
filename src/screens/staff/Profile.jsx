@@ -29,6 +29,7 @@ import {useAuth} from "../../components/AuthProvider.jsx";
 import {supabase} from "../../lib/auth/saas.js";
 import {SESSION_PIN_KEY} from "./StaffTiles.jsx";
 import HoursTab from "./HoursTab.jsx";
+import SettingsTab from "./SettingsTab.jsx";
 
 const IDLE_LOCK_MS=10*60*1000;
 
@@ -76,6 +77,7 @@ export default function Profile(){
   const sessionPin=(typeof window!=="undefined"&&targetUserId)
     ?(window.sessionStorage&&window.sessionStorage.getItem(SESSION_PIN_KEY(targetUserId)))||""
     :"";
+  const isOwnProfile=!!(auth&&auth.user&&auth.user.id&&targetUserId&&auth.user.id===targetUserId);
 
   const lockAndReturn=useCallback(()=>{
     if(targetUserId){
@@ -151,6 +153,11 @@ export default function Profile(){
     {key:"documents",label:"📄 Documents"},
     {key:"contacts",label:"📇 Contacts"},
     {key:"email",label:"✉ Email"},
+    // 2026-05-16 — own-profile-only Settings tab (My PIN + Job
+    // Title). Hidden when an admin views another staff's profile;
+    // they manage that staff's PIN via the tile Edit panel
+    // instead.
+    ...(isOwnProfile?[{key:"settings",label:"⚙ Settings"}]:[]),
   ];
 
   return <div style={{minHeight:"100vh",background:T.bg,color:T.text,padding:"24px 18px",fontFamily:"system-ui"}}>
@@ -210,6 +217,7 @@ export default function Profile(){
           <div>Email tab — coming in Commit 2.</div>
           <div style={{marginTop:6,fontSize:11}}>Compose emails to your contacts via SMTP2GO.</div>
         </div>:null}
+        {tab==="settings"&&isOwnProfile?<SettingsTab sessionPin={sessionPin} pop={pop}/>:null}
       </div>
     </div>
 

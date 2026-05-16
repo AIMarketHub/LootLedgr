@@ -35,16 +35,7 @@ import {T,c} from "../theme.js";
 import {sS} from "../lib/utils.js";
 import {Modal,F,SF} from "../components/ui";
 import {useAuth} from "../components/AuthProvider.jsx";
-import {supabase,createStaffInvite,setMyPin,setStaffPin,setMyJobTitle} from "../lib/auth/saas.js";
-
-// Trim, then accept only 4-12 digit strings or blank. Returns the
-// canonical value to store, or null if the input is rejected.
-function normalizePin(v){
-  const s=(v==null?"":String(v)).trim();
-  if(s==="")return "";
-  if(!/^\d{4,12}$/.test(s))return null;
-  return s;
-}
+import {supabase,createStaffInvite,createStaffProfileManually} from "../lib/auth/saas.js";
 
 // Cheap email shape check for the invite form. Server-side
 // validation via the create_staff_invite RPC is the authority;
@@ -79,66 +70,21 @@ export default function Staff({pop,setShowStaff}){
   const auth=useAuth();
   const role=(auth&&auth.role)||null;
   const canInvite=role==="owner"||role==="manager";
-  const canResetStaffPins=role==="owner";
   const inviteRoleOptions=role==="owner"
     ?[{value:"staff",label:"Staff"},{value:"manager",label:"Manager"},{value:"owner",label:"Owner"}]
     :[{value:"staff",label:"Staff"},{value:"manager",label:"Manager"}];
 
-  // Section A — My PIN + Job Title state.
-  const[myPinInput,setMyPinInput]=useState("");
-  const[jobTitleInput,setJobTitleInput]=useState("");
-  const[myBusy,setMyBusy]=useState(false);
-  const myPinSet=!!(auth&&auth.userRecord&&auth.userRecord.pin);
-
-  // Sync job title input from auth.userRecord on mount + auth
-  // refresh. PIN field stays empty (it's a "set new" not "edit
-  // current" affordance — current PIN is opaque).
-  useEffect(()=>{
-    setJobTitleInput((auth&&auth.userRecord&&auth.userRecord.job_title)||"");
-  },[auth&&auth.userRecord]);
-
-  const onSetMyPin=async()=>{
-    const norm=normalizePin(myPinInput);
-    if(norm===null||norm===""){pop("PIN must be 4–12 digits.","warn");return;}
-    setMyBusy(true);
-    try{
-      await setMyPin(norm);
-      setMyPinInput("");
-      if(typeof auth.refresh==="function")await auth.refresh();
-      pop("Your PIN was updated.","ok");
-    }catch(e){pop("PIN update failed: "+sS(e&&e.message),"err");}
-    finally{setMyBusy(false);}
-  };
-  const onClearMyPin=async()=>{
-    if(typeof window!=="undefined"&&window.confirm){
-      if(!window.confirm("Clear your per-staff PIN? You'll need the shop Admin PIN to unlock the app until you set a new one."))return;
-    }
-    setMyBusy(true);
-    try{
-      await setMyPin(null);
-      setMyPinInput("");
-      if(typeof auth.refresh==="function")await auth.refresh();
-      pop("Your PIN was cleared.","ok");
-    }catch(e){pop("Clear failed: "+sS(e&&e.message),"err");}
-    finally{setMyBusy(false);}
-  };
-  const onSaveJobTitle=async()=>{
-    setMyBusy(true);
-    try{
-      await setMyJobTitle(jobTitleInput);
-      if(typeof auth.refresh==="function")await auth.refresh();
-      pop("Job title updated.","ok");
-    }catch(e){pop("Job title update failed: "+sS(e&&e.message),"err");}
-    finally{setMyBusy(false);}
-  };
+  // ─── Section A retired 2026-05-16 (fix-forward 1.5) ───────
+  // "My PIN + Job Title" — moved into the per-user Profile
+  // Settings tab (src/screens/staff/SettingsTab.jsx). This
+  // modal is now invite-focused; personal settings belong in
+  // the user's own profile, not a shop-wide admin surface.
 
   // ─── Section A.5 retired 2026-05-16 ────────────────────────
   // The "My Hours (last 14 days)" grid that lived here was
   // replaced by the Staff Workspace at /staff (per-user profile
   // Hours tab) plus the bulk hours editor at /staff/today
-  // (owner / manager only). See the redirect notice card in the
-  // JSX below for the user-facing pointer. Source-file removal
-  // is intentionally NOT done — the file stays on disk per
+  // (owner / manager only). Source file kept on disk per
   // "only add, never remove."
 
   // Section B — Invite state.
@@ -172,80 +118,68 @@ export default function Staff({pop,setShowStaff}){
     }catch(_){pop("Copy failed — copy manually.","warn");}
   };
 
-  // Sections C + D — pending invites + active staff lists.
+  // Section C — pending invites only. Section D ("Active staff")
+  // was retired 2026-05-16; the active-staff CRUD now lives on
+  // StaffTiles via the per-tile ✏ Edit panel.
   const[pendingInvites,setPendingInvites]=useState([]);
-  const[activeStaffList,setActiveStaffList]=useState([]);
   const[listsLoading,setListsLoading]=useState(true);
-  const[resetPinFor,setResetPinFor]=useState(null);
 
   const refreshLists=useCallback(async()=>{
     if(!auth||!auth.shop||!auth.shop.id)return;
     setListsLoading(true);
     try{
-      const[pi,as]=await Promise.all([
-        supabase.from("staff_invites")
-          .select("id, email, role, token, created_by, created_at, expires_at")
-          .eq("shop_id",String(auth.shop.id))
-          .is("claimed_at",null)
-          .gt("expires_at",new Date().toISOString())
-          .order("created_at",{ascending:false}),
-        supabase.from("users")
-          .select("id, role, first_name, family_name, email, pin, job_title")
-          .eq("shop_id",auth.shop.id)
-          .order("role",{ascending:true}),
-      ]);
+      const pi=await supabase.from("staff_invites")
+        .select("id, email, role, token, created_by, created_at, expires_at")
+        .eq("shop_id",String(auth.shop.id))
+        .is("claimed_at",null)
+        .gt("expires_at",new Date().toISOString())
+        .order("created_at",{ascending:false});
       if(!pi.error&&Array.isArray(pi.data))setPendingInvites(pi.data);
-      if(!as.error&&Array.isArray(as.data))setActiveStaffList(as.data);
     }finally{setListsLoading(false);}
   },[auth&&auth.shop&&auth.shop.id]);
 
   useEffect(()=>{refreshLists();},[refreshLists]);
 
-  const onConfirmResetPin=async()=>{
-    if(!resetPinFor)return;
-    const norm=normalizePin(resetPinFor.value);
-    if(norm===null||norm===""){pop("PIN must be 4–12 digits.","warn");return;}
-    setResetPinFor(p=>({...p,busy:true}));
-    try{
-      await setStaffPin(resetPinFor.userId,norm);
-      pop("PIN reset for "+sS(resetPinFor.label||"")+". Share securely.","ok");
-      setResetPinFor(null);
-      await refreshLists();
-    }catch(e){
-      pop("Reset failed: "+sS(e&&e.message),"err");
-      setResetPinFor(p=>({...p,busy:false}));
+  // ─── NEW Section E — Add profile manually ────────────────────
+  // Used when an email invite isn't viable (no email address,
+  // urgent, etc.). Calls the create-staff-profile Edge Function
+  // which requires service-role auth (verified caller is owner/
+  // manager and same-shop server-side).
+  const[manAddOpen,setManAddOpen]=useState(false);
+  const[manAddEmail,setManAddEmail]=useState("");
+  const[manAddFirst,setManAddFirst]=useState("");
+  const[manAddFamily,setManAddFamily]=useState("");
+  const[manAddRole,setManAddRole]=useState("staff");
+  const[manAddPin,setManAddPin]=useState("");
+  const[manAddBusy,setManAddBusy]=useState(false);
+  const[manAddResult,setManAddResult]=useState(null);
+  const[manAddErr,setManAddErr]=useState("");
+
+  const onCreateManually=async()=>{
+    setManAddErr("");
+    if(!isValidEmail(manAddEmail)){setManAddErr("Valid email required.");return;}
+    if(!manAddFirst.trim()){setManAddErr("First name required.");return;}
+    if(!/^\d{4,12}$/.test(manAddPin.trim())){setManAddErr("Initial PIN must be 4–12 digits.");return;}
+    setManAddBusy(true);
+    const r=await createStaffProfileManually({
+      email:manAddEmail.trim(),
+      firstName:manAddFirst.trim(),
+      familyName:manAddFamily.trim(),
+      role:manAddRole,
+      pin:manAddPin.trim(),
+    });
+    setManAddBusy(false);
+    if(r&&r.ok){
+      setManAddResult({email:manAddEmail.trim(),tempPassword:r.tempPassword,pin:manAddPin.trim()});
+      // Clear form for next add (but keep result block visible).
+      setManAddEmail("");setManAddFirst("");setManAddFamily("");setManAddRole("staff");setManAddPin("");
+      pop&&pop("Profile created. Capture the temp password + PIN now — they won't be shown again.","warn");
+    }else{
+      setManAddErr("Create failed: "+sS((r&&r.error)||"unknown"));
     }
   };
 
-  return <Modal title="👥 Staff" onClose={()=>setShowStaff(false)}>
-    {/* ─── Section A — My PIN + Job Title ─────────────────────── */}
-    <div style={{...c.card({padding:14}),marginBottom:14}}>
-      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>My PIN + Job Title</div>
-      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>{myPinSet?"You have a per-staff PIN set. The shop Admin PIN also works as a fallback.":"You don't have a per-staff PIN. Set one to unlock the app quickly without using the shop Admin PIN."}</div>
-      <div style={c.g2(10)}>
-        <F label={myPinSet?"New PIN (4–12 digits)":"PIN (4–12 digits)"} type="password" value={myPinInput} onChange={setMyPinInput} placeholder="••••"/>
-        <F label="Job title (decorative)" value={jobTitleInput} onChange={setJobTitleInput} placeholder="e.g. Goldsmith, Buyer"/>
-      </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
-        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onSetMyPin} disabled={myBusy||!myPinInput}>{myBusy?"…":"Save PIN"}</button>
-        <button style={c.bsm()} onClick={onSaveJobTitle} disabled={myBusy}>{myBusy?"…":"Save job title"}</button>
-        {myPinSet&&<button style={c.bsm(T.redBg,T.red)} onClick={onClearMyPin} disabled={myBusy}>Clear PIN</button>}
-      </div>
-    </div>
-
-    {/* ─── Section A.5 — RETIRED 2026-05-16 (redirect notice) ── */}
-    <div style={{...c.card({padding:14}),marginBottom:14,borderColor:T.gold}}>
-      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>My Hours — moved</div>
-      <div style={{fontSize:12,color:T.text,lineHeight:1.5,marginBottom:10}}>
-        Hours editing has moved out of this modal. There are now two surfaces:
-      </div>
-      <ul style={{fontSize:12,color:T.text,lineHeight:1.6,paddingLeft:20,marginTop:0,marginBottom:10}}>
-        <li><strong>Your own hours</strong> — Dashboard → 🗂 Workspace → tap your tile → Hours tab. 14-day view with previous-week navigation, lock/unlock, and auto-save drafts.</li>
-        <li><strong>Boss bulk entry</strong> (owner/manager) — Dashboard → 🗂 Workspace → 📅 Bulk hours editor. Pick a date, tick the staff who worked, fill hours, save them all in one round-trip.</li>
-      </ul>
-      <div style={{fontSize:11,color:T.muted}}>Both surfaces read and write the same staff_hours rows — entries here surface there immediately, and vice versa.</div>
-    </div>
-
+  return <Modal title="👥 Invite staff" onClose={()=>setShowStaff(false)}>
     {/* ─── Section B — Invite staff member (owner / manager) ─── */}
     {canInvite&&<div style={{...c.card({padding:14}),marginBottom:14}}>
       <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>Invite Staff Member</div>
@@ -275,36 +209,47 @@ export default function Staff({pop,setShowStaff}){
       ))}
     </div>
 
-    {/* ─── Section D — Active staff (Supabase users table) ───── */}
-    <div style={{...c.card({padding:14}),marginBottom:14}}>
-      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>Active Staff</div>
-      {listsLoading?<div style={{fontSize:11,color:T.muted}}>Loading…</div>:activeStaffList.length===0?<div style={{fontSize:11,color:T.muted}}>No staff yet.</div>:activeStaffList.map(u=>{
-        const isMe=auth&&auth.user&&auth.user.id===u.id;
-        const userPinSet=!!u.pin;
-        const resetting=resetPinFor&&resetPinFor.userId===u.id;
-        return <div key={u.id} style={{padding:"10px 0",borderBottom:"1px solid "+T.border+"33"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <div style={{flex:1,minWidth:160}}>
-              <div style={{fontSize:13,color:T.white}}>{userLabel(u)}{isMe?" (you)":""}</div>
-              <div style={{fontSize:10,color:T.muted}}>
-                <span style={{color:u.role==="owner"?T.gold:u.role==="manager"?T.green:T.muted}}>{sS(u.role).toUpperCase()}</span>
-                {u.job_title?" · "+sS(u.job_title):""}
-                {" · PIN "+(userPinSet?"•".repeat(Math.max(4,sS(u.pin).length)):"not set")}
-              </div>
-            </div>
-            {canResetStaffPins&&!isMe&&!resetting&&<button style={c.bsm()} onClick={()=>setResetPinFor({userId:u.id,label:userLabel(u),value:"",busy:false})}>Reset PIN</button>}
-          </div>
-          {resetting&&<div style={{...c.card({padding:10}),marginTop:8,background:T.warn||T.surface}}>
-            <div style={{fontSize:11,marginBottom:6}}>Reset PIN for <strong>{sS(resetPinFor.label)}</strong>. They'll need the new PIN to unlock the app.</div>
-            <F label="New PIN (4–12 digits)" type="password" value={resetPinFor.value} onChange={v=>setResetPinFor(p=>({...p,value:v}))}/>
-            <div style={{display:"flex",gap:8}}>
-              <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onConfirmResetPin} disabled={resetPinFor.busy||!resetPinFor.value}>{resetPinFor.busy?"…":"Confirm reset"}</button>
-              <button style={c.bsm()} onClick={()=>setResetPinFor(null)} disabled={resetPinFor.busy}>Cancel</button>
-            </div>
-          </div>}
-        </div>;
-      })}
-    </div>
+    {/* ─── Section D retired 2026-05-16 ─────────────────────────
+        "Active Staff" listing + Reset PIN UI is now on the
+        StaffTiles page via the ✏ Edit panel per tile. */}
+
+    {/* ─── Section E — Add profile manually (owner / manager) ─── */}
+    {canInvite&&<div style={{...c.card({padding:14}),marginBottom:14}}>
+      <div style={{fontSize:11,fontWeight:"bold",color:T.gold,marginBottom:10,letterSpacing:"0.05em",textTransform:"uppercase"}}>Add profile manually</div>
+      <div style={{fontSize:11,color:T.muted,marginBottom:10}}>
+        Use when email invite isn't viable (no email, urgent, in-person setup). Creates the auth user + the staff profile in one step. The temporary password + initial PIN are shown ONCE — capture them before closing.
+      </div>
+      {!manAddOpen?<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setManAddOpen(true)}>+ New manual profile</button>:<div>
+        <div style={c.g2(10)}>
+          <F label="First name" value={manAddFirst} onChange={setManAddFirst} placeholder="Jane"/>
+          <F label="Family name" value={manAddFamily} onChange={setManAddFamily} placeholder="Smith"/>
+        </div>
+        <div style={c.g2(10)}>
+          <F label="Email" value={manAddEmail} onChange={setManAddEmail} placeholder="jane@example.com"/>
+          <SF label="Role" value={manAddRole} onChange={setManAddRole} options={inviteRoleOptions}/>
+        </div>
+        <div style={{marginTop:8}}>
+          <F label="Initial PIN (4–12 digits)" type="password" value={manAddPin} onChange={setManAddPin} placeholder="••••"/>
+        </div>
+        {manAddErr?<div style={{...c.bnr("block"),marginTop:10}}>{manAddErr}</div>:null}
+        <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+          <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={onCreateManually} disabled={manAddBusy}>{manAddBusy?"Creating…":"Create profile"}</button>
+          <button style={c.bsm()} onClick={()=>{setManAddOpen(false);setManAddErr("");setManAddResult(null);}} disabled={manAddBusy}>Close</button>
+        </div>
+      </div>}
+      {manAddResult?<div style={{...c.bnr("warn"),marginTop:10}}>
+        <div style={{fontSize:12,fontWeight:"bold",marginBottom:6}}>✅ Profile created. Capture these now:</div>
+        <div style={{fontFamily:"monospace",fontSize:12,lineHeight:1.6,color:T.white}}>
+          <div>Email: <strong>{sS(manAddResult.email)}</strong></div>
+          <div>Temp password: <strong style={{letterSpacing:"0.1em"}}>{sS(manAddResult.tempPassword)}</strong></div>
+          <div>Initial PIN: <strong style={{letterSpacing:"0.2em"}}>{sS(manAddResult.pin)}</strong></div>
+        </div>
+        <div style={{fontSize:10,color:T.muted,marginTop:6}}>The temp password will not be shown again. Have the staff sign in and change it, then set a new PIN via Profile → Settings.</div>
+        <div style={{marginTop:8}}>
+          <button style={c.bsm()} onClick={()=>setManAddResult(null)}>Done</button>
+        </div>
+      </div>:null}
+    </div>}
 
   </Modal>;
 }

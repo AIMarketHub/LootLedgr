@@ -19,7 +19,7 @@
 // (src/components/RequireAuth.jsx).
 
 import React,{createContext,useContext,useEffect,useState,useCallback,useRef} from "react";
-import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isPlatformAdmin,isLockedOut} from "../lib/auth/saas.js";
+import {supabase,getCurrentUser,getCurrentUserRecord,getCurrentShop,isAdmin,isPlatformAdmin,isLockedOut,signOut} from "../lib/auth/saas.js";
 import {setCurrentShopId,setCurrentUserId} from "../lib/storage.js";
 
 const AuthCtx=createContext({
@@ -59,6 +59,23 @@ export function AuthProvider({children}){
       isPlatformAdmin(),
       isLockedOut(),
     ]);
+
+    // 2026-05-16 — soft-delete enforcement. If users.is_active is
+    // explicitly false, sign the session out and bounce to login.
+    // Defensive: only acts when the field is the literal `false`
+    // (not null/undefined) so a missing column or pre-migration
+    // row doesn't accidentally lock anyone out.
+    if(userRecord&&userRecord.is_active===false){
+      try{await signOut();}catch(_){}
+      hadUserRef.current=false;
+      setCurrentShopId(null);
+      setCurrentUserId(null,null);
+      if(typeof window!=="undefined"){
+        try{window.alert("This profile has been deactivated. Contact your shop owner to reactivate.");}catch(_){}
+      }
+      setState({user:null,userRecord:null,shop:null,role:null,admin:false,isPlatformAdmin:false,locked:false,loading:false});
+      return;
+    }
     // Cache the shop id in storage.js so module-level sb.* helpers
     // can read it synchronously from this point on. Cleared above
     // when the user signs out.

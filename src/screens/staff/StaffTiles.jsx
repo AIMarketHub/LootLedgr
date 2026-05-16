@@ -17,12 +17,15 @@ import {sS} from "../../lib/utils.js";
 import {F} from "../../components/ui";
 import {useAuth} from "../../components/AuthProvider.jsx";
 import {supabase,verifyStaffPin} from "../../lib/auth/saas.js";
-// 2026-05-16 — UI merge. The Staff modal (My PIN + Job Title,
-// Invite, Pending, Active staff + Reset PIN) is now reachable
-// from the Workspace via the "👥 Manage staff" button instead
-// of from a separate Dashboard entry. The Dashboard's old
-// "👥 Staff" button is being unwired in the same commit.
+// 2026-05-16 — UI merge. The Staff modal (now Invite-focused)
+// is opened from the "👥 Invite staff" button on this page
+// rather than from a separate Dashboard entry.
 import Staff from "../../modals/Staff.jsx";
+// 2026-05-16 fix-forward 1.5 — per-tile ✏ Edit panel for
+// owner / manager.
+import EditStaffPanel from "./EditStaffPanel.jsx";
+
+const ADMIN_PIN_SESSION_KEY="gf_admin_pin_session";
 
 function userLabel(u){
   if(!u)return "(unknown)";
@@ -49,8 +52,11 @@ export default function StaffTiles(){
   const[errMsg,setErrMsg]=useState("");
 
   const[gateFor,setGateFor]=useState(null); // {user, pin, busy, msg}
-  // Staff modal (Manage staff) toggle.
+  // Staff modal (Invite staff) toggle.
   const[showStaffModal,setShowStaffModal]=useState(false);
+  // Per-tile Edit panel + admin PIN gate cached for the session.
+  const[editTarget,setEditTarget]=useState(null); // user being edited
+  const[adminGate,setAdminGate]=useState(null);  // {targetUser, pin, busy, msg}
   // Toast for the Staff modal's pop() callback.
   const[toast,setToast]=useState(null);
   const toastTimer=useRef(null);
@@ -66,8 +72,9 @@ export default function StaffTiles(){
     (async()=>{
       setLoading(true);
       const{data,error}=await supabase.from("users")
-        .select("id, role, job_title, first_name, family_name, email, pin")
+        .select("id, role, job_title, first_name, family_name, email, pin, is_active")
         .eq("shop_id",auth.shop.id)
+        .eq("is_active",true)
         .order("role",{ascending:true})
         .order("family_name",{ascending:true});
       if(cancelled)return;
@@ -123,20 +130,106 @@ export default function StaffTiles(){
     }
   };
 
+  // Per-tile Edit flow.
+  // First ✏ click in a session prompts for the admin's own PIN
+  // (verified against their own users row via verify_staff_pin).
+  // Subsequent ✏ clicks skip the prompt — the verified PIN lives
+  // in sessionStorage under ADMIN_PIN_SESSION_KEY for the
+  // duration of the browser session.
+  const openEdit=(targetUser)=>{
+    if(!auth||!auth.user)return;
+    let cached="";
+    try{cached=sessionStorage.getItem(ADMIN_PIN_SESSION_KEY)||"";}catch(_){}
+    if(cached){
+      setEditTarget(targetUser);
+      return;
+    }
+    setAdminGate({targetUser,pin:"",busy:false,msg:""});
+  };
+
+  const submitAdminGate=async()=>{
+    if(!adminGate||!auth||!auth.user)return;
+    const pin=String(adminGate.pin||"").trim();
+    if(!/^\d{4,12}$/.test(pin)){
+      setAdminGate(p=>({...p,msg:"PIN must be 4–12 digits."}));
+      return;
+    }
+    setAdminGate(p=>({...p,busy:true,msg:""}));
+    try{
+      const r=await verifyStaffPin(auth.user.id,pin);
+      if(r&&r.ok){
+        try{sessionStorage.setItem(ADMIN_PIN_SESSION_KEY,pin);}catch(_){}
+        const t=adminGate.targetUser;
+        setAdminGate(null);
+        setEditTarget(t);
+        return;
+      }
+      const err=r&&r.error;
+      if(err==="locked"){
+        const until=r&&r.locked_until?new Date(r.locked_until):null;
+        setAdminGate(p=>({...p,busy:false,msg:"Your PIN is locked"+(until?" until "+until.toLocaleTimeString("en-AU",{hour:"2-digit",minute:"2-digit"}):"")+"."}));
+      }else if(err==="no_pin"){
+        setAdminGate(p=>({...p,busy:false,msg:"You have no PIN set. Open your own profile → Settings → Set PIN."}));
+      }else if(err==="wrong"&&typeof r.remaining==="number"){
+        setAdminGate(p=>({...p,busy:false,pin:"",msg:"Wrong PIN. "+r.remaining+" attempt"+(r.remaining===1?"":"s")+" left."}));
+      }else{
+        setAdminGate(p=>({...p,busy:false,msg:"PIN check failed."}));
+      }
+    }catch(e){
+      setAdminGate(p=>({...p,busy:false,msg:"PIN check failed: "+sS(e&&e.message)}));
+    }
+  };
+
+  const reloadTiles=()=>{
+    // Force the users effect to re-fetch by toggling a no-op
+    // state. Simpler: clear users and let the existing effect
+    // refire on shop_id (unchanged) by re-mounting an empty list.
+    // Cheapest: re-call the same load logic inline.
+    if(!auth||!auth.shop||!auth.shop.id)return;
+    setLoading(true);
+    supabase.from("users")
+      .select("id, role, job_title, first_name, family_name, email, pin, is_active")
+      .eq("shop_id",auth.shop.id)
+      .eq("is_active",true)
+      .order("role",{ascending:true})
+      .order("family_name",{ascending:true})
+      .then(({data,error})=>{
+        if(error){setErrMsg("Could not reload staff: "+sS(error.message));setUsers([]);}
+        else{setUsers(Array.isArray(data)?data:[]);setErrMsg("");}
+        setLoading(false);
+      });
+  };
+
+  const callerCanEdit=auth&&(auth.role==="owner"||auth.role==="manager");
+
   return <div style={{minHeight:"100vh",background:T.bg,color:T.text,padding:"24px 18px",fontFamily:"system-ui"}}>
     <div style={{maxWidth:900,margin:"0 auto"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:12}}>
         <div>
           <div style={{fontSize:18,fontWeight:"bold",color:T.white}}>🗂 Staff Workspace</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>{(auth&&auth.shop&&auth.shop.business_name)||"Shop"} — tap your tile to open your profile.</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>{(auth&&auth.shop&&auth.shop.business_name)||"Shop"}</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {/* Fix-forward 2026-05-16 — bulk hours editor link, owner/manager only. */}
-          {(auth&&(auth.role==="owner"||auth.role==="manager"))?<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>navigate("/staff/today")}>📅 Bulk hours editor</button>:null}
-          {/* 2026-05-16 — Manage staff (formerly the Dashboard's
-              👥 Staff button). Opens the Staff modal in-place. */}
-          <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowStaffModal(true)}>👥 Manage staff</button>
+          {callerCanEdit?<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>navigate("/staff/today")}>📅 Bulk hours editor</button>:null}
+          {/* 2026-05-16 fix-forward 1.5 — Invite staff (formerly
+              "Manage staff"). The Staff modal is now invite-focused
+              after Section A + D were retired in favour of the
+              per-user Profile → Settings tab + per-tile ✏ Edit. */}
+          <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowStaffModal(true)}>👥 Invite staff</button>
           <button style={c.bsm()} onClick={()=>navigate("/app")}>← Back to dashboard</button>
+        </div>
+      </div>
+
+      {/* 2026-05-16 — identity display + shared-device model explainer. */}
+      <div style={{padding:"10px 12px",background:T.surface,border:"1px solid "+T.border,borderRadius:6,marginBottom:14,fontSize:11,color:T.text,lineHeight:1.5}}>
+        <div>
+          <strong style={{color:T.gold}}>Logged in as:</strong>{" "}
+          <span style={{color:T.white}}>{(auth&&auth.user&&auth.user.email)||"(unknown)"}</span>
+          {auth&&auth.role?<span style={{color:T.muted}}> · {sS(auth.role).toUpperCase()}</span>:null}
+        </div>
+        <div style={{marginTop:4,color:T.muted}}>
+          Click your own tile + enter your PIN to access your personal profile. Click someone else's tile + their PIN if you need to act in their profile (e.g. edit your own hours on a shared device).
         </div>
       </div>
 
@@ -148,19 +241,30 @@ export default function StaffTiles(){
         {users.map(u=>{
           const badge=roleBadge(u.role);
           const hasPin=!!u.pin;
-          return <button key={u.id}
-            onClick={()=>openGate(u)}
-            style={{...c.card({padding:16}),textAlign:"left",cursor:"pointer",border:"1px solid "+T.border,background:T.surface,minHeight:120,display:"flex",flexDirection:"column",justifyContent:"space-between",fontFamily:"inherit"}}
-          >
-            <div>
-              <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:6}}>{userLabel(u)}</div>
-              {u.job_title?<div style={{fontSize:11,color:T.muted,marginBottom:6}}>{sS(u.job_title)}</div>:null}
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:9,fontWeight:"bold",color:badge.color,letterSpacing:"0.08em"}}>{badge.label}</span>
-              <span style={{fontSize:10,color:hasPin?T.gold:T.red}}>{hasPin?"🔒 PIN set":"⚠ No PIN"}</span>
-            </div>
-          </button>;
+          const isMe=auth&&auth.user&&auth.user.id===u.id;
+          // Manager can't edit owners. Owner can edit anyone except
+          // self. Manager can edit themselves via Profile Settings.
+          const canEditThisTile=callerCanEdit&&!isMe&&(auth.role==="owner"||u.role!=="owner");
+          return <div key={u.id} style={{position:"relative"}}>
+            <button
+              onClick={()=>openGate(u)}
+              style={{...c.card({padding:16}),width:"100%",textAlign:"left",cursor:"pointer",border:"1px solid "+T.border,background:T.surface,minHeight:120,display:"flex",flexDirection:"column",justifyContent:"space-between",fontFamily:"inherit"}}
+            >
+              <div>
+                <div style={{fontSize:13,fontWeight:"bold",color:T.white,marginBottom:6,paddingRight:20}}>{userLabel(u)}{isMe?" (you)":""}</div>
+                {u.job_title?<div style={{fontSize:11,color:T.muted,marginBottom:6}}>{sS(u.job_title)}</div>:null}
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:9,fontWeight:"bold",color:badge.color,letterSpacing:"0.08em"}}>{badge.label}</span>
+                <span style={{fontSize:10,color:hasPin?T.gold:T.red}}>{hasPin?"🔒 PIN set":"⚠ No PIN"}</span>
+              </div>
+            </button>
+            {canEditThisTile?<button
+              title="Edit staff"
+              onClick={e=>{e.stopPropagation();openEdit(u);}}
+              style={{position:"absolute",top:6,right:6,width:28,height:28,padding:0,fontSize:12,background:T.gold,color:T.bg,border:"1px solid "+T.bg,borderRadius:4,cursor:"pointer",fontWeight:"bold"}}
+            >✏</button>:null}
+          </div>;
         })}
       </div>
     </div>
@@ -178,9 +282,26 @@ export default function StaffTiles(){
       </div>
     </div>}
 
-    {/* 2026-05-16 — Staff modal opened from the "Manage staff"
+    {/* 2026-05-16 — Staff modal opened from the "Invite staff"
         button. Same component used previously from the Dashboard. */}
-    {showStaffModal?<Staff pop={pop} setShowStaff={setShowStaffModal}/>:null}
+    {showStaffModal?<Staff pop={pop} setShowStaff={(v)=>{setShowStaffModal(v);if(!v)reloadTiles();}}/>:null}
+
+    {/* 2026-05-16 fix-forward 1.5 — admin PIN gate before Edit. */}
+    {adminGate?<div style={{position:"fixed",inset:0,background:"#000000e0",zIndex:2050,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>!adminGate.busy&&setAdminGate(null)}>
+      <div style={{...c.card({padding:20}),maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontSize:14,fontWeight:"bold",color:T.white,marginBottom:6}}>🔐 Admin PIN required</div>
+        <div style={{fontSize:11,color:T.muted,marginBottom:12}}>Enter your own per-staff PIN to manage other staff. Cached for this browser session.</div>
+        <F label="Your PIN" type="password" value={adminGate.pin} onChange={v=>setAdminGate(p=>({...p,pin:v,msg:""}))} placeholder="••••"/>
+        {adminGate.msg?<div style={{fontSize:11,color:T.red,marginTop:8}}>{adminGate.msg}</div>:null}
+        <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"flex-end"}}>
+          <button style={c.bsm()} onClick={()=>setAdminGate(null)} disabled={adminGate.busy}>Cancel</button>
+          <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"8px 14px"})} onClick={submitAdminGate} disabled={adminGate.busy||!adminGate.pin}>{adminGate.busy?"…":"Unlock"}</button>
+        </div>
+      </div>
+    </div>:null}
+
+    {/* 2026-05-16 fix-forward 1.5 — Edit Staff Panel. */}
+    {editTarget?<EditStaffPanel user={editTarget} onClose={()=>setEditTarget(null)} onChanged={reloadTiles} pop={pop}/>:null}
 
     {toast?<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.kind==="ok"?T.green:toast.kind==="warn"?T.gold:toast.kind==="err"?T.red:T.surface,color:toast.kind==="err"?T.white:T.bg,padding:"10px 20px",borderRadius:8,fontSize:12,zIndex:3000,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",maxWidth:480}}>{toast.text}</div>:null}
   </div>;

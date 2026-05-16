@@ -530,6 +530,52 @@ export async function verifyStaffPin(targetUserId,pin){
 }
 
 // ──────────────────────────────────────────────────────────────────
+// Phase 5.2 fix-forward 1.5 (2026-05-16) — admin staff CRUD.
+// Wrappers for the new RPCs in migration 0024 that let an
+// owner/manager toggle is_active and update name/email/role on
+// another user in the same shop. Both audit-logged server-side.
+// ──────────────────────────────────────────────────────────────────
+export async function adminSetStaffActive(userId,active){
+  const{data,error}=await supabase.rpc("admin_set_staff_active",{
+    p_user_id:userId,
+    p_active:!!active,
+  });
+  if(error)throw error;
+  return data;
+}
+
+export async function adminUpdateStaffFields({userId,firstName,familyName,email,role}){
+  const{data,error}=await supabase.rpc("admin_update_staff_fields",{
+    p_user_id:userId,
+    p_first_name:firstName==null?null:firstName,
+    p_family_name:familyName==null?null:familyName,
+    p_email:email==null?null:email,
+    p_role:role==null?null:role,
+  });
+  if(error)throw error;
+  return data;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Phase 5.2 fix-forward 1.5 (2026-05-16) — manual profile creation.
+// Calls the create-staff-profile Edge Function. Used by the new
+// "Add profile manually" flow in the Staff (Invite) modal when an
+// email-based invite isn't viable.
+// Args: { email, firstName, familyName, role, pin }.
+// Returns: { ok:true, userId, tempPassword } or { ok:false, error }.
+// ──────────────────────────────────────────────────────────────────
+export async function createStaffProfileManually({email,firstName,familyName,role,pin}){
+  try{
+    const{data,error}=await supabase.functions.invoke("create-staff-profile",{
+      body:{email,firstName,familyName,role,pin},
+    });
+    if(error)return{ok:false,error:(error&&error.message)||String(error)};
+    if(data&&typeof data==="object")return data;
+    return{ok:false,error:"Unexpected Edge Function response"};
+  }catch(e){return{ok:false,error:(e&&e.message)||String(e)};}
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Phase 3.5-A-2 — staff_hours wrappers (table + RPCs from 0014).
 // Reads use direct RLS-gated SELECT; writes go through the
 // SECURITY DEFINER RPCs so PIN + role checks happen server-side

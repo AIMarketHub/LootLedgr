@@ -136,6 +136,7 @@ export default function Today(){
         supabase.from("users")
           .select("id, role, job_title, first_name, family_name, email")
           .eq("shop_id",shopId)
+          .eq("is_active",true)
           .order("role",{ascending:true})
           .order("family_name",{ascending:true}),
         listStaffHours(shopId,selectedDate,selectedDate),
@@ -184,19 +185,6 @@ export default function Today(){
   };
 
   const onSaveSelected=async()=>{
-    // ── DIAGNOSTIC LOGS (2026-05-16) — to be removed after USER
-    // confirms the silent-save bug is identified. Trace every
-    // critical branch so a single F12 capture pins the root cause.
-    console.log("[Today.onSaveSelected] CLICK received");
-    console.log("[Today.onSaveSelected] state snapshot at entry", {
-      opPinLength:String(opPin||"").length,
-      usersCount:users.length,
-      checkedKeys:Object.keys(checked).filter(k=>checked[k]),
-      editsKeys:Object.keys(edits),
-      saving, locking, loading,
-      selectedDate,
-    });
-
     // Force-flush focused time input. <input type="time"> doesn't
     // always fire onChange until blur, so a user who types a time
     // and clicks Save without tabbing out leaves React state
@@ -204,52 +192,33 @@ export default function Today(){
     // and updates `edits` before we read it below.
     if(typeof document!=="undefined"&&document.activeElement&&document.activeElement.blur)document.activeElement.blur();
     await new Promise(r=>setTimeout(r,0));
-    console.log("[Today.onSaveSelected] post-flush, opPin len:",String(opPin||"").length);
 
     const pin=String(opPin||"").trim();
-    if(!/^\d{4,12}$/.test(pin)){
-      console.log("[Today.onSaveSelected] PIN failed regex; bailing");
-      pop("Enter your 4-12 digit PIN.","warn");return;
-    }
+    if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit PIN.","warn");return;}
     const ticked=users.filter(u=>checked[u.id]);
-    console.log("[Today.onSaveSelected] ticked count:",ticked.length,"ids:",ticked.map(u=>u.id));
-    if(ticked.length===0){
-      console.log("[Today.onSaveSelected] no rows ticked; bailing");
-      pop("Tick at least one staff to save.","warn");return;
-    }
+    if(ticked.length===0){pop("Tick at least one staff to save.","warn");return;}
     setSaving(true);
     let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0,skippedEmpty=0;
     try{
       for(const u of ticked){
         const existing=hoursByUser[u.id];
-        if(existing&&existing.locked){
-          console.log("[Today.onSaveSelected] skip locked:",u.id);
-          skippedLocked++;continue;
-        }
+        if(existing&&existing.locked){skippedLocked++;continue;}
         const ed=edits[u.id]||{start:"",end:"",break:"0",note:""};
-        console.log("[Today.onSaveSelected] processing",u.id,"ed:",ed,"existing?",!!existing);
         // Skip ticked-but-empty rows — don't insert NULL-times
         // rows for staff who were ticked but whose time fields
         // were never filled. (Editing an existing row to clear
         // it still flows through, since `existing` is truthy.)
         const isEmpty=!ed.start&&!ed.end&&(parseInt(ed.break,10)||0)===0&&!(ed.note&&ed.note.trim());
-        if(!existing&&isEmpty){
-          console.log("[Today.onSaveSelected] skip empty:",u.id);
-          skippedEmpty++;continue;
-        }
+        if(!existing&&isEmpty){skippedEmpty++;continue;}
         // Duplicate-day overwrite confirmation when DB row exists.
         if(existing){
           const ok=typeof window!=="undefined"&&window.confirm
             ?window.confirm(diffPromptText(selectedDate,existing,ed))
             :true;
-          if(!ok){
-            console.log("[Today.onSaveSelected] overwrite declined:",u.id);
-            skippedUserDeclined++;continue;
-          }
+          if(!ok){skippedUserDeclined++;continue;}
         }
         try{
-          console.log("[Today.onSaveSelected] calling upsertStaffHours for",u.id);
-          const res=await upsertStaffHours({
+          await upsertStaffHours({
             pin,
             userId:u.id,
             workDate:selectedDate,
@@ -258,15 +227,12 @@ export default function Today(){
             breakMinutes:parseInt(ed.break,10)||0,
             note:ed.note||"",
           });
-          console.log("[Today.onSaveSelected] upsert returned for",u.id,res);
           saved++;
         }catch(e){
-          console.error("[Today.onSaveSelected] upsert threw for",u.id,e);
           failed++;
           pop("Save failed for "+userLabel(u)+": "+sS(e&&e.message),"err");
         }
       }
-      console.log("[Today.onSaveSelected] loop done. counts:",{saved,failed,skippedLocked,skippedUserDeclined,skippedEmpty});
       if(saved>0){
         const extras=[];
         if(failed>0)extras.push(failed+" failed");
@@ -281,10 +247,8 @@ export default function Today(){
         pop("All overwrites declined.","warn");
       }else if(skippedEmpty>0&&saved===0&&failed===0){
         pop("Ticked rows have no hours filled in — nothing to save.","warn");
-      }else{
-        console.warn("[Today.onSaveSelected] reached end with no saved/skipped — fall-through");
       }
-    }finally{setSaving(false);console.log("[Today.onSaveSelected] DONE");}
+    }finally{setSaving(false);}
   };
 
   const onLockSelected=async()=>{
@@ -352,6 +316,11 @@ export default function Today(){
           <div style={{fontSize:11,color:T.muted,marginTop:4}}>Owner / manager view — log or correct hours for every staff member on a given date.</div>
         </div>
         <button style={c.bsm()} onClick={()=>navigate("/staff")}>← Staff Tiles</button>
+      </div>
+
+      {/* 2026-05-16 — single-line note for staff who land here. */}
+      <div style={{fontSize:11,color:T.muted,fontStyle:"italic",marginBottom:14}}>
+        Staff can also edit their own timesheet from their profile (Staff Tiles → tap your tile → Hours tab).
       </div>
 
       {/* Date navigation strip */}
@@ -436,16 +405,7 @@ export default function Today(){
       </div>}
 
       <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap",position:"sticky",bottom:14,background:T.bg,padding:"10px 0"}}>
-        {/* DIAGNOSTIC 2026-05-16 — Save button NOT disabled. The
-            handler logs the would-be disabled state and toasts if
-            preconditions fail. Lets us see in F12 whether clicks
-            ever reach the handler. */}
-        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"10px 18px"})} onClick={()=>{
-          console.log("[Today.SaveButton] click event reached handler. disabled-conditions:",{saving,locking,loading,opPinEmpty:!opPin});
-          if(saving||locking||loading){pop("Wait for current operation to finish.","warn");return;}
-          if(!opPin){pop("Type your PIN first.","warn");return;}
-          onSaveSelected();
-        }}>{saving?"Saving…":"💾 Save selected"}</button>
+        <button style={c.btn(T.gold,T.bg,{fontSize:12,padding:"10px 18px"})} onClick={onSaveSelected} disabled={saving||locking||loading||!opPin}>{saving?"Saving…":"💾 Save selected"}</button>
         <button style={c.bsm(T.goldBg,T.gold)} onClick={onLockSelected} disabled={saving||locking||loading||!opPin}>{locking?"Locking…":"🔒 Lock selected"}</button>
         <button style={c.bsm()} onClick={load} disabled={saving||locking||loading}>↻ Reload</button>
         <div style={{flex:1}}/>
