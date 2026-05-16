@@ -531,6 +531,11 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
     }
     // Record the submission. Best-effort — surface failures but
     // don't unwind the (successful) email send.
+    //
+    // 2026-05-16 — email_log_id now uses r.logId (the email_log
+    // row's uuid PK returned by the Edge Function) rather than
+    // r.id (which is the SMTP2GO send identifier — a non-UUID
+    // string that Postgres rejects for a uuid column).
     try{
       const{error}=await supabase.from("timesheet_submissions").insert({
         user_id:userId,
@@ -539,9 +544,12 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
         hours_snapshot:sendConfirm.weekRowsSnapshot,
         discrepancies:comparison.rows||[],
         sent_to_email:accountantEmail,
-        email_log_id:r.id||null,
+        email_log_id:r.logId||null,
       });
       if(error){
+        // Console-log so the next silent failure surfaces in F12.
+        console.error("[timesheet_submissions insert FAILED]",
+          {message:error.message,code:error.code,details:error.details,hint:error.hint});
         // Unique-index violation if the same week is submitted
         // twice — surface as info rather than error since the
         // email did go through.
@@ -554,6 +562,7 @@ export default function HoursTab({userId,shopId,pin,pop,userLabel}){
         pop&&pop("Timesheet sent to "+accountantEmail+".","ok");
       }
     }catch(e){
+      console.error("[timesheet_submissions insert EXCEPTION]",e);
       pop&&pop("Email sent. Submission record exception: "+sS(e&&e.message),"warn");
     }
     setSendingTimesheet(false);

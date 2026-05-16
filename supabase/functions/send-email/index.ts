@@ -27,9 +27,17 @@
 //   Body: { to, subject, body, htmlBody?, replyTo?, template?, fromName? }
 //
 // Response shape:
-//   200 { ok: true, id: "<smtp2go email_id>" }
+//   200 { ok: true, id: "<smtp2go email_id>", logId: "<email_log row uuid | null>" }
 //   4xx { ok: false, error: "<reason>" }
 //   5xx { ok: false, error: "<reason>" }
+//
+// 2026-05-16 — added logId to the 200 response. id is the
+// SMTP2GO send identifier (string, non-UUID). logId is the
+// email_log row's uuid PK and is the right thing to store as
+// an FK in downstream audit tables (timesheet_submissions
+// .email_log_id, etc.). logId may be null when the queued-row
+// insert at the top of this function failed; callers must
+// treat it as optional.
 //
 // 2026-05-15 — added optional htmlBody parameter (Phase 5.2
 // Commit 1, staff workspace + EOD email enhancement). When
@@ -274,7 +282,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (smtpResult.ok) {
-    return jsonResponse({ ok: true, id: smtpResult.emailId });
+    return jsonResponse({ ok: true, id: smtpResult.emailId, logId: logId });
   }
   return jsonResponse({ ok: false, error: smtpResult.error }, 500);
 });
