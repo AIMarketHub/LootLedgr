@@ -238,6 +238,14 @@ export default function HoursTab({userId,shopId,pin,pop}){
   };
 
   const onSave=async()=>{
+    // Force-flush focused time input. <input type="time"> doesn't
+    // always fire onChange until blur — clicking Save while the
+    // input is still focused can leave React state empty. Blur +
+    // microtask wait lets the pending onChange run before we read
+    // the grid below.
+    if(typeof document!=="undefined"&&document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+    await new Promise(r=>setTimeout(r,0));
+
     if(!pin){pop&&pop("Session PIN missing. Return to Staff Tiles and re-enter.","warn");return;}
     const candidates=dates.filter(d=>{
       const row=grid[d];

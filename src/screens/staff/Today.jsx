@@ -184,17 +184,31 @@ export default function Today(){
   };
 
   const onSaveSelected=async()=>{
+    // Force-flush focused time input. <input type="time"> doesn't
+    // always fire onChange until blur, so a user who types a time
+    // and clicks Save without tabbing out leaves React state
+    // empty. Blur + microtask wait lets the pending onChange run
+    // and updates `edits` before we read it below.
+    if(typeof document!=="undefined"&&document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+    await new Promise(r=>setTimeout(r,0));
+
     const pin=String(opPin||"").trim();
     if(!/^\d{4,12}$/.test(pin)){pop("Enter your 4-12 digit PIN.","warn");return;}
     const ticked=users.filter(u=>checked[u.id]);
     if(ticked.length===0){pop("Tick at least one staff to save.","warn");return;}
     setSaving(true);
-    let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0;
+    let saved=0,failed=0,skippedLocked=0,skippedUserDeclined=0,skippedEmpty=0;
     try{
       for(const u of ticked){
         const existing=hoursByUser[u.id];
         if(existing&&existing.locked){skippedLocked++;continue;}
         const ed=edits[u.id]||{start:"",end:"",break:"0",note:""};
+        // Skip ticked-but-empty rows — don't insert NULL-times
+        // rows for staff who were ticked but whose time fields
+        // were never filled. (Editing an existing row to clear
+        // it still flows through, since `existing` is truthy.)
+        const isEmpty=!ed.start&&!ed.end&&(parseInt(ed.break,10)||0)===0&&!(ed.note&&ed.note.trim());
+        if(!existing&&isEmpty){skippedEmpty++;continue;}
         // Duplicate-day overwrite confirmation when DB row exists.
         if(existing){
           const ok=typeof window!=="undefined"&&window.confirm
@@ -222,13 +236,16 @@ export default function Today(){
         const extras=[];
         if(failed>0)extras.push(failed+" failed");
         if(skippedLocked>0)extras.push(skippedLocked+" locked");
-        if(skippedUserDeclined>0)extras.push(skippedUserDeclined+" skipped");
+        if(skippedUserDeclined>0)extras.push(skippedUserDeclined+" overwrites declined");
+        if(skippedEmpty>0)extras.push(skippedEmpty+" empty");
         pop("Saved "+saved+" entr"+(saved===1?"y":"ies")+(extras.length?" ("+extras.join(", ")+")":"."),"ok");
         await load();
       }else if(skippedLocked>0&&saved===0&&failed===0){
         pop("All ticked rows are locked. Unlock first.","warn");
       }else if(skippedUserDeclined>0&&saved===0){
         pop("All overwrites declined.","warn");
+      }else if(skippedEmpty>0&&saved===0&&failed===0){
+        pop("Ticked rows have no hours filled in — nothing to save.","warn");
       }
     }finally{setSaving(false);}
   };
