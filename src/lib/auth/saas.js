@@ -373,13 +373,36 @@ export async function isPlatformAdmin(){
   return!!data;
 }
 
-// True iff trial_ends_at is in the past AND subscription_active is
-// false. Used by RequireAuth to decide whether to redirect to
-// /trial-expired. null shop → also locked out (no active shop is
-// not a useful state for the app surface).
+// Decides whether RequireAuth redirects the user to /trial-expired.
+// null shop → locked out (no active shop is not a useful state).
+//
+// 2026-05-16 fix — previous implementation only checked
+// subscription_active + trial_ends_at, ignoring subscription_plan
+// entirely. Daylesford (plan='platform_exempt',
+// subscription_active=false from default, trial_ends_at in the
+// past) was incorrectly redirected to /trial-expired.
+//
+// Plan semantics (locked 2026-05-16 with USER):
+//   platform_exempt — owner's own shop, always unlocked.
+//   cancelled       — dealer cancelled, always locked. Phase 5.5
+//                     will add a pro-rated grace period + 3-day-
+//                     before and on-day email warnings.
+//   monthly_99aud   — paying subscriber; unlocked when
+//                     subscription_active is true.
+//   trial / null    — within the 3-month trial window;
+//                     unlocked while trial_ends_at is in the
+//                     future.
+//
+// Conservative default: any unrecognised future plan value
+// falls through to the trial-date check (same as the legacy
+// behaviour), so adding new plan values later doesn't
+// accidentally unlock shops.
 export async function isLockedOut(){
   const shop=await getCurrentShop();
   if(!shop)return true;
+  const plan=shop.subscription_plan||"trial";
+  if(plan==="platform_exempt")return false;
+  if(plan==="cancelled")return true;
   if(shop.subscription_active)return false;
   const ends=shop.trial_ends_at?new Date(shop.trial_ends_at).getTime():0;
   return ends<Date.now();
