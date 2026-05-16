@@ -24,7 +24,7 @@
 //
 // Request shape (POST /functions/v1/send-email):
 //   Authorization: Bearer <user-JWT>
-//   Body: { to, subject, body, htmlBody?, replyTo?, template? }
+//   Body: { to, subject, body, htmlBody?, replyTo?, template?, fromName? }
 //
 // Response shape:
 //   200 { ok: true, id: "<smtp2go email_id>" }
@@ -37,6 +37,15 @@
 // htmlBody is the rich HTML rendition. When htmlBody is
 // omitted, the function falls back to the pre-existing
 // behaviour (body is used for both text_body and html_body).
+//
+// 2026-05-16 — added optional fromName parameter. When supplied,
+// the SMTP2GO sender field becomes "<fromName> <bareEmail>" so
+// recipient email clients show the staff member's name in the
+// inbox preview alongside the noreply@ address. When omitted,
+// the function falls back to SMTP2GO_FROM_ADDRESS unchanged
+// (EOD reports and weekly timesheets stay on the legacy display).
+// fromName is sanitised — angle brackets, quotes and control
+// characters are stripped to prevent header injection.
 
 // @ts-ignore — Deno runtime; types resolve at deploy.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.105.1";
@@ -120,6 +129,7 @@ Deno.serve(async (req: Request) => {
     htmlBody?: unknown;
     replyTo?: unknown;
     template?: unknown;
+    fromName?: unknown;
   };
   try {
     payload = await req.json();
@@ -137,6 +147,16 @@ Deno.serve(async (req: Request) => {
     ? payload.replyTo.trim()
     : null;
   const template = typeof payload.template === "string" ? payload.template.slice(0, 64) : null;
+  // Sanitise fromName: strip <, >, ", \r, \n, and any other
+  // control chars. Trim and cap at 100 chars. Anything left after
+  // sanitising is the safe display name we put in front of the
+  // bare address.
+  const rawFromName = typeof payload.fromName === "string" ? payload.fromName : "";
+  const fromName = rawFromName
+    .replace(/[<>"\r\n\t]/g, "")
+    .replace(/[\x00-\x1F\x7F]/g, "")
+    .trim()
+    .slice(0, 100);
 
   if (!to || !subject || !body) {
     return jsonResponse({ ok: false, error: "Missing required fields (to, subject, body)" }, 400);
@@ -161,6 +181,18 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ ok: false, error: "SMTP2GO_API_KEY not configured on the Edge Function" }, 500);
   }
 
+  // Build the SMTP2GO sender field. When fromName is supplied,
+  // extract the bare address from DEFAULT_FROM (which may itself
+  // already include a display name like "LootLedger <noreply@…>")
+  // and reconstruct as "<fromName> <bareAddress>". Otherwise use
+  // DEFAULT_FROM unchanged — preserves the legacy behaviour for
+  // EOD reports + weekly timesheets.
+  const bareFromMatch = DEFAULT_FROM.match(/<([^>]+)>/);
+  const bareFromAddress = bareFromMatch ? bareFromMatch[1] : DEFAULT_FROM;
+  const senderField = fromName
+    ? (fromName + " <" + bareFromAddress + ">")
+    : DEFAULT_FROM;
+
   // ─── Log queued state ─────────────────────────────────────────
   let logId: string | null = null;
   try {
@@ -170,7 +202,7 @@ Deno.serve(async (req: Request) => {
         shop_id: shopId,
         sent_by: user.id,
         to_address: to,
-        from_address: DEFAULT_FROM,
+        from_address: senderField,
         reply_to: replyTo,
         subject: cleanSubject,
         body_preview: preview,
@@ -194,7 +226,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         api_key: SMTP2GO_API_KEY,
         to: [to],
-        sender: DEFAULT_FROM,
+        sender: senderField,
         subject: cleanSubject,
         text_body: cleanBody,
         html_body: cleanHtmlBody,

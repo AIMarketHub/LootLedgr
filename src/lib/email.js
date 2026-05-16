@@ -31,15 +31,20 @@ import {supabase} from "./auth/saas.js";
  *                                 single-body behaviour).
  * @param {string} [args.replyTo] Optional Reply-To header
  * @param {string} [args.template] Optional template tag (recorded in email_log.template)
+ * @param {string} [args.fromName] Optional display name shown alongside the
+ *                                 bare FROM address. Sanitised server-side.
+ *                                 When omitted, the function uses the
+ *                                 SMTP2GO_FROM_ADDRESS default unchanged
+ *                                 (EOD + timesheet emails skip this).
  * @returns {Promise<{ok: boolean, id?: string, error?: string}>}
  */
-export async function sendEmail({to,subject,body,htmlBody,replyTo,template}){
+export async function sendEmail({to,subject,body,htmlBody,replyTo,template,fromName}){
   if(!to||!subject||!body){
     return{ok:false,error:"Missing required fields (to, subject, body)"};
   }
   try{
     const{data,error}=await supabase.functions.invoke("send-email",{
-      body:{to:to,subject:subject,body:body,htmlBody:htmlBody||null,replyTo:replyTo||null,template:template||null},
+      body:{to:to,subject:subject,body:body,htmlBody:htmlBody||null,replyTo:replyTo||null,template:template||null,fromName:fromName||null},
     });
     if(error){
       return{ok:false,error:(error&&error.message)||String(error)};

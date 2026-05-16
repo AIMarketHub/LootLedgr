@@ -39,10 +39,24 @@ function htmlEscape(s){
     .replace(/'/g, "&#39;");
 }
 
+function senderDisplayName(auth){
+  const r = auth && auth.userRecord;
+  if(r){
+    const fn = String(r.first_name || "").trim();
+    const ln = String(r.family_name || "").trim();
+    const full = (fn + " " + ln).trim();
+    if(full) return full;
+    if(r.email) return String(r.email);
+  }
+  if(auth && auth.user && auth.user.email) return String(auth.user.email);
+  return "LootLedger staff";
+}
+
 export default function EmailTab({userId, pop}){
   const auth = useAuth();
   const fromAddress = "noreply@lootledger.au";
   const replyToAddress = (auth && auth.user && auth.user.email) || "";
+  const senderName = senderDisplayName(auth);
 
   const [contacts, setContacts] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -185,6 +199,11 @@ export default function EmailTab({userId, pop}){
     htmlLines.push('</div>');
     const htmlBody = htmlLines.join("\n");
 
+    // Prepend the sender's display name to the subject so the
+    // recipient sees who sent it even when the body isn't signed.
+    // 2026-05-16 — matches the FROM display-name change below.
+    const finalSubject = "Message from " + senderName + ": " + subject.trim();
+
     // Send to each recipient. SMTP2GO supports multi-recipient
     // in a single call but our Edge Function takes one `to`
     // string. Loop here.
@@ -192,11 +211,12 @@ export default function EmailTab({userId, pop}){
     for(const to of recipients){
       const r = await sendEmail({
         to,
-        subject: subject.trim(),
+        subject: finalSubject,
         body: plainBody,
         htmlBody,
         replyTo: replyToAddress || null,
         template: "staff_compose",
+        fromName: senderName,
       });
       if(r && r.ok){ sent++; }
       else {
@@ -221,8 +241,9 @@ export default function EmailTab({userId, pop}){
 
     <div style={{...c.card({padding:12}), marginBottom:14}}>
       <div style={{fontSize:11, color:T.muted, lineHeight:1.5}}>
-        <strong style={{color:T.gold}}>From:</strong> <span style={{color:T.white}}>{fromAddress}</span>
+        <strong style={{color:T.gold}}>From:</strong> <span style={{color:T.white}}>{senderName} &lt;{fromAddress}&gt;</span>
         <span style={{color:T.muted}}> (replies go to <strong style={{color:T.white}}>{replyToAddress || "your account email"}</strong>)</span>
+        <div style={{marginTop:4,fontSize:10,color:T.muted}}>Subject will be prepended with "Message from {senderName}:" so recipients know who sent it.</div>
       </div>
     </div>
 
