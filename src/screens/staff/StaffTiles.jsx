@@ -10,13 +10,19 @@
 // can pass it to the upsert_staff_hours RPC without re-prompting.
 // Key: gf_staff_pin_session_{user_id}. Cleared on lock / sign-out.
 
-import React,{useEffect,useState} from "react";
+import React,{useEffect,useState,useRef,useCallback} from "react";
 import {useNavigate} from "react-router-dom";
 import {T,c} from "../../theme.js";
 import {sS} from "../../lib/utils.js";
 import {F} from "../../components/ui";
 import {useAuth} from "../../components/AuthProvider.jsx";
 import {supabase,verifyStaffPin} from "../../lib/auth/saas.js";
+// 2026-05-16 — UI merge. The Staff modal (My PIN + Job Title,
+// Invite, Pending, Active staff + Reset PIN) is now reachable
+// from the Workspace via the "👥 Manage staff" button instead
+// of from a separate Dashboard entry. The Dashboard's old
+// "👥 Staff" button is being unwired in the same commit.
+import Staff from "../../modals/Staff.jsx";
 
 function userLabel(u){
   if(!u)return "(unknown)";
@@ -43,6 +49,16 @@ export default function StaffTiles(){
   const[errMsg,setErrMsg]=useState("");
 
   const[gateFor,setGateFor]=useState(null); // {user, pin, busy, msg}
+  // Staff modal (Manage staff) toggle.
+  const[showStaffModal,setShowStaffModal]=useState(false);
+  // Toast for the Staff modal's pop() callback.
+  const[toast,setToast]=useState(null);
+  const toastTimer=useRef(null);
+  const pop=useCallback((text,kind)=>{
+    if(toastTimer.current)clearTimeout(toastTimer.current);
+    setToast({text,kind:kind||"info"});
+    toastTimer.current=setTimeout(()=>setToast(null),3500);
+  },[]);
 
   useEffect(()=>{
     if(!auth||!auth.shop||!auth.shop.id){setLoading(false);return;}
@@ -117,6 +133,9 @@ export default function StaffTiles(){
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {/* Fix-forward 2026-05-16 — bulk hours editor link, owner/manager only. */}
           {(auth&&(auth.role==="owner"||auth.role==="manager"))?<button style={c.bsm(T.goldBg,T.gold)} onClick={()=>navigate("/staff/today")}>📅 Bulk hours editor</button>:null}
+          {/* 2026-05-16 — Manage staff (formerly the Dashboard's
+              👥 Staff button). Opens the Staff modal in-place. */}
+          <button style={c.bsm(T.goldBg,T.gold)} onClick={()=>setShowStaffModal(true)}>👥 Manage staff</button>
           <button style={c.bsm()} onClick={()=>navigate("/app")}>← Back to dashboard</button>
         </div>
       </div>
@@ -158,5 +177,11 @@ export default function StaffTiles(){
         </div>
       </div>
     </div>}
+
+    {/* 2026-05-16 — Staff modal opened from the "Manage staff"
+        button. Same component used previously from the Dashboard. */}
+    {showStaffModal?<Staff pop={pop} setShowStaff={setShowStaffModal}/>:null}
+
+    {toast?<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:toast.kind==="ok"?T.green:toast.kind==="warn"?T.gold:toast.kind==="err"?T.red:T.surface,color:toast.kind==="err"?T.white:T.bg,padding:"10px 20px",borderRadius:8,fontSize:12,zIndex:3000,boxShadow:"0 4px 12px rgba(0,0,0,0.4)",maxWidth:480}}>{toast.text}</div>:null}
   </div>;
 }

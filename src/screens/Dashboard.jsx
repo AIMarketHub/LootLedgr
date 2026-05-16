@@ -146,8 +146,16 @@ export default function Dashboard({
     </div>
     <div style={{display:"flex",justifyContent:"center",gap:10,marginTop:8,flexWrap:"wrap"}}>
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowVendors(true)}>🏪 Suppliers</button>
-      <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowStaff(true)}>👥 Staff</button>
-      {typeof openStaffWorkspace==="function"&&<button style={c.bsm(T.border,T.muted)} onClick={openStaffWorkspace}>🗂 Workspace</button>}
+      {/* 2026-05-16 — UI merge. The old "👥 Staff" Dashboard
+          button (which opened src/modals/Staff.jsx via
+          setShowStaff) is unwired. Staff functions are now
+          reached via this single "👥 Staff" entry which opens
+          /staff (the workspace). The Staff modal lives there
+          via the "👥 Manage staff" button on the tile selector.
+          Source files (Staff.jsx, the setShowStaff state in
+          App.tsx) stay on disk per "only add, never remove";
+          only the menu entry is removed. */}
+      {typeof openStaffWorkspace==="function"&&<button style={c.bsm(T.border,T.muted)} onClick={openStaffWorkspace}>👥 Staff</button>}
       <button style={c.bsm(T.border,T.muted)} onClick={()=>setShowBackup(true)}>💾 Backup</button>
     </div>
     <div style={{display:"flex",justifyContent:"center",marginTop:8}}>
